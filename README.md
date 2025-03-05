@@ -10,3 +10,12 @@ Functions are in the naviflow folder.
 ## Main scripts 
 
 Main scripts are in the main folder.
+
+## Installation
+
+To install Naviflow, run the following command in root directory:
+
+```bash
+pip install -e .
+```
+
