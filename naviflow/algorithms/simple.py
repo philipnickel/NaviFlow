@@ -6,7 +6,8 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
                     pressure_solver=None,
                     velocity_updater=None,
                     use_numba=False,
-                    solver_params=None):
+                    solver_params=None,
+                    callback=None):
     """
     SIMPLE algorithm for solving the Navier-Stokes equations.
     
@@ -42,6 +43,9 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
         Whether to use Numba acceleration
     solver_params : dict, optional
         Additional parameters for the pressure solver
+    callback : function, optional
+        Function called at each iteration with parameters (iteration, u, v, p, maxRes)
+        If the callback returns True, the iteration will stop
         
     Returns:
     --------
@@ -188,6 +192,12 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
         
         # Print progress
         print(f"Iteration {iteration}, Residual: {maxRes:.6e}, Max Divergence: {np.max(np.abs(divergence)):.6e}")
+        
+        # Call the callback function if provided
+        if callback is not None:
+            should_stop = callback(iteration, u, v, p, maxRes)
+            if should_stop:
+                break
         
         iteration += 1
     
