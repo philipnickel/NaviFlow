@@ -5,7 +5,8 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize
 import os
 import inspect
-
+import scienceplots
+plt.style.use('science')
 
 def _get_caller_directory():
     """
@@ -55,7 +56,6 @@ def _ensure_output_directory(filename, output_dir=None):
     if output_dir is None:
         caller_dir = _get_caller_directory()
         output_dir = os.path.join(caller_dir, 'results')
-        print(f"Saving to results directory in: {caller_dir}")
     
     # Create full path
     full_path = os.path.join(output_dir, os.path.basename(filename))
@@ -63,7 +63,6 @@ def _ensure_output_directory(filename, output_dir=None):
     # Create the directory if it doesn't exist
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-        print(f"Created directory: {output_dir}")
         
     return full_path
 
@@ -158,7 +157,6 @@ def plot_velocity_field(u, v, x, y, title=None, filename=None, cmap='jet',
         # Ensure output directory exists and get full path
         full_path = _ensure_output_directory(filename, output_dir)
         plt.savefig(full_path, dpi=150, bbox_inches='tight')
-        print(f"Velocity field plot saved to {full_path}")
     
     if show:
         plt.show()
@@ -273,7 +271,6 @@ def plot_streamlines(u, v, x, y, title=None, filename=None, density=1.0, color='
         # Ensure output directory exists and get full path
         full_path = _ensure_output_directory(filename, output_dir)
         plt.savefig(full_path, dpi=150, bbox_inches='tight')
-        print(f"Streamlines plot saved to {full_path}")
     
     if show:
         plt.show()
@@ -375,7 +372,6 @@ def create_animation(u_list, v_list, x, y, title=None, filename=None, fps=10, dp
         # Ensure output directory exists and get full path
         full_path = _ensure_output_directory(filename, output_dir)
         animation.save(full_path, writer='ffmpeg', fps=fps, dpi=dpi)
-        print(f"Animation saved to {full_path}")
     
     plt.close()
     

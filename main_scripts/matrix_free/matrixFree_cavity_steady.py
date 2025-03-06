@@ -1,27 +1,28 @@
 import numpy as np
 from naviflow import *
+from numba import njit
 
 
 # Grid size and other parameters
-imax = 129                       # grid size in x-direction
-jmax = 129                       # grid size in y-direction
-max_iteration = 10000
+imax = 129                      # grid size in x-direction
+jmax = 129                      # grid size in y-direction
+max_iteration = 50
 maxRes = 1000
-iteration = 1
-mu = 0.01                       # viscosity
-rho = 1                         # density
+iteration = 0
+Re = 3200                        # Reynolds number
 velocity = 1                    # lid velocity
+rho = 1                         # density
+mu = rho * velocity * 1.0 / Re  # viscosity calculated from Reynolds number
 dx = 1/(imax-1)                 # dx,dy cell sizes along x and y directions
 dy = 1/(jmax-1)
 x = np.arange(dx/2, 1, dx)      # cell centers in x
 y = np.arange(0, 1+dy, dy)      # cell centers in y
 alphaP = 0.1                    # pressure under-relaxation
-alphaU = 0.7                    # velocity under-relaxation
-tol = 1e-7
+alphaU = 0.9                    # velocity under-relaxation
+tol = 1e-9
 
-# Calculate Reynolds number based on lid velocity, cavity length, and fluid properties
-Re = rho * velocity * 1.0 / mu  # Length = 1.0 (cavity dimension)
 print(f"Reynolds number: {Re}")
+print(f"Calculated viscosity: {mu}")
 
 
 # Initialize variables
@@ -40,7 +41,8 @@ u[:, jmax-1] = velocity
 u, v, p, iteration, maxRes, divergence = simple_algorithm(
     imax, jmax, dx, dy, rho, mu, u, v, p, 
     velocity, alphaU, alphaP, max_iteration, tol,
-    pressure_solver="pres_correct_matrix_free"
+    pressure_solver="pres_correct_matrix_free",
+    use_numba=True  # Enable Numba acceleration
 )
 
 print(f"Total Iterations = {iteration}")
