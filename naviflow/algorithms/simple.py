@@ -94,6 +94,13 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
         get_rhs_func = get_rhs
         get_coeff_mat_func = get_coeff_mat_matrix_free
         solver = jacobi
+    elif pressure_solver == "gauss-seidel":
+        from ..solvers.pressure.helpers import get_rhs, get_coeff_mat_matrix_free, pres_correct
+        from ..solvers.pressure.gauss_seidel import gauss_seidel
+        pressure_solver = pres_correct
+        get_rhs_func = get_rhs
+        get_coeff_mat_func = get_coeff_mat_matrix_free
+        solver = gauss_seidel
     elif pressure_solver == "multigrid":
         from ..solvers.pressure.helpers import get_rhs, get_coeff_mat_matrix_free, pres_correct
         from ..solvers.pressure.multigrid_vcycle import multigrid_vcycle_solver
