@@ -4,12 +4,12 @@ import matplotlib.pyplot as plt
 
 
 # Grid size and other parameters
-imax = 129                     # grid size in x-direction
-jmax = 129                      # grid size in y-direction
-max_iteration = 5000           # Reduced for faster animation
+imax = 516                     # grid size in x-direction
+jmax = 516                      # grid size in y-direction
+max_iteration = 7500           # Reduced for faster animation
 maxRes = 1000
 iteration = 0
-Re = 1000                      # Reynolds number
+Re = 7500                      # Reynolds number
 velocity = 1                    # lid velocity
 rho = 1                         # density
 mu = rho * velocity * 1.0 / Re  # viscosity calculated from Reynolds number
