@@ -1,7 +1,11 @@
 import numpy as np
+from numba import njit, prange
 
-def u_momentum(imax, jmax, dx, dy, rho, mu, u, v, p, velocity, alpha):
+def u_momentum(imax, jmax, dx, dy, rho, mu, u, v, p, velocity, alpha, use_numba=False):
     """Solve the u-momentum equation for the intermediate velocity u_star."""
+    if use_numba:
+        return u_momentum_numba(imax, jmax, dx, dy, rho, mu, u, v, p, velocity, alpha)
+    
     u_star = np.zeros((imax+1, jmax))
     d_u = np.zeros((imax+1, jmax))
     
@@ -81,8 +85,11 @@ def u_momentum(imax, jmax, dx, dy, rho, mu, u, v, p, velocity, alpha):
     
     return u_star, d_u
 
-def v_momentum(imax, jmax, dx, dy, rho, mu, u, v, p, alpha):
+def v_momentum(imax, jmax, dx, dy, rho, mu, u, v, p, alpha, use_numba=False):
     """Solve the v-momentum equation for the intermediate velocity v_star."""
+    if use_numba:
+        return v_momentum_numba(imax, jmax, dx, dy, rho, mu, u, v, p, alpha)
+    
     v_star = np.zeros((imax, jmax+1))
     d_v = np.zeros((imax, jmax+1))
     
@@ -199,3 +206,172 @@ def solve_momentum(imax, jmax, dx, dy, rho, mu, u, v, p, velocity, alpha):
     u_star, d_u = u_momentum(imax, jmax, dx, dy, rho, mu, u, v, p, velocity, alpha)
     
     return u_star, d_u
+
+@njit(parallel=True)
+def u_momentum_numba(imax, jmax, dx, dy, rho, mu, u, v, p, velocity, alpha):
+    """Numba-accelerated parallel version of u-momentum equation solver."""
+    u_star = np.zeros((imax+1, jmax))
+    d_u = np.zeros((imax+1, jmax))
+    
+    De = mu * dy / dx   # convective coefficients
+    Dw = mu * dy / dx
+    Dn = mu * dx / dy
+    Ds = mu * dx / dy
+    
+    # Interior points - parallel computation
+    for i in prange(1, imax):
+        for j in range(1, jmax-1):
+            # Calculate flow terms
+            Fe = 0.5 * rho * dy * (u[i+1, j] + u[i, j])
+            Fw = 0.5 * rho * dy * (u[i-1, j] + u[i, j])
+            Fn = 0.5 * rho * dx * (v[i, j+1] + v[i-1, j+1])
+            Fs = 0.5 * rho * dx * (v[i, j] + v[i-1, j])
+            
+            # Power-law function A
+            def A(F, D):
+                return max(0, (1 - 0.1 * abs(F/D))**5)
+            
+            # Calculate coefficients
+            aE = De * A(Fe, De) + max(-Fe, 0)
+            aW = Dw * A(Fw, Dw) + max(Fw, 0)
+            aN = Dn * A(Fn, Dn) + max(-Fn, 0)
+            aS = Ds * A(Fs, Ds) + max(Fs, 0)
+            aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
+            
+            pressure_term = (p[i-1, j] - p[i, j]) * dy
+            
+            # Calculate u_star and d_u
+            u_star[i, j] = alpha/aP * ((aE*u[i+1, j] + 
+                                        aW*u[i-1, j] + 
+                                        aN*u[i, j+1] + 
+                                        aS*u[i, j-1]) + 
+                                       pressure_term) + (1-alpha)*u[i, j]
+            
+            d_u[i, j] = alpha * dy / aP
+    
+    # Bottom boundary (j=0)
+    j = 0
+    for i in range(1, imax):
+        # Calculate flow terms
+        Fe = 0.5 * rho * dy * (u[i+1, j] + u[i, j])
+        Fw = 0.5 * rho * dy * (u[i-1, j] + u[i, j])
+        Fn = 0.5 * rho * dx * (v[i, j+1] + v[i-1, j+1])
+        Fs = 0.0  # No flow through bottom wall
+        
+        # Power-law function A
+        def A(F, D):
+            return max(0, (1 - 0.1 * abs(F/D))**5)
+        
+        # Calculate coefficients
+        aE = De * A(Fe, De) + max(-Fe, 0)
+        aW = Dw * A(Fw, Dw) + max(Fw, 0)
+        aN = Dn * A(Fn, Dn) + max(-Fn, 0)
+        aS = 0.0  # No south neighbor at bottom boundary
+        aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
+        
+        # Calculate d_u for bottom boundary
+        d_u[i, j] = alpha * dy / aP
+    
+    # Apply boundary conditions
+    u_star[0, :] = -u_star[1, :]         # left wall
+    u_star[imax, :] = -u_star[imax-1, :] # right wall
+    u_star[:, 0] = 0.0                   # bottom wall
+    u_star[:, jmax-1] = velocity         # top wall (moving lid)
+    
+    return u_star, d_u
+
+@njit(parallel=True)
+def v_momentum_numba(imax, jmax, dx, dy, rho, mu, u, v, p, alpha):
+    """Numba-accelerated parallel version of v-momentum equation solver."""
+    v_star = np.zeros((imax, jmax+1))
+    d_v = np.zeros((imax, jmax+1))
+    
+    De = mu * dy / dx   # convective coefficients
+    Dw = mu * dy / dx
+    Dn = mu * dx / dy
+    Ds = mu * dx / dy
+    
+    # Interior points - parallel computation
+    for i in prange(1, imax-1):
+        for j in range(1, jmax):
+            # Calculate flow terms
+            Fe = 0.5 * rho * dy * (u[i+1, j] + u[i+1, j-1])
+            Fw = 0.5 * rho * dy * (u[i, j] + u[i, j-1])
+            Fn = 0.5 * rho * dx * (v[i, j] + v[i, j+1])
+            Fs = 0.5 * rho * dx * (v[i, j-1] + v[i, j])
+            
+            # Power-law function A
+            def A(F, D):
+                return max(0, (1 - 0.1 * abs(F/D))**5)
+            
+            # Calculate coefficients
+            aE = De * A(Fe, De) + max(-Fe, 0)
+            aW = Dw * A(Fw, Dw) + max(Fw, 0)
+            aN = Dn * A(Fn, Dn) + max(-Fn, 0)
+            aS = Ds * A(Fs, Ds) + max(Fs, 0)
+            aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
+            
+            pressure_term = (p[i, j-1] - p[i, j]) * dx
+            
+            # Calculate v_star and d_v
+            v_star[i, j] = alpha/aP * ((aE*v[i+1, j] + 
+                                        aW*v[i-1, j] + 
+                                        aN*v[i, j+1] + 
+                                        aS*v[i, j-1]) + 
+                                       pressure_term) + (1-alpha)*v[i, j]
+            
+            d_v[i, j] = alpha * dx / aP
+    
+    # Left boundary (i=0)
+    i = 0
+    for j in range(1, jmax):
+        # Calculate flow terms
+        Fe = 0.5 * rho * dy * (u[i+1, j] + u[i+1, j-1])
+        Fw = 0.0  # No flow through left wall
+        Fn = 0.5 * rho * dx * (v[i, j] + v[i, j+1])
+        Fs = 0.5 * rho * dx * (v[i, j-1] + v[i, j])
+        
+        # Power-law function A
+        def A(F, D):
+            return max(0, (1 - 0.1 * abs(F/D))**5)
+        
+        # Calculate coefficients
+        aE = De * A(Fe, De) + max(-Fe, 0)
+        aW = 0.0  # No west neighbor at left boundary
+        aN = Dn * A(Fn, Dn) + max(-Fn, 0)
+        aS = Ds * A(Fs, Ds) + max(Fs, 0)
+        aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
+        
+        # Calculate d_v for left boundary
+        d_v[i, j] = alpha * dx / aP
+    
+    # Right boundary (i=imax-1)
+    i = imax-1
+    for j in range(1, jmax):
+        # Calculate flow terms
+        Fe = 0.0  # No flow through right wall
+        Fw = 0.5 * rho * dy * (u[i, j] + u[i, j-1])
+        Fn = 0.5 * rho * dx * (v[i, j] + v[i, j+1])
+        Fs = 0.5 * rho * dx * (v[i, j-1] + v[i, j])
+        
+        # Power-law function A
+        def A(F, D):
+            return max(0, (1 - 0.1 * abs(F/D))**5)
+        
+        # Calculate coefficients
+        aE = 0.0  # No east neighbor at right boundary
+        aW = Dw * A(Fw, Dw) + max(Fw, 0)
+        aN = Dn * A(Fn, Dn) + max(-Fn, 0)
+        aS = Ds * A(Fs, Ds) + max(Fs, 0)
+        aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
+        
+        # Calculate d_v for right boundary
+        d_v[i, j] = alpha * dx / aP
+    
+    # Apply boundary conditions
+    v_star[0, :] = 0.0                      # left wall
+    v_star[imax-1, :] = 0.0                 # right wall
+    v_star[:, 0] = -v_star[:, 1]            # bottom wall
+    v_star[:, jmax] = -v_star[:, jmax-1]    # top wall
+    
+    return v_star, d_v

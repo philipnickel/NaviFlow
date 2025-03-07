@@ -3,14 +3,15 @@ from naviflow import *
 
 
 # Grid size and other parameters
-imax = 65                       # grid size in x-direction
+imax = 65                      # grid size in x-direction
 jmax = 65                       # grid size in y-direction
-max_iteration = 100
+max_iteration = 2000 
 maxRes = 1000
 iteration = 1
-mu = 0.01                       # viscosity
-rho = 1                         # density
+Re = 100                        # Reynolds number
 velocity = 1                    # lid velocity
+rho = 1                         # density
+mu = rho * velocity * 1.0 / Re  # viscosity calculated from Reynolds number
 dx = 1/(imax-1)                 # dx,dy cell sizes along x and y directions
 dy = 1/(jmax-1)
 x = np.arange(dx/2, 1, dx)      # cell centers in x
@@ -19,9 +20,8 @@ alphaP = 0.1                    # pressure under-relaxation
 alphaU = 0.7                    # velocity under-relaxation
 tol = 1e-5
 
-# Calculate Reynolds number based on lid velocity, cavity length, and fluid properties
-Re = rho * velocity * 1.0 / mu  # Length = 1.0 (cavity dimension)
 print(f"Reynolds number: {Re}")
+print(f"Calculated viscosity: {mu}")
 
 
 # Initialize variables

@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 import os
 import inspect
+from numba import njit, prange
 
 
 def check_divergence_free(imax, jmax, dx, dy, u, v):
@@ -48,15 +49,61 @@ class BenchmarkData:
                        0.29012, 0.27485, 0.00000])
     }
     
+    # Ghia et al. (1982) data for Re = 3200
+    GHIA_RE_3200 = {
+        'x': np.array([1.0000, 0.9688, 0.9609, 0.9531, 0.9453, 0.9063, 0.8594, 0.8047, 
+                       0.5000, 0.2344, 0.2266, 0.1563, 0.0938, 0.0781, 0.0703, 0.0625, 0.0000]),
+        'v': np.array([0.00000, -0.39017, -0.47425, -0.52357, -0.54053, -0.44307, -0.37401, 
+                       -0.31184, 0.00999, 0.28188, 0.29030, 0.37119, 0.42768, 0.41906, 
+                       0.40917, 0.39560, 0.00000])
+    }
+    
+    # Ghia et al. (1982) data for Re = 5000
+    GHIA_RE_5000 = {
+        'x': np.array([1.0000, 0.9688, 0.9609, 0.9531, 0.9453, 0.9063, 0.8594, 0.8047, 
+                       0.5000, 0.2344, 0.2266, 0.1563, 0.0938, 0.0781, 0.0703, 0.0625, 0.0000]),
+        'v': np.array([0.00000, -0.41165, -0.52876, -0.55408, -0.55069, -0.41442, -0.36214, 
+                       -0.30018, 0.00945, 0.27280, 0.28066, 0.35368, 0.41824, 0.43564, 
+                       0.43154, 0.42735, 0.00000])
+    }
+    
+    # Ghia et al. (1982) data for Re = 7500
+    GHIA_RE_7500 = {
+        'x': np.array([1.0000, 0.9688, 0.9609, 0.9531, 0.9453, 0.9063, 0.8594, 0.8047, 
+                       0.5000, 0.2344, 0.2266, 0.1563, 0.0938, 0.0781, 0.0703, 0.0625, 0.0000]),
+        'v': np.array([0.00000, -0.43154, -0.55216, -0.59756, -0.55460, -0.41824, -0.36435, 
+                       -0.30448, 0.00824, 0.29598, 0.30448, 0.36089, 0.41349, 0.43453, 
+                       0.43759, 0.43736, 0.00000])
+    }
+    
+    # Ghia et al. (1982) data for Re = 10000
+    GHIA_RE_10000 = {
+        'x': np.array([1.0000, 0.9688, 0.9609, 0.9531, 0.9453, 0.9063, 0.8594, 0.8047, 
+                       0.5000, 0.2344, 0.2266, 0.1563, 0.0938, 0.0781, 0.0703, 0.0625, 0.0000]),
+        'v': np.array([0.00000, -0.42735, -0.57492, -0.65928, -0.68439, -0.43025, -0.37582, 
+                       -0.31966, 0.00831, 0.30719, 0.31586, 0.37401, 0.42160, 0.44265, 
+                       0.44407, 0.43979, 0.00000])
+    }
+    
     @classmethod
     def get_ghia_data(cls, Re):
         """Get Ghia et al. data for given Reynolds number."""
-        if Re <= 100:
+        if Re == 100:
             return cls.GHIA_RE_100
-        elif Re <= 400:
+        elif Re == 400:
             return cls.GHIA_RE_400
-        else:
+        elif Re == 1000:
             return cls.GHIA_RE_1000
+        elif Re == 3200:
+            return cls.GHIA_RE_3200
+        elif Re == 5000:
+            return cls.GHIA_RE_5000
+        elif Re == 7500:
+            return cls.GHIA_RE_7500
+        elif Re == 10000:
+            return cls.GHIA_RE_10000
+        else:
+            return None
 
 
 def _get_caller_directory():
@@ -157,7 +204,6 @@ def compare_with_ghia(v, x, Re, j_center=None, title=None, filename=None,
     # Get the appropriate Ghia data based on Reynolds number
     ghia_data = BenchmarkData.get_ghia_data(Re)
     if ghia_data is None:
-        print(f"Warning: No benchmark data available for Re={Re}. Using closest available data.")
         ghia_data = get_closest_ghia_data(Re)
     
     ghia_x = ghia_data['x']
@@ -181,7 +227,7 @@ def compare_with_ghia(v, x, Re, j_center=None, title=None, filename=None,
     # Create the comparison plot
     plt.figure(figsize=figsize)
     plt.plot(x_normalized, v_centerline, 'b-', linewidth=2, label='Current Simulation')
-    plt.plot(ghia_x, ghia_v, 'ro--', markersize=6, label='Ghia et al. (1982)')
+    plt.plot(ghia_x, ghia_v, 'ro', markersize=6, label='Ghia et al. (1982)')
     plt.grid(True)
     plt.xlabel('x')
     plt.ylabel('v-velocity')
@@ -208,10 +254,7 @@ def compare_with_ghia(v, x, Re, j_center=None, title=None, filename=None,
                           bounds_error=False, fill_value='extrapolate')
     v_interp = interp_func(ghia_x)
     
-    abs_error = np.abs(v_interp - ghia_v)
-    mean_abs_error = np.mean(abs_error)
-    max_abs_error = np.max(abs_error)
-    rmse = np.sqrt(np.mean((v_interp - ghia_v)**2))
+    inf_norm = np.linalg.norm(v_interp - ghia_v, np.inf)
     
     # Optional: save comparison data
     if save_data:
@@ -219,53 +262,46 @@ def compare_with_ghia(v, x, Re, j_center=None, title=None, filename=None,
             data_filename = f'ghia_comparison_Re{Re:.0f}.txt'
         
         full_data_path = _ensure_output_directory(data_filename, output_dir)
-        comparison_data = np.column_stack((ghia_x, ghia_v, v_interp, abs_error))
-        header = "x_position, ghia_v, simulation_v, abs_error"
+        
+        # Fix: Create an array of the same size as ghia_x filled with the inf_norm value
+        inf_norm_array = np.full_like(ghia_x, inf_norm)
+        
+        comparison_data = np.column_stack((ghia_x, ghia_v, v_interp, inf_norm_array))
+        header = "x_position, ghia_v, simulation_v, inf_norm"
         np.savetxt(full_data_path, comparison_data, header=header)
-        print(f"Comparison data saved to {full_data_path}")
     
     # Print and return error metrics
     print(f"Validation against Ghia et al. (1982) for Re = {Re:.0f}:")
-    print(f"Mean Absolute Error: {mean_abs_error:.6f}")
-    print(f"Maximum Absolute Error: {max_abs_error:.6f}")
-    print(f"Root Mean Square Error: {rmse:.6f}")
+    print(f"Inf norm: {inf_norm:.6f}")
     
     return {
-        'mean_abs_error': mean_abs_error,
-        'max_abs_error': max_abs_error,
-        'rmse': rmse,
+        'inf_norm': inf_norm,
         'v_centerline': v_centerline,
         'v_interp': v_interp,
         'x_positions': x_normalized
     }
 
 
-def calculate_divergence(u, v, dx, dy):
-    """
-    Calculate the divergence of the velocity field.
-    
-    Parameters:
-    -----------
-    u : ndarray
-        x-velocity component
-    v : ndarray
-        y-velocity component
-    dx : float
-        Grid spacing in x-direction
-    dy : float
-        Grid spacing in y-direction
-    
-    Returns:
-    --------
-    ndarray
-        Divergence field
-    """
-    imax = u.shape[0] - 1
-    jmax = v.shape[1] - 1
-    
+@njit(parallel=True)
+def calculate_divergence_numba(u, v, dx, dy, imax, jmax):
+    """Numba-accelerated calculation of velocity field divergence with parallel processing."""
     divergence = np.zeros((imax, jmax))
     
-    # Vectorized calculation
+    for i in prange(imax):
+        for j in range(jmax):
+            divergence[i,j] = (u[i+1,j] - u[i,j])/dx + (v[i,j+1] - v[i,j])/dy
+    
+    return divergence
+
+
+def calculate_divergence(u, v, dx, dy, use_numba=False):
+    """Check if velocity field is divergence free."""
+    imax, jmax = u.shape[0]-1, u.shape[1]
+    
+    if use_numba:
+        return calculate_divergence_numba(u, v, dx, dy, imax, jmax)
+    
+    # Fully vectorized implementation
     i_indices = np.arange(imax)
     j_indices = np.arange(jmax)
     i_grid, j_grid = np.meshgrid(i_indices, j_indices, indexing='ij')
@@ -313,7 +349,34 @@ def get_ghia_data(Re):
                           -0.31966, 0.02526, 0.32235, 0.33075, 0.37095, 0.32627, 0.30353, 
                           0.29012, 0.27485, 0.00000])
         },
-        # Add more Reynolds numbers as needed
+        3200: {
+            'x': np.array([1.0000, 0.9688, 0.9609, 0.9531, 0.9453, 0.9063, 0.8594, 0.8047, 
+                           0.5000, 0.2344, 0.2266, 0.1563, 0.0938, 0.0781, 0.0703, 0.0625, 0.0000]),
+            'v': np.array([0.00000, -0.39017, -0.47425, -0.52357, -0.54053, -0.44307, -0.37401, 
+                           -0.31184, 0.00999, 0.28188, 0.29030, 0.37119, 0.42768, 0.41906, 
+                           0.40917, 0.39560, 0.00000])
+        },
+        5000: {
+            'x': np.array([1.0000, 0.9688, 0.9609, 0.9531, 0.9453, 0.9063, 0.8594, 0.8047, 
+                           0.5000, 0.2344, 0.2266, 0.1563, 0.0938, 0.0781, 0.0703, 0.0625, 0.0000]),
+            'v': np.array([0.00000, -0.41165, -0.52876, -0.55408, -0.55069, -0.41442, -0.36214, 
+                           -0.30018, 0.00945, 0.27280, 0.28066, 0.35368, 0.41824, 0.43564, 
+                           0.43154, 0.42735, 0.00000])
+        },
+        7500: {
+            'x': np.array([1.0000, 0.9688, 0.9609, 0.9531, 0.9453, 0.9063, 0.8594, 0.8047, 
+                           0.5000, 0.2344, 0.2266, 0.1563, 0.0938, 0.0781, 0.0703, 0.0625, 0.0000]),
+            'v': np.array([0.00000, -0.43154, -0.55216, -0.59756, -0.55460, -0.41824, -0.36435, 
+                           -0.30448, 0.00824, 0.29598, 0.30448, 0.36089, 0.41349, 0.43453, 
+                           0.43759, 0.43736, 0.00000])
+        },
+        10000: {
+            'x': np.array([1.0000, 0.9688, 0.9609, 0.9531, 0.9453, 0.9063, 0.8594, 0.8047, 
+                           0.5000, 0.2344, 0.2266, 0.1563, 0.0938, 0.0781, 0.0703, 0.0625, 0.0000]),
+            'v': np.array([0.00000, -0.42735, -0.57492, -0.65928, -0.68439, -0.43025, -0.37582, 
+                           -0.31966, 0.00831, 0.30719, 0.31586, 0.37401, 0.42160, 0.44265, 
+                           0.44407, 0.43979, 0.00000])
+        }
     }
     
     # Round to nearest integer for lookup
@@ -336,7 +399,7 @@ def get_closest_ghia_data(Re):
     dict
         Dictionary containing benchmark data
     """
-    available_Re = [100, 400, 1000]
+    available_Re = [100, 400, 1000, 3200, 5000, 7500, 10000]
     closest_Re = min(available_Re, key=lambda x: abs(x - Re))
     print(f"Using benchmark data for Re={closest_Re} (requested Re={Re})")
     return get_ghia_data(closest_Re)
