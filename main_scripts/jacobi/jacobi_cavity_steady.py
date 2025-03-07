@@ -4,12 +4,12 @@ import matplotlib.pyplot as plt
 
 
 # Grid size and other parameters
-imax = 129                      # grid size in x-direction
-jmax = 129                      # grid size in y-direction
-max_iteration = 5000           # Reduced for faster animation
+imax = 514                      # grid size in x-direction
+jmax = 514                      # grid size in y-direction
+max_iteration = 10000           # Reduced for faster animation
 maxRes = 1000
 iteration = 0
-Re = 3200                       # Reynolds number
+Re = 10000                      # Reynolds number
 velocity = 1                    # lid velocity
 rho = 1                         # density
 mu = rho * velocity * 1.0 / Re  # viscosity calculated from Reynolds number
@@ -48,7 +48,7 @@ save_fields_callback = create_callback_for_animation(
     u_list, v_list, 
     iterations=iterations, 
     residuals=residuals,
-    save_interval=10, 
+    save_interval=20, 
     tol=tol
 )
 
@@ -69,42 +69,23 @@ print(f"Total Iterations = {iteration}")
 print(f"Number of saved frames: {len(u_list)}")
 
 # Visualization and validation using utility functions
-# 1. Plot velocity field
-plot_velocity_field(u, v, x, y, 
-                   title=f'Velocity Field (Re={Re})',
-                   filename=f'velocity_field_Re{Re}_jacobi.png',
-                   show=False)
-
-# 2. Plot streamlines with pressure as background
-plot_streamlines(u, v, x, y, 
-                title=f'Streamlines (Re={Re})',
-                filename=f'streamlines_Re{Re}_jacobi.png',
-                background_field=p,
-                show=False)
-
-# 3. Validate against Ghia benchmark
-error_metrics = compare_with_ghia(v, x, Re, 
-                                filename=f'validation_Re{Re}_jacobi.png',
-                                save_data=False,
-                                show=False)
+# 1. Plot combined results
+plot_combined_results_matrix(u, v, p, x, y, Re,
+                           title=f'Cavity Flow Results (Re={Re})',
+                           filename=f'cavity_Re{Re}_matrix_results.pdf',
+                           cmap='coolwarm',
+                           show=False)
 
 # 4. Check for mass conservation
 div = calculate_divergence(u, v, dx, dy)
 max_div = np.max(np.abs(div))
 print(f"Maximum absolute divergence: {max_div:.6e}")
 
-# 5. Create velocity magnitude animation
-create_animation(u_list, v_list, x, y, 
-                title=f'Jacobi Cavity Flow (Re={Re})',
-                filename=f'jacobi_cavity_Re{Re}_velocity_magnitude.mp4',
-                fps=20, dpi=150,
-                field_type='magnitude',
-                output_dir=None)
-
-# 6. Create streamline animation
-create_streamline_animation(u_list, v_list, x, y, 
-                          title=f'Jacobi Cavity Flow (Re={Re})',
-                          filename=f'velocity_streamlines_Re{Re}_jacobi_animation.mp4',
-                          fps=20, dpi=150,
-                          output_dir=None)
+# 5. Create side-by-side animation with velocity magnitude and streamlines
+create_side_by_side_animation(u_list, v_list, x, y, 
+                            title=f'Jacobi Cavity Flow (Re={Re})',
+                            filename=f'jacobi_cavity_Re{Re}_combined_animation.mp4',
+                            fps=15, dpi=150,
+                            cmap='coolwarm',
+                            output_dir=None)
 

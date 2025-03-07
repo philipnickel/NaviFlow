@@ -6,6 +6,8 @@ from matplotlib.colors import Normalize
 import os
 import inspect
 import scienceplots
+
+
 plt.style.use('science')
 
 def _get_caller_directory():
@@ -280,104 +282,6 @@ def plot_streamlines(u, v, x, y, title=None, filename=None, density=1.0, color='
     return plt.gcf()
 
 
-def create_animation(u_list, v_list, x, y, title=None, filename=None, fps=10, dpi=150,
-                     cmap='jet', figsize=(8, 6), field_type='magnitude', output_dir=None):
-    """
-    Create an animation of the velocity field evolution.
-    
-    Parameters:
-    -----------
-    u_list : list of ndarray
-        List of u velocity fields at different time steps
-    v_list : list of ndarray
-        List of v velocity fields at different time steps
-    x : ndarray
-        x-coordinates
-    y : ndarray
-        y-coordinates
-    title : str, optional
-        Animation title
-    filename : str, optional
-        Output filename (should end with .mp4)
-    fps : int, optional
-        Frames per second
-    dpi : int, optional
-        Resolution of output animation
-    cmap : str, optional
-        Colormap to use
-    figsize : tuple, optional
-        Figure size (width, height) in inches
-    field_type : str, optional
-        Type of field to show ('magnitude', 'u', 'v')
-    output_dir : str, optional
-        Directory where to save the output. If None, uses 'results' in the calling script's directory.
-    
-    Returns:
-    --------
-    animation : FuncAnimation
-        The created animation object
-    """
-    # Create mesh grid
-    X, Y = np.meshgrid(x, y, indexing='ij')
-    X_plot, Y_plot = X.T, Y.T
-    
-    fig, ax = plt.subplots(figsize=figsize)
-    
-    # Determine vmin, vmax for consistent color scaling
-    if field_type == 'magnitude':
-        fields = [np.sqrt(0.25*(u_list[i][:-1,:]**2 + u_list[i][1:,:]**2 + 
-                               v_list[i][:,:-1]**2 + v_list[i][:,1:]**2)).T
-                 for i in range(len(u_list))]
-    elif field_type == 'u':
-        fields = [0.5*(u_list[i][:-1,:] + u_list[i][1:,:]).T for i in range(len(u_list))]
-    elif field_type == 'v':
-        fields = [0.5*(v_list[i][:,:-1] + v_list[i][:,1:]).T for i in range(len(v_list))]
-    
-    vmin = min(np.min(field) for field in fields)
-    vmax = max(np.max(field) for field in fields)
-    norm = Normalize(vmin=vmin, vmax=vmax)
-    
-    # Initial plot
-    cont = ax.contourf(X_plot, Y_plot, fields[0], cmap=cmap, levels=50, norm=norm)
-    cbar = fig.colorbar(cont, ax=ax)
-    
-    if title:
-        ax.set_title(f"{title} - Frame 0")
-    
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    
-    # Update function for animation
-    def update_frame(i):
-        ax.clear()
-        cont = ax.contourf(X_plot, Y_plot, fields[i], cmap=cmap, levels=50, norm=norm)
-        if title:
-            ax.set_title(f"{title} - Frame {i}")
-        ax.set_xlabel('x')
-        ax.set_ylabel('y')
-        ax.set_xlim(0, max(x))
-        ax.set_ylim(0, max(y))
-        return [cont]
-    
-    # Create animation
-    animation = FuncAnimation(
-        fig,
-        update_frame,
-        frames=len(u_list),
-        interval=1000/fps,  # interval in milliseconds
-        blit=False
-    )
-    
-    if filename:
-        # Ensure output directory exists and get full path
-        full_path = _ensure_output_directory(filename, output_dir)
-        animation.save(full_path, writer='ffmpeg', fps=fps, dpi=dpi)
-    
-    plt.close()
-    
-    return animation
-
-
 def create_callback_for_animation(u_list, v_list, p_list=None, iterations=None, residuals=None, save_interval=50, tol=1e-6):
     """
     Create a callback function for saving fields during SIMPLE algorithm iterations.
@@ -419,208 +323,224 @@ def create_callback_for_animation(u_list, v_list, p_list=None, iterations=None, 
     
     return save_fields_callback
 
-
-def animate_solution_process(imax, jmax, dx, dy, rho, mu, u, v, p, 
-                            velocity, alphaU, alphaP, max_iteration, tol,
-                            x, y, save_interval=50, title=None, filename=None,
-                            fps=10, dpi=150, cmap='jet', figsize=(8, 6),
-                            field_types=None, output_dir=None, **solver_kwargs):
+def plot_combined_results_matrix(u, v, p, x, y, Re, title=None, filename=None, 
+                               figsize=(18, 6), cmap='jet', show=True, output_dir=None):
     """
-    Run the SIMPLE algorithm and create animations of the solution process.
+    Create a combined plot with three subplots side by side: velocity magnitude using matshow, 
+    streamlines with pressure background, and a validation plot for u and v velocity
+    against Ghia et al. benchmark data.
     
     Parameters:
     -----------
-    imax, jmax : int
-        Grid dimensions
-    dx, dy : float
-        Grid spacing
-    rho : float
-        Fluid density
-    mu : float
-        Fluid viscosity
-    u, v : numpy.ndarray
-        Initial velocity fields
-    p : numpy.ndarray
-        Initial pressure field
-    velocity : float
-        Lid velocity
-    alphaU, alphaP : float
-        Relaxation factors for velocity and pressure
-    max_iteration : int
-        Maximum number of iterations
-    tol : float
-        Convergence tolerance
-    x, y : numpy.ndarray
-        Grid coordinates
-    save_interval : int, optional
-        Interval for saving frames
+    u : ndarray
+        x-velocity component
+    v : ndarray
+        y-velocity component
+    p : ndarray
+        pressure field
+    x : ndarray
+        x-coordinates
+    y : ndarray
+        y-coordinates
+    Re : float
+        Reynolds number
     title : str, optional
-        Base title for animations
+        Base title for the plot
     filename : str, optional
-        Base filename for animations (without extension)
-    fps : int, optional
-        Frames per second
-    dpi : int, optional
-        Resolution of output animation
-    cmap : str, optional
-        Colormap to use
+        If provided, saves the figure to this filename (should end with .pdf)
     figsize : tuple, optional
         Figure size (width, height) in inches
-    field_types : list, optional
-        List of field types to animate ('magnitude', 'u', 'v', 'p')
-        If None, animates all types
+    cmap : str, optional
+        Colormap to use
+    show : bool, optional
+        Whether to display the plot
     output_dir : str, optional
-        Directory where to save the output
-    **solver_kwargs : dict
-        Additional arguments to pass to simple_algorithm
+        Directory where to save the output. If None, uses 'results' in the calling script's directory.
         
     Returns:
     --------
-    u, v : numpy.ndarray
-        Final velocity fields
-    p : numpy.ndarray
-        Final pressure field
-    iteration : int
-        Number of iterations performed
-    maxRes : float
-        Final maximum residual
-    divergence : numpy.ndarray
-        Final divergence field
-    animations : dict
-        Dictionary of created animations
+    fig : Figure
+        The created figure object
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation
-    from matplotlib.colors import Normalize
+    from matplotlib.gridspec import GridSpec
+    from scipy.interpolate import interp1d
     import numpy as np
-    from ..algorithms.simple import simple_algorithm
+    from .validation import BenchmarkData
     
-    # Default field types if none specified
-    if field_types is None:
-        field_types = ['magnitude', 'u', 'v', 'p']
+    # Get the dimensions for the cell centers
+    nx = len(x)
+    ny = len(y)
     
-    # Lists to store fields for animation
-    u_list = []
-    v_list = []
-    p_list = []
-    iterations = []
-    residuals = []
+    # Create arrays for velocity at cell centers
+    u_centers = np.zeros((nx, ny))
+    v_centers = np.zeros((nx, ny))
     
-    # Custom callback function to save fields during iterations
-    save_fields_callback = create_callback_for_animation(u_list, v_list, p_list, iterations, residuals, save_interval, tol)
+    # Interpolate u to cell centers - handle staggered grid
+    if u.shape[0] > nx:  # Staggered grid for u
+        for j in range(min(ny, u.shape[1])):
+            for i in range(nx):
+                u_centers[i, j] = 0.5 * (u[i, j] + u[i+1, j])
+    else:
+        # Copy values directly if dimensions match
+        u_centers[:u.shape[0], :u.shape[1]] = u[:nx, :ny]
     
-    # Run the SIMPLE algorithm with the callback
-    u, v, p, iteration, maxRes, divergence = simple_algorithm(
-        imax, jmax, dx, dy, rho, mu, u, v, p, 
-        velocity, alphaU, alphaP, max_iteration, tol,
-        callback=save_fields_callback,
-        **solver_kwargs
-    )
+    # Interpolate v to cell centers - handle staggered grid
+    if v.shape[1] > ny:  # Staggered grid for v
+        for i in range(min(nx, v.shape[0])):
+            for j in range(ny):
+                v_centers[i, j] = 0.5 * (v[i, j] + v[i, j+1])
+    else:
+        # Copy values directly if dimensions match
+        v_centers[:v.shape[0], :v.shape[1]] = v[:nx, :ny]
     
-    print(f"Total Iterations = {iteration}")
-    print(f"Number of saved frames: {len(u_list)}")
-    
-    # Create animations for each requested field type
-    animations = {}
+    # Calculate velocity magnitude at cell centers
+    u_mag = np.sqrt(u_centers**2 + v_centers**2)
     
     # Create mesh grid for plotting
     X, Y = np.meshgrid(x, y, indexing='ij')
-    X_plot, Y_plot = X.T, Y.T
     
-    # Generate animations for each field type
-    for field_type in field_types:
-        if field_type == 'magnitude':
-            fields = [np.sqrt(0.25*(u_list[i][:-1,:]**2 + u_list[i][1:,:]**2 + 
-                                  v_list[i][:,:-1]**2 + v_list[i][:,1:]**2)).T
-                     for i in range(len(u_list))]
-            field_name = "Velocity Magnitude"
-            anim_filename = f"{filename}_velocity_magnitude.mp4" if filename else None
-        elif field_type == 'u':
-            fields = [0.5*(u_list[i][:-1,:] + u_list[i][1:,:]).T for i in range(len(u_list))]
-            field_name = "U-Velocity"
-            anim_filename = f"{filename}_u_velocity.mp4" if filename else None
-        elif field_type == 'v':
-            fields = [0.5*(v_list[i][:,:-1] + v_list[i][:,1:]).T for i in range(len(v_list))]
-            field_name = "V-Velocity"
-            anim_filename = f"{filename}_v_velocity.mp4" if filename else None
-        elif field_type == 'p':
-            fields = [p_list[i].T for i in range(len(p_list))]
-            field_name = "Pressure"
-            anim_filename = f"{filename}_pressure.mp4" if filename else None
+    # Create a figure with 3 subplots side by side
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=figsize)
+    
+    # 1. Plot velocity magnitude using matshow (left)
+    im1 = ax1.matshow(u_mag.T, cmap=cmap, origin='lower', aspect='auto')
+    plt.colorbar(im1, ax=ax1, label='Velocity magnitude')
+    
+    # Set proper ticks for the axes
+    x_ticks = np.linspace(0, nx-1, 5)
+    y_ticks = np.linspace(0, ny-1, 5)
+    x_labels = np.linspace(0, 1, 5)
+    y_labels = np.linspace(0, 1, 5)
+    
+    ax1.set_xticks(x_ticks)
+    ax1.set_yticks(y_ticks)
+    ax1.set_xticklabels([f'{x:.1f}' for x in x_labels])
+    ax1.set_yticklabels([f'{y:.1f}' for y in y_labels])
+    
+    ax1.set_title(f'Velocity Magnitude (Re={Re})')
+    ax1.set_xlabel('x')
+    ax1.set_ylabel('y')
+    
+    # 2. Plot streamlines with pressure background (middle)
+    # Prepare pressure field for plotting
+    p_plot = p.T
+    
+    # Plot pressure contours
+    im2 = ax2.contourf(X.T, Y.T, p_plot, 50, cmap=cmap)
+    plt.colorbar(im2, ax=ax2, label='Pressure')
+    
+    # Prepare velocity components for streamplot
+    u_plot = u_centers.T
+    v_plot = v_centers.T
+    X_plot = X.T
+    Y_plot = Y.T
+    
+    # Plot streamlines
+    ax2.streamplot(X_plot, Y_plot, u_plot, v_plot, density=1.0, color='white')
+    ax2.set_xlim(0, max(x))
+    ax2.set_ylim(0, max(y))
+    ax2.set_title(f'Streamlines (Re={Re})')
+    ax2.set_xlabel('x')
+    ax2.set_ylabel('y')
+    
+    # Get the appropriate Ghia data based on Reynolds number
+    ghia_data = BenchmarkData.get_ghia_data(Re)
+    if ghia_data is None:
+        from .validation import get_closest_ghia_data
+        ghia_data = get_closest_ghia_data(Re)
+    
+    # Extract Ghia data
+    ghia_x = ghia_data['x']
+    ghia_v = ghia_data['v']
+    ghia_y = ghia_data['y']
+    ghia_u = ghia_data['u']
+    
+    # Get dimensions for centerlines
+    imax = u.shape[0] - 1 if u.shape[0] > nx else u.shape[0]  # Assuming staggered grid for u
+    jmax = v.shape[1] - 1 if v.shape[1] > ny else v.shape[1]  # Assuming staggered grid for v
+    
+    # Set center indices
+    j_center = jmax // 2  # Center index for y-direction
+    i_center = imax // 2  # Center index for x-direction
+    
+    # Extract v-velocity along horizontal centerline
+    v_centerline = np.zeros(imax)
+    for i in range(imax):
+        if v.shape[1] > ny:  # Staggered grid
+            v_centerline[i] = 0.5 * (v[i, j_center] + v[i, j_center+1])
         else:
-            continue
-        
-        # Determine min/max for consistent color scaling
-        vmin = min(np.min(field) for field in fields)
-        vmax = max(np.max(field) for field in fields)
-        norm = Normalize(vmin=vmin, vmax=vmax)
-        
-        # Create figure and initial plot
-        fig, ax = plt.subplots(figsize=figsize)
-        cont = ax.contourf(X_plot, Y_plot, fields[0], cmap=cmap, levels=50, norm=norm)
-        cbar = fig.colorbar(cont, ax=ax)
-        cbar.set_label(field_name)
-        
-        # Set title with iteration info
-        full_title = f"{title} - {field_name}" if title else field_name
-        ax.set_title(f"{full_title}\nIteration: {iterations[0]}, Residual: {residuals[0]:.2e}")
-        ax.set_xlabel('x')
-        ax.set_ylabel('y')
-        
-        # Update function for animation
-        def update_frame(i):
-            ax.clear()
-            cont = ax.contourf(X_plot, Y_plot, fields[i], cmap=cmap, levels=50, norm=norm)
-            ax.set_title(f"{full_title}\nIteration: {iterations[i]}, Residual: {residuals[i]:.2e}")
-            ax.set_xlabel('x')
-            ax.set_ylabel('y')
-            ax.set_xlim(0, max(x))
-            ax.set_ylim(0, max(y))
-            return [cont]
-        
-        # Create animation
-        animation = FuncAnimation(
-            fig,
-            update_frame,
-            frames=len(fields),
-            interval=1000/fps,  # interval in milliseconds
-            blit=False
-        )
-        
-        if anim_filename:
-            # Ensure output directory exists and get full path
-            full_path = _ensure_output_directory(anim_filename, output_dir)
-            animation.save(full_path, writer='ffmpeg', fps=fps, dpi=dpi)
-            print(f"Saved animation to {full_path}")
-        
-        animations[field_type] = animation
-        plt.close(fig)
+            v_centerline[i] = v[i, j_center]
     
-    # Create convergence history plot
-    if iterations and residuals:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.semilogy(iterations, residuals, 'b-', linewidth=2)
-        ax.grid(True)
-        ax.set_xlabel('Iteration')
-        ax.set_ylabel('Residual')
-        conv_title = f"{title} - Convergence History" if title else "Convergence History"
-        ax.set_title(conv_title)
-        
-        if filename:
-            conv_filename = f"{filename}_convergence_history.png"
-            full_path = _ensure_output_directory(conv_filename, output_dir)
-            fig.savefig(full_path, dpi=dpi, bbox_inches='tight')
-            print(f"Saved convergence history to {full_path}")
-        
-        plt.close(fig)
+    # Extract u-velocity along vertical centerline
+    u_centerline = np.zeros(jmax)
+    for j in range(jmax):
+        if u.shape[0] > nx:  # Staggered grid
+            u_centerline[j] = 0.5 * (u[i_center, j] + u[i_center+1, j])
+        else:
+            u_centerline[j] = u[i_center, j]
     
-    return u, v, p, iteration, maxRes, divergence, animations
+    # Normalize coordinates for comparison
+    x_normalized = np.linspace(0, 1, imax)
+    y_normalized = np.linspace(0, 1, jmax)
+    
+    # 3. Validation plot (right)
+    # Create a twin axis for the second plot
+    ax3b = ax3.twinx()
+    
+    # Plot v-velocity on the left y-axis
+    line1, = ax3.plot(x_normalized, v_centerline, 'b-', linewidth=2, label='v-velocity (simulation)')
+    line2, = ax3.plot(ghia_x, ghia_v, 'bo', markersize=6, label='v-velocity (Ghia et al.)')
+    ax3.set_xlabel('Position')
+    ax3.set_ylabel('v-velocity', color='blue')
+    ax3.tick_params(axis='y', labelcolor='blue')
+    
+    # Plot u-velocity on the right y-axis
+    line3, = ax3b.plot(y_normalized, u_centerline, 'r-', linewidth=2, label='u-velocity (simulation)')
+    line4, = ax3b.plot(ghia_y, ghia_u, 'ro', markersize=6, label='u-velocity (Ghia et al.)')
+    ax3b.set_ylabel('u-velocity', color='red')
+    ax3b.tick_params(axis='y', labelcolor='red')
+    
+    # Add a title
+    ax3.set_title('Velocity Profiles Comparison')
+    
+    # Add a combined legend
+    lines = [line1, line2, line3, line4]
+    labels = [l.get_label() for l in lines]
+    ax3.legend(lines, labels, loc='best')
+    
+    # Add grid
+    ax3.grid(True)
+    
+    # Add overall title if provided
+    if title:
+        fig.suptitle(title, fontsize=16)
+    
+    # Adjust layout
+    plt.tight_layout()
+    if title:
+        fig.subplots_adjust(top=0.90)  # Make room for the suptitle
+    
+    if filename:
+        # Ensure output directory exists and get full path
+        full_path = _ensure_output_directory(filename, output_dir)
+        # Make sure the file extension is .pdf
+        if not full_path.endswith('.pdf'):
+            full_path += '.pdf'
+        plt.savefig(full_path, format='pdf', bbox_inches='tight')
+        print(f"Combined matrix results saved to {full_path}")
+    
+    if show:
+        plt.show()
+    else:
+        plt.close()
+        
+    return fig
 
-
-def create_streamline_animation(u_list, v_list, x, y, title=None, filename=None, fps=10, dpi=150,
-                              cmap='jet', figsize=(10, 8), output_dir=None):
+def create_side_by_side_animation(u_list, v_list, x, y, title=None, filename=None, fps=10, dpi=150,
+                                cmap='jet', figsize=(16, 8), output_dir=None):
     """
-    Create an animation of velocity magnitude with streamlines overlay.
+    Create a side-by-side animation with velocity magnitude using matshow on the left
+    and streamlines on the right.
     
     Parameters:
     -----------
@@ -652,71 +572,133 @@ def create_streamline_animation(u_list, v_list, x, y, title=None, filename=None,
     animation : FuncAnimation
         The created animation object
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation
-    from matplotlib.colors import Normalize
-    import numpy as np
-    
     # Create mesh grid
     X, Y = np.meshgrid(x, y, indexing='ij')
     X_plot, Y_plot = X.T, Y.T
     
-    fig, ax = plt.subplots(figsize=figsize)
+    # Get the dimensions for the cell centers
+    nx = len(x)
+    ny = len(y)
     
-    # Calculate velocity magnitude fields
-    fields = [np.sqrt(0.25*(u_list[i][:-1,:]**2 + u_list[i][1:,:]**2 + 
-                           v_list[i][:,:-1]**2 + v_list[i][:,1:]**2)).T
-             for i in range(len(u_list))]
+    # Calculate velocity magnitude fields and center velocities for all frames
+    u_centers_list = []
+    v_centers_list = []
+    u_mag_list = []
+    
+    for i in range(len(u_list)):
+        # Create arrays for velocity at cell centers
+        u_centers = np.zeros((nx, ny))
+        v_centers = np.zeros((nx, ny))
+        
+        # Interpolate u to cell centers - handle staggered grid
+        if u_list[i].shape[0] > nx:  # Staggered grid for u
+            for j in range(min(ny, u_list[i].shape[1])):
+                for i_idx in range(nx):
+                    u_centers[i_idx, j] = 0.5 * (u_list[i][i_idx, j] + u_list[i][i_idx+1, j])
+        else:
+            # Copy values directly if dimensions match
+            u_centers[:u_list[i].shape[0], :u_list[i].shape[1]] = u_list[i][:nx, :ny]
+        
+        # Interpolate v to cell centers - handle staggered grid
+        if v_list[i].shape[1] > ny:  # Staggered grid for v
+            for i_idx in range(min(nx, v_list[i].shape[0])):
+                for j in range(ny):
+                    v_centers[i_idx, j] = 0.5 * (v_list[i][i_idx, j] + v_list[i][i_idx, j+1])
+        else:
+            # Copy values directly if dimensions match
+            v_centers[:v_list[i].shape[0], :v_list[i].shape[1]] = v_list[i][:nx, :ny]
+        
+        # Calculate velocity magnitude
+        u_mag = np.sqrt(u_centers**2 + v_centers**2)
+        
+        u_centers_list.append(u_centers.T)
+        v_centers_list.append(v_centers.T)
+        u_mag_list.append(u_mag.T)
     
     # Determine vmin, vmax for consistent color scaling
-    vmin = min(np.min(field) for field in fields)
-    vmax = max(np.max(field) for field in fields)
-    norm = Normalize(vmin=vmin, vmax=vmax)
+    vmin = min(np.min(field) for field in u_mag_list)
+    vmax = max(np.max(field) for field in u_mag_list)
     
-    # Calculate u and v at cell centers for streamlines
-    u_centers = [0.5*(u_list[i][:-1,:] + u_list[i][1:,:]).T for i in range(len(u_list))]
-    v_centers = [0.5*(v_list[i][:,:-1] + v_list[i][:,1:]).T for i in range(len(v_list))]
+    # Create figure with two subplots side by side
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
     
-    # Initial plot
-    cont = ax.contourf(X_plot, Y_plot, fields[0], cmap=cmap, levels=50, norm=norm)
-    strm = ax.streamplot(X_plot, Y_plot, u_centers[0], v_centers[0], 
-                        color='white', linewidth=0.8, density=1.5, arrowsize=0.8)
-    cbar = fig.colorbar(cont, ax=ax)
-    cbar.set_label('Velocity Magnitude')
+    # Initial plots
+    # Left: Velocity magnitude using matshow
+    im1 = ax1.matshow(u_mag_list[0], cmap=cmap, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
+    cbar1 = fig.colorbar(im1, ax=ax1, label='Velocity magnitude')
     
-    ax.set_title(f"{title}\nIteration: {0}")
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_xlim(0, max(x))
-    ax.set_ylim(0, max(y))
+    # Set proper ticks for the axes
+    x_ticks = np.linspace(0, nx-1, 5)
+    y_ticks = np.linspace(0, ny-1, 5)
+    x_labels = np.linspace(0, 1, 5)
+    y_labels = np.linspace(0, 1, 5)
+    
+    ax1.set_xticks(x_ticks)
+    ax1.set_yticks(y_ticks)
+    ax1.set_xticklabels([f'{x:.1f}' for x in x_labels])
+    ax1.set_yticklabels([f'{y:.1f}' for y in y_labels])
+    
+    ax1.set_title('Velocity Magnitude')
+    
+    # Right: Streamlines with velocity magnitude background
+    im2 = ax2.contourf(X_plot, Y_plot, u_mag_list[0], cmap=cmap, levels=50, vmin=vmin, vmax=vmax)
+    strm = ax2.streamplot(X_plot, Y_plot, u_centers_list[0], v_centers_list[0], 
+                         color='white', linewidth=0.8, density=1.5, arrowsize=0.8)
+    cbar2 = fig.colorbar(im2, ax=ax2, label='Velocity magnitude')
+    
+    ax2.set_xlim(0, max(x))
+    ax2.set_ylim(0, max(y))
+    ax2.set_title('Streamlines')
+    ax2.set_xlabel('x')
+    ax2.set_ylabel('y')
+    
+    if title:
+        fig.suptitle(f"{title} - Iteration: 0", fontsize=14)
     
     # Update function for animation
     def update_frame(i):
-        ax.clear()
-        cont = ax.contourf(X_plot, Y_plot, fields[i], cmap=cmap, levels=50, norm=norm)
-        strm = ax.streamplot(X_plot, Y_plot, u_centers[i], v_centers[i], 
-                            color='white', linewidth=0.8, density=1.5, arrowsize=0.8)
-        ax.set_title(f"{title}\nIteration: {i*len(fields)//len(fields)}")
-        ax.set_xlabel('x')
-        ax.set_ylabel('y')
-        ax.set_xlim(0, max(x))
-        ax.set_ylim(0, max(y))
-        return [cont, strm.lines]
+        # Clear axes
+        ax1.clear()
+        ax2.clear()
+        
+        # Update matshow plot
+        im1 = ax1.matshow(u_mag_list[i], cmap=cmap, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
+        ax1.set_xticks(x_ticks)
+        ax1.set_yticks(y_ticks)
+        ax1.set_xticklabels([f'{x:.1f}' for x in x_labels])
+        ax1.set_yticklabels([f'{y:.1f}' for y in y_labels])
+        ax1.set_title('Velocity Magnitude')
+        
+        # Update streamlines plot
+        im2 = ax2.contourf(X_plot, Y_plot, u_mag_list[i], cmap=cmap, levels=50, vmin=vmin, vmax=vmax)
+        strm = ax2.streamplot(X_plot, Y_plot, u_centers_list[i], v_centers_list[i], 
+                             color='white', linewidth=0.8, density=1.5, arrowsize=0.8)
+        
+        ax2.set_xlim(0, max(x))
+        ax2.set_ylim(0, max(y))
+        ax2.set_title('Streamlines')
+        ax2.set_xlabel('x')
+        ax2.set_ylabel('y')
+        
+        if title:
+            fig.suptitle(f"{title} - Iteration: {i*len(u_list)//len(u_list)}", fontsize=14)
+        
+        return [im1, im2, strm.lines]
     
     # Create animation
     animation = FuncAnimation(
         fig,
         update_frame,
-        frames=len(fields),
+        frames=len(u_list),
         interval=1000/fps,  # interval in milliseconds
         blit=False
     )
     
     if filename:
-        # Ensure output directory exists
+        # Ensure output directory exists and get full path
         full_path = _ensure_output_directory(filename, output_dir)
         animation.save(full_path, writer='ffmpeg', fps=fps, dpi=dpi)
-        print(f"Saved streamline animation to {full_path}")
+        print(f"Saved side-by-side animation to {full_path}")
     
     plt.close(fig)
     return animation
