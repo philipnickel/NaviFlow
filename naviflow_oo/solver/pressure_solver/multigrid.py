@@ -7,6 +7,7 @@ import math
 from .base_pressure_solver import PressureSolver
 from .helpers.rhs_construction import get_rhs
 from .helpers.matrix_free import compute_Ap_product
+from .jacobi import JacobiSolver
 
 class MultiGridSolver(PressureSolver):
     """
@@ -16,11 +17,15 @@ class MultiGridSolver(PressureSolver):
     the pressure correction equation without explicitly forming matrices.
     It requires grid sizes to be 2^k-1 (e.g., 3, 7, 15, 31, 63, 127, etc.)
     to ensure proper coarsening down to a 1x1 grid.
+    
+    The solver supports both V-cycles and F-cycles. F-cycles provide better
+    convergence in many cases by combining aspects of V-cycles and W-cycles.
     """
     
     def __init__(self, tolerance=1e-6, max_iterations=100, 
                  pre_smoothing=3, post_smoothing=3,
-                 smoother_iterations=2, smoother_omega=0.8):
+                 smoother_iterations=2, smoother_omega=0.8,
+                 smoother=None, cycle_type='v'):
         """
         Initialize the multigrid solver.
         
@@ -38,6 +43,10 @@ class MultiGridSolver(PressureSolver):
             Number of iterations for the smoother
         smoother_omega : float, optional
             Relaxation factor for the smoother (0.8 is often good for Jacobi)
+        smoother : PressureSolver, optional
+            External smoother to use (if None, will use internal Jacobi smoother)
+        cycle_type : str, optional
+            Type of multigrid cycle to use ('v' for V-cycle, 'f' for F-cycle)
         """
         super().__init__(tolerance=tolerance, max_iterations=max_iterations)
         self.pre_smoothing = pre_smoothing
@@ -45,6 +54,14 @@ class MultiGridSolver(PressureSolver):
         self.smoother_iterations = smoother_iterations
         self.smoother_omega = smoother_omega
         self.residual_history = []
+        self.cycle_type = cycle_type.lower()
+        
+        # Initialize smoother
+        self.smoother = smoother if smoother is not None else JacobiSolver(
+            tolerance=1e-4,  # Not used for fixed iterations
+            max_iterations=1000,  # Not used for fixed iterations
+            omega=smoother_omega
+        )
         
     def _is_valid_grid_size(self, n):
         """
@@ -94,9 +111,6 @@ class MultiGridSolver(PressureSolver):
         if nx != ny:
             raise ValueError(f"Only square grids are supported. Got {nx}x{ny}.")
         
-        # Calculate the number of levels based on grid size
-        num_levels = int(math.log2(nx + 1))
-        print(f"Using {num_levels} grid levels for {nx}x{ny} grid")
         
         dx, dy = mesh.get_cell_sizes()
         rho = 1.0  # This should come from fluid properties
@@ -120,6 +134,31 @@ class MultiGridSolver(PressureSolver):
             'd_u': d_u,
             'd_v': d_v
         }
+        
+        # If using F-cycle, start with one F-cycle
+        if self.cycle_type == 'f':
+            grid_calculations = []  # Track grid sizes used
+            x = self._f_cycle(x, b, params, grid_calculations)
+            
+            # Compute initial residual after F-cycle
+            Ax = compute_Ap_product(x, nx, ny, dx, dy, rho, d_u, d_v)
+            r = b - Ax
+            r_norm = np.linalg.norm(r[1:])
+            b_norm = np.linalg.norm(b[1:])
+            
+            # Avoid division by zero
+            if b_norm < 1e-15:
+                res_norm = r_norm
+            else:
+                res_norm = r_norm / b_norm
+                
+            self.residual_history.append(res_norm)
+            
+            # Check if we've already converged after the F-cycle
+            if res_norm < self.tolerance:
+                # Reshape to 2D
+                p_prime = x.reshape((nx, ny), order='F')
+                return p_prime
         
         # Perform multiple V-cycles until convergence or max iterations
         for k in range(self.max_iterations):
@@ -145,16 +184,92 @@ class MultiGridSolver(PressureSolver):
             
             # Check convergence
             if res_norm < self.tolerance:
-                print(f"Multigrid converged in {k+1} iterations, residual: {res_norm:.6e}")
                 break
-        
-        else:
-            print(f"Multigrid did not converge in {self.max_iterations} iterations, "
-                 f"final residual: {res_norm:.6e}")
         
         # Reshape to 2D
         p_prime = x.reshape((nx, ny), order='F')
         return p_prime
+    
+    def _f_cycle(self, u, f, params, grid_calculations):
+        """
+        Performs one F-cycle of the multigrid method.
+        
+        An F-cycle is a more powerful cycle that combines aspects of V-cycles and W-cycles.
+        It starts by recursively going to the coarsest grid, then on the way up, it performs
+        a V-cycle at each level before continuing to the next finer level.
+        
+        Parameters:
+        -----------
+        u : ndarray
+            Initial guess for the solution (1D)
+        f : ndarray
+            Right-hand side (1D)
+        params : dict
+            Parameters for matrix-free operations
+        grid_calculations : list
+            List to track grid sizes used
+            
+        Returns:
+        --------
+        u : ndarray
+            Updated solution after one F-cycle (1D)
+        """
+        nx, ny = params['nx'], params['ny']
+        dx, dy = params['dx'], params['dy']
+        rho = params['rho']
+        d_u, d_v = params['d_u'], params['d_v']
+        
+        # Track grid size
+        grid_calculations.append(nx)
+        
+        # Base case: 1x1 grid (coarsest level)
+        if nx == 1 and ny == 1:
+            return self._solve_directly(f, params)
+        
+        # 1. Pre-smoothing
+        u = self._smooth(u, f, params, num_iterations=self.pre_smoothing)
+        
+        # 2. Compute residual: r = f - Au
+        Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
+        r = f - Au
+        
+        # 3. Restrict residual to coarser grid using full weighting
+        r_2d = r.reshape((nx, ny), order='F')
+        r_coarse = self._restrict(r_2d)
+        mc = r_coarse.shape[0]  # Size of coarse grid
+        
+        # 4. Create new parameters for coarse grid
+        coarse_params = params.copy()
+        coarse_params['nx'] = mc
+        coarse_params['ny'] = mc
+        coarse_params['dx'] = dx * 2
+        coarse_params['dy'] = dy * 2
+        
+        # 5. Restrict d_u and d_v to coarser grid using improved method
+        d_u_coarse, d_v_coarse = self._restrict_coefficients(d_u, d_v, nx, ny)
+        coarse_params['d_u'] = d_u_coarse
+        coarse_params['d_v'] = d_v_coarse
+        
+        # 6. Recursive call to solve on coarser grid (F-cycle)
+        r_coarse_flat = r_coarse.flatten('F')
+        e_coarse = np.zeros_like(r_coarse_flat)
+        e_coarse = self._f_cycle(e_coarse, r_coarse_flat, coarse_params, grid_calculations)
+        
+        # 7. Perform a V-cycle at this level before going up
+        e_coarse = self._v_cycle(e_coarse, r_coarse_flat, coarse_params, grid_calculations)
+        
+        # 8. Prolongate error to fine grid
+        e_coarse_2d = e_coarse.reshape((mc, mc), order='F')
+        e_2d = self._interpolate(e_coarse_2d, nx)
+        e = e_2d.flatten('F')
+        
+        # 9. Update solution
+        u = u + e
+        
+        # 10. Post-smoothing
+        u = self._smooth(u, f, params, num_iterations=self.post_smoothing)
+        
+        return u
     
     def _restrict(self, fine_grid):
         """
@@ -362,7 +477,7 @@ class MultiGridSolver(PressureSolver):
     
     def _smooth(self, u, f, params, num_iterations=None):
         """
-        Apply Jacobi smoother for a specified number of iterations.
+        Apply smoother for a specified number of iterations.
         
         Parameters:
         -----------
@@ -383,75 +498,13 @@ class MultiGridSolver(PressureSolver):
         if num_iterations is None:
             num_iterations = self.smoother_iterations
             
-        omega = self.smoother_omega
         nx, ny = params['nx'], params['ny']
         dx, dy = params['dx'], params['dy']
         rho = params['rho']
         d_u, d_v = params['d_u'], params['d_v']
         
-        # Reshape u to 2D for easier manipulation
-        u_2d = u.reshape((nx, ny), order='F')
-        f_2d = f.reshape((nx, ny), order='F')
-        
-        # Compute coefficients for the pressure equation
-        # East coefficients
-        aE = np.zeros((nx, ny))
-        aE[:-1, :] = rho * d_u[1:nx, :] * dy
-        
-        # West coefficients
-        aW = np.zeros((nx, ny))
-        aW[1:, :] = rho * d_u[1:nx, :] * dy
-        
-        # North coefficients
-        aN = np.zeros((nx, ny))
-        aN[:, :-1] = rho * d_v[:, 1:ny] * dx
-        
-        # South coefficients
-        aS = np.zeros((nx, ny))
-        aS[:, 1:] = rho * d_v[:, 1:ny] * dx
-        
-        # Diagonal coefficients
-        aP = aE + aW + aN + aS
-        
-        # Ensure reference point has proper coefficient
-        aP[0, 0] = 1.0
-        aE[0, 0] = 0.0
-        aN[0, 0] = 0.0
-        aW[0, 0] = 0.0
-        aS[0, 0] = 0.0
-        f_2d[0, 0] = 0.0
-        
-        # Avoid division by zero
-        aP[aP == 0] = 1.0
-        
-        # Pre-compute 1/aP for efficiency
-        inv_aP = 1.0 / aP
-        
-        # Create shifted arrays for neighbor values (pre-allocate once)
-        u_east = np.zeros_like(u_2d)
-        u_west = np.zeros_like(u_2d)
-        u_north = np.zeros_like(u_2d)
-        u_south = np.zeros_like(u_2d)
-        
-        # Vectorized Jacobi iteration
-        for _ in range(num_iterations):
-            # Update shifted arrays for neighbor values
-            u_east[:-1, :] = u_2d[1:, :]
-            u_west[1:, :] = u_2d[:-1, :]
-            u_north[:, :-1] = u_2d[:, 1:]
-            u_south[:, 1:] = u_2d[:, :-1]
-            
-            # Jacobi update - fully vectorized
-            u_2d = (1 - omega) * u_2d + omega * (
-                (f_2d + aE * u_east + aW * u_west + aN * u_north + aS * u_south) * inv_aP
-            )
-            
-            # Ensure reference pressure point remains zero
-            u_2d[0, 0] = 0.0
-        
-        # Flatten back to 1D
-        return u_2d.flatten('F')
-    
+        return self.smoother.perform_iteration(u, f, nx, ny, dx, dy, rho, d_u, d_v, num_iterations)
+  
     def _solve_directly(self, f, params):
         """
         Solve the 1x1 system directly.

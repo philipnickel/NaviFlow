@@ -258,11 +258,5 @@ class StandardMomentumSolver(MomentumSolver):
             
             # Apply velocity boundary conditions
             _, v_star = bc_manager.apply_velocity_boundary_conditions(u.copy(), v_star, imax, jmax)
-        else:
-            # Default: initialize all boundaries to zero (wall condition)
-            v_star[0, :] = 0.0                      # left wall
-            v_star[imax-1, :] = 0.0                 # right wall
-            v_star[:, 0] = 0.0                      # bottom wall
-            v_star[:, jmax] = 0.0                   # top wall
-        
+     
         return v_star, d_v 

@@ -1,5 +1,6 @@
 """
-Lid-driven cavity flow simulation using the object-oriented framework with Jacobi solver.
+Lid-driven cavity flow simulation using the object-oriented framework with multigrid solver
+that uses JacobiSolver as the smoother.
 """
 
 import numpy as np
@@ -11,6 +12,7 @@ from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
 from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
+from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
 from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
@@ -23,11 +25,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 129, 129          # Grid size
-reynolds = 100           # Reynolds number
-alpha_p = 0.3            # Pressure relaxation factor (lower for stability)
-alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 15000     # Maximum number of iterations
+nx, ny = 511, 511          # Grid size (2^6-1)
+reynolds = 10000           # Reynolds number
+alpha_p = 0.4            # Pressure relaxation factor
+alpha_u = 0.9            # Velocity relaxation factor
+max_iterations = 100000      # Maximum number of iterations
 tolerance = 1e-7         # Convergence tolerance
 
 # 2. Create mesh
@@ -45,11 +47,22 @@ print(f"Reynolds number: {fluid.get_reynolds_number()}")
 print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
-# Use Jacobi solver for pressure correction
-pressure_solver = JacobiSolver(
-    tolerance=1e-4,  # Relaxed tolerance for inner iterations
-    max_iterations=50,  # Fewer iterations per SIMPLE iteration
-    omega=0.5  # Weighted Jacobi for better convergence
+# Create a Jacobi smoother for the multigrid solver
+jacobi_smoother = JacobiSolver(
+    tolerance=1e-4,  # Not used for fixed iterations
+    max_iterations=50,  # Not used for fixed iterations
+    omega=0.8  # Weighted Jacobi for better convergence
+)
+
+# Use multigrid solver with Jacobi smoother for pressure correction
+pressure_solver = MultiGridSolver(
+    tolerance=1e-3,
+    max_iterations=50,
+    pre_smoothing=20,
+    post_smoothing=20,
+    smoother_iterations=20,
+    smoother_omega=0.8,
+    smoother=jacobi_smoother  # Use the Jacobi smoother
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -89,8 +102,8 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'Jacobi Cavity Flow Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_jacobi_results.pdf'),
+    title=f'Multigrid with Jacobi Smoother Cavity Flow Results (Re={reynolds})',
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_multigrid_jacobi_results.pdf'),
     show=False
 )
 
@@ -101,11 +114,9 @@ if hasattr(pressure_solver, 'residual_history') and pressure_solver.residual_his
     plt.grid(True)
     plt.xlabel('Iteration')
     plt.ylabel('Residual (log scale)')
-    plt.title('Jacobi Solver Convergence History')
+    plt.title('Multigrid with Jacobi Smoother Convergence History')
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, f'jacobi_convergence_Re{reynolds}.pdf'))
+    plt.savefig(os.path.join(results_dir, f'multigrid_jacobi_convergence_Re{reynolds}.pdf'))
     plt.close()
 
-print(f"Results saved to {results_dir}")
-
-
+print(f"Results saved to {results_dir}") 
