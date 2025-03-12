@@ -1,3 +1,7 @@
+"""
+Implementation of momentum equations.
+""" 
+
 import numpy as np
 from numba import njit, prange
 

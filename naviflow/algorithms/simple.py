@@ -5,7 +5,6 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
                     momentum_solver=None,
                     pressure_solver=None,
                     velocity_updater=None,
-                    use_numba=False,
                     solver_params=None,
                     callback=None):
     """
@@ -39,8 +38,6 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
         Function or name of method to solve pressure correction equation
     velocity_updater : function, optional
         Function to update velocities
-    use_numba : bool, optional
-        Whether to use Numba acceleration
     solver_params : dict, optional
         Additional parameters for the pressure solver
     callback : function, optional
@@ -145,10 +142,10 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
     while (iteration <= max_iteration) and (maxRes > tol):
         
         # Solve u-momentum equation for intermediate velocity u_star
-        u_star, d_u = u_momentum_solver(imax, jmax, dx, dy, rho, mu, u, v, p_star, velocity, alphaU, use_numba=use_numba)
+        u_star, d_u = u_momentum_solver(imax, jmax, dx, dy, rho, mu, u, v, p_star, velocity, alphaU)
         
         # Solve v-momentum equation for intermediate velocity v_star
-        v_star, d_v = v_momentum_solver(imax, jmax, dx, dy, rho, mu, u, v, p_star, alphaU, use_numba=use_numba)
+        v_star, d_v = v_momentum_solver(imax, jmax, dx, dy, rho, mu, u, v, p_star, alphaU)
         
         uold = u.copy()
         vold = v.copy()
@@ -172,7 +169,6 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
             },
             'imax': imax,
             'jmax': jmax,
-            'use_numba': use_numba  # Pass the Numba flag
         }
         
         # Add any additional solver parameters
@@ -182,7 +178,7 @@ def simple_algorithm(imax, jmax, dx, dy, rho, mu, u, v, p,
         p, p_prime = pressure_solver(solver, imax, jmax, rhsp, solver_param_dict, p_star, alphaP)
         
         # Update velocity based on pressure correction
-        u, v = velocity_updater(imax, jmax, u_star, v_star, p_prime, d_u, d_v, velocity, use_numba=use_numba)
+        u, v = velocity_updater(imax, jmax, u_star, v_star, p_prime, d_u, d_v, velocity)
         
         # Calculate residuals
         uRes = np.abs(u - uold)
