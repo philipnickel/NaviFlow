@@ -29,7 +29,7 @@ results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
 
 # Problem parameters
-problem_size = 65
+problem_size = 63  # Changed to 63 (2^6-1) to match the 2^k-1 requirement
 problem_type = 'poisson'
 max_iterations = 1000
 tolerance = 1e-6
@@ -65,7 +65,6 @@ solvers = [
         'solver': MultiGridSolver(
             tolerance=tolerance,
             max_iterations=50,
-            num_levels=3,
             pre_smoothing=2,
             post_smoothing=2,
             smoother_iterations=3,
@@ -147,16 +146,28 @@ for i, time_val in enumerate(times):
 plt.tight_layout()
 plt.savefig(os.path.join(results_dir, f'time_comparison_{problem_type}_{problem_size}.pdf'))
 
-# Create table with results
-print("\n\nResults Summary:")
+# Print results
+print("\nResults Summary:")
 print(f"{'Solver':<20} {'Iterations':<12} {'Time (s)':<12} {'Final Residual':<16} {'Error':<16}")
-print(f"{'-'*70}")
+print("-" * 70)
 for result in results:
     iterations = result.get('iterations', 'N/A')
-    time_taken = f"{result.get('time_taken', 0):.4f}"
-    residual = f"{result.get('convergence_history', [0])[-1]:.6e}" if 'convergence_history' in result and len(result['convergence_history']) > 0 else 'N/A'
-    error = f"{result.get('error', 0):.6e}" if result.get('error') is not None else 'N/A'
-    print(f"{result['solver_name']:<20} {iterations:<12} {time_taken:<12} {residual:<16} {error:<16}")
+    time_taken = f"{result.get('time_taken', 'N/A'):.4f}"
+    final_residual = f"{result.get('final_residual', 'N/A')}"
+    error = f"{result.get('error', 'N/A')}"
+    print(f"{result['solver_name']:<20} {iterations:<12} {time_taken:<12} {final_residual:<16} {error:<16}")
+
+# Save detailed results to a file
+with open(os.path.join(results_dir, 'summary.txt'), 'w') as f:
+    f.write("Results Summary:\n")
+    f.write(f"{'Solver':<20} {'Iterations':<12} {'Time (s)':<12} {'Final Residual':<16} {'Error':<16}\n")
+    f.write("-" * 70 + "\n")
+    for result in results:
+        iterations = result.get('iterations', 'N/A')
+        time_taken = f"{result.get('time_taken', 'N/A'):.4f}"
+        final_residual = f"{result.get('final_residual', 'N/A')}"
+        error = f"{result.get('error', 'N/A')}"
+        f.write(f"{result['solver_name']:<20} {iterations:<12} {time_taken:<12} {final_residual:<16} {error:<16}\n")
 
 print(f"\nResults saved to {results_dir}")
 

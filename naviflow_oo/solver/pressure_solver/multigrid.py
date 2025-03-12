@@ -1,59 +1,72 @@
 """
-Geometric multigrid solver for pressure correction equation.
+Matrix-free geometric multigrid solver for pressure correction equation.
 """
 
 import numpy as np
-from scipy.sparse.linalg import spsolve
+import math
 from .base_pressure_solver import PressureSolver
 from .helpers.rhs_construction import get_rhs
-from .helpers.coeff_matrix import get_coeff_mat
 from .helpers.matrix_free import compute_Ap_product
 
 class MultiGridSolver(PressureSolver):
     """
-    Geometric multigrid solver for pressure correction equation.
+    Matrix-free geometric multigrid solver for pressure correction equation.
     
     This solver uses a geometric multigrid approach with V-cycles to solve
-    the pressure correction equation. It uses the Jacobi method as a smoother.
+    the pressure correction equation without explicitly forming matrices.
+    It requires grid sizes to be 2^k-1 (e.g., 3, 7, 15, 31, 63, 127, etc.)
+    to ensure proper coarsening down to a 1x1 grid.
     """
     
-    def __init__(self, tolerance=1e-6, max_iterations=100, num_levels=3, 
-                 pre_smoothing=2, post_smoothing=2, coarsest_size=5,
-                 smoother_iterations=5, smoother_omega=0.8):
+    def __init__(self, tolerance=1e-6, max_iterations=100, 
+                 pre_smoothing=3, post_smoothing=3,
+                 smoother_iterations=2, smoother_omega=0.8):
         """
         Initialize the multigrid solver.
         
         Parameters:
         -----------
         tolerance : float, optional
-            Convergence tolerance
+            Convergence tolerance for the overall solver
         max_iterations : int, optional
-            Maximum number of V-cycles
-        num_levels : int, optional
-            Number of grid levels (automatically determined if None)
+            Maximum number of iterations for the overall solver
         pre_smoothing : int, optional
             Number of pre-smoothing steps
         post_smoothing : int, optional
             Number of post-smoothing steps
-        coarsest_size : int, optional
-            Minimum size of the coarsest grid
         smoother_iterations : int, optional
             Number of iterations for the smoother
         smoother_omega : float, optional
             Relaxation factor for the smoother (0.8 is often good for Jacobi)
         """
         super().__init__(tolerance=tolerance, max_iterations=max_iterations)
-        self.num_levels = num_levels
         self.pre_smoothing = pre_smoothing
         self.post_smoothing = post_smoothing
-        self.coarsest_size = coarsest_size
         self.smoother_iterations = smoother_iterations
         self.smoother_omega = smoother_omega
         self.residual_history = []
         
+    def _is_valid_grid_size(self, n):
+        """
+        Check if the grid size is valid (2^k-1).
+        
+        Parameters:
+        -----------
+        n : int
+            Grid size to check
+            
+        Returns:
+        --------
+        bool
+            True if the grid size is valid, False otherwise
+        """
+        # Check if n is of the form 2^k-1
+        k = math.log2(n + 1)
+        return k.is_integer() and k >= 1
+        
     def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
         """
-        Solve the pressure correction equation using the multigrid method.
+        Solve the pressure correction equation using the matrix-free multigrid method.
         
         Parameters:
         -----------
@@ -72,6 +85,19 @@ class MultiGridSolver(PressureSolver):
             Pressure correction field
         """
         nx, ny = mesh.get_dimensions()
+        
+        # Check if grid sizes are valid (2^k-1)
+        if not self._is_valid_grid_size(nx) or not self._is_valid_grid_size(ny):
+            raise ValueError(f"Grid size must be 2^k-1 (e.g., 3, 7, 15, 31, 63, 127, etc.). Got {nx}x{ny}.")
+        
+        # Only square grids are supported for now
+        if nx != ny:
+            raise ValueError(f"Only square grids are supported. Got {nx}x{ny}.")
+        
+        # Calculate the number of levels based on grid size
+        num_levels = int(math.log2(nx + 1))
+        print(f"Using {num_levels} grid levels for {nx}x{ny} grid")
+        
         dx, dy = mesh.get_cell_sizes()
         rho = 1.0  # This should come from fluid properties
         
@@ -79,396 +105,534 @@ class MultiGridSolver(PressureSolver):
         self.residual_history = []
         
         # Get right-hand side of pressure correction equation
-        rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
-        
-        # Determine number of levels if not specified
-        if self.num_levels is None:
-            self.num_levels = self._determine_num_levels(nx, ny)
+        b = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
         
         # Initial guess
-        x = np.zeros((nx, ny), order='F')
-        x_flat = x.reshape(-1, order='F')
+        x = np.zeros_like(b)
         
-        # V-cycle iteration
+        # Store parameters needed for matrix-free operations
+        params = {
+            'nx': nx,
+            'ny': ny,
+            'dx': dx,
+            'dy': dy,
+            'rho': rho,
+            'd_u': d_u,
+            'd_v': d_v
+        }
+        
+        # Perform multiple V-cycles until convergence or max iterations
         for k in range(self.max_iterations):
-            # Compute residual using matrix-free approach
-            r_flat = rhs - compute_Ap_product(x_flat, nx, ny, dx, dy, rho, d_u, d_v)
-            res_norm = np.linalg.norm(r_flat) / np.linalg.norm(rhs)
+            # Apply V-cycle
+            grid_calculations = []  # Track grid sizes used
+            x = self._v_cycle(x, b, params, grid_calculations)
+            
+            # Compute residual: r = b - Ax
+            Ax = compute_Ap_product(x, nx, ny, dx, dy, rho, d_u, d_v)
+            r = b - Ax
+            
+            # Calculate residual norm (excluding reference point)
+            r_norm = np.linalg.norm(r[1:])
+            b_norm = np.linalg.norm(b[1:])
+            
+            # Avoid division by zero
+            if b_norm < 1e-15:
+                res_norm = r_norm
+            else:
+                res_norm = r_norm / b_norm
+                
             self.residual_history.append(res_norm)
             
             # Check convergence
             if res_norm < self.tolerance:
                 print(f"Multigrid converged in {k+1} iterations, residual: {res_norm:.6e}")
                 break
-            
-            # Reshape residual to 2D
-            r = r_flat.reshape((nx, ny), order='F')
-            
-            # Apply V-cycle
-            correction = self._v_cycle(x, r, nx, ny, dx, dy, rho, d_u, d_v)
-            
-            # Update solution
-            x += correction
-            x_flat = x.reshape(-1, order='F')
         
         else:
             print(f"Multigrid did not converge in {self.max_iterations} iterations, "
                  f"final residual: {res_norm:.6e}")
         
-        return x
+        # Reshape to 2D
+        p_prime = x.reshape((nx, ny), order='F')
+        return p_prime
     
-    def _determine_num_levels(self, nx, ny):
-        """Determine the optimal number of levels based on grid size."""
-        min_dim = min(nx, ny)
-        num_levels = 1
-        while min_dim > self.coarsest_size:
-            min_dim = min_dim // 2
-            num_levels += 1
-        return num_levels
-    
-    def _v_cycle(self, x, r, nx, ny, dx, dy, rho, d_u, d_v):
+    def _restrict(self, fine_grid):
         """
-        Perform one V-cycle of the multigrid method.
-        
-        Parameters:
-        -----------
-        x : ndarray
-            Current solution (2D)
-        r : ndarray
-            Current residual (2D)
-        nx, ny : int
-            Grid dimensions
-        dx, dy : float
-            Grid spacing
-        rho : float
-            Density
-        d_u, d_v : ndarray
-            Momentum equation coefficients
-            
-        Returns:
-        --------
-        correction : ndarray
-            Correction to the solution (2D)
-        """
-        # Base case: coarsest grid
-        if nx <= self.coarsest_size or ny <= self.coarsest_size:
-            # Solve directly on coarsest grid
-            A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
-            r_flat = r.reshape(-1, order='F')
-            correction_flat = spsolve(A, r_flat)
-            return correction_flat.reshape((nx, ny), order='F')
-        
-        # Pre-smoothing
-        x = self._smooth(x, r, nx, ny, dx, dy, rho, d_u, d_v, self.pre_smoothing)
-        
-        # Compute residual using matrix-free approach
-        x_flat = x.reshape(-1, order='F')
-        r_flat = r.reshape(-1, order='F')
-        new_r_flat = r_flat - compute_Ap_product(x_flat, nx, ny, dx, dy, rho, d_u, d_v)
-        new_r = new_r_flat.reshape((nx, ny), order='F')
-        
-        # Restrict residual to coarser grid
-        nx_coarse = nx // 2
-        ny_coarse = ny // 2
-        dx_coarse = dx * 2
-        dy_coarse = dy * 2
-        
-        # Create coarse grid residual using vectorized restriction
-        r_coarse = self._restrict(new_r, nx, ny, nx_coarse, ny_coarse)
-        
-        # Create coarse grid d_u and d_v using vectorized restriction
-        d_u_coarse = self._restrict_d_u(d_u, nx, ny, nx_coarse, ny_coarse)
-        d_v_coarse = self._restrict_d_v(d_v, nx, ny, nx_coarse, ny_coarse)
-        
-        # Solve on coarser grid
-        x_coarse = np.zeros((nx_coarse, ny_coarse), order='F')
-        correction_coarse = self._v_cycle(x_coarse, r_coarse, nx_coarse, ny_coarse, 
-                                         dx_coarse, dy_coarse, rho, d_u_coarse, d_v_coarse)
-        
-        # Prolongate correction to finer grid
-        correction = self._prolongate(correction_coarse, nx_coarse, ny_coarse, nx, ny)
-        
-        # Post-smoothing
-        correction = self._smooth(correction, r, nx, ny, dx, dy, rho, d_u, d_v, self.post_smoothing)
-        
-        return correction
-    
-    def _restrict(self, fine_grid, nx_fine, ny_fine, nx_coarse, ny_coarse):
-        """
-        Restrict a fine grid to a coarse grid using full weighting.
+        Restricts a fine grid to a coarse grid using full weighting.
         
         Parameters:
         -----------
         fine_grid : ndarray
-            Fine grid values (2D)
-        nx_fine, ny_fine : int
-            Fine grid dimensions
-        nx_coarse, ny_coarse : int
-            Coarse grid dimensions
+            The input fine grid to be restricted (2D)
             
         Returns:
         --------
-        coarse_grid : ndarray
-            Coarse grid values (2D)
+        ndarray
+            The restricted grid (2D)
         """
-        coarse_grid = np.zeros((nx_coarse, ny_coarse), order='F')
+        # Reshape to 2D if needed
+        if fine_grid.ndim == 1:
+            m = int(np.sqrt(fine_grid.size))
+            fine_grid = fine_grid.reshape((m, m), order='F')
+            
+        m = fine_grid.shape[0]
+        mc = (m + 1) // 2 - 1  # Size of coarse grid
         
-        # Create indices for coarse grid points
-        i_coarse = np.arange(nx_coarse)
-        j_coarse = np.arange(ny_coarse)
-        i_coarse_grid, j_coarse_grid = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+        # Create coarse grid
+        coarse_grid = np.zeros((mc, mc))
         
-        # Map to fine grid
-        i_fine = i_coarse_grid * 2
-        j_fine = j_coarse_grid * 2
+        # Vectorized full weighting restriction
+        # Create indices for the fine grid points that correspond to coarse grid points
+        i_fine = np.arange(1, m, 2)[:mc]
+        j_fine = np.arange(1, m, 2)[:mc]
+        I_fine, J_fine = np.meshgrid(i_fine, j_fine, indexing='ij')
         
-        # Center points (weight 0.25)
-        mask = (i_fine < nx_fine) & (j_fine < ny_fine)
-        coarse_grid[mask] += 0.25 * fine_grid[i_fine[mask], j_fine[mask]]
+        # Center points (weight 1/4)
+        center_points = fine_grid[I_fine, J_fine]
         
-        # Horizontal neighbors (weight 0.125)
-        # Left
-        i_left = i_fine - 1
-        mask = (i_left >= 0) & (j_fine < ny_fine)
-        coarse_grid[mask] += 0.125 * fine_grid[i_left[mask], j_fine[mask]]
+        # Adjacent points (weight 1/8)
+        # Create masks for valid adjacent indices
+        valid_im1 = I_fine > 0
+        valid_ip1 = I_fine < m-1
+        valid_jm1 = J_fine > 0
+        valid_jp1 = J_fine < m-1
         
-        # Right
-        i_right = i_fine + 1
-        mask = (i_right < nx_fine) & (j_fine < ny_fine)
-        coarse_grid[mask] += 0.125 * fine_grid[i_right[mask], j_fine[mask]]
+        # Initialize adjacent sum with zeros
+        adjacent_sum = np.zeros((mc, mc))
         
-        # Vertical neighbors (weight 0.125)
-        # Bottom
-        j_bottom = j_fine - 1
-        mask = (i_fine < nx_fine) & (j_bottom >= 0)
-        coarse_grid[mask] += 0.125 * fine_grid[i_fine[mask], j_bottom[mask]]
+        # Add valid adjacent points
+        adjacent_count = np.zeros((mc, mc))
         
-        # Top
-        j_top = j_fine + 1
-        mask = (i_fine < nx_fine) & (j_top < ny_fine)
-        coarse_grid[mask] += 0.125 * fine_grid[i_fine[mask], j_top[mask]]
+        # Left points
+        mask = valid_im1
+        adjacent_sum[mask] += fine_grid[I_fine[mask]-1, J_fine[mask]]
+        adjacent_count[mask] += 1
         
-        # Diagonal neighbors (weight 0.0625)
-        # Bottom-left
-        mask = (i_left >= 0) & (j_bottom >= 0)
-        coarse_grid[mask] += 0.0625 * fine_grid[i_left[mask], j_bottom[mask]]
+        # Right points
+        mask = valid_ip1
+        adjacent_sum[mask] += fine_grid[I_fine[mask]+1, J_fine[mask]]
+        adjacent_count[mask] += 1
         
-        # Bottom-right
-        mask = (i_right < nx_fine) & (j_bottom >= 0)
-        coarse_grid[mask] += 0.0625 * fine_grid[i_right[mask], j_bottom[mask]]
+        # Bottom points
+        mask = valid_jm1
+        adjacent_sum[mask] += fine_grid[I_fine[mask], J_fine[mask]-1]
+        adjacent_count[mask] += 1
         
-        # Top-left
-        mask = (i_left >= 0) & (j_top < ny_fine)
-        coarse_grid[mask] += 0.0625 * fine_grid[i_left[mask], j_top[mask]]
+        # Top points
+        mask = valid_jp1
+        adjacent_sum[mask] += fine_grid[I_fine[mask], J_fine[mask]+1]
+        adjacent_count[mask] += 1
         
-        # Top-right
-        mask = (i_right < nx_fine) & (j_top < ny_fine)
-        coarse_grid[mask] += 0.0625 * fine_grid[i_right[mask], j_top[mask]]
+        # Diagonal points (weight 1/16)
+        # Initialize diagonal sum with zeros
+        diagonal_sum = np.zeros((mc, mc))
+        diagonal_count = np.zeros((mc, mc))
+        
+        # Bottom-left points
+        mask = np.logical_and(valid_im1, valid_jm1)
+        diagonal_sum[mask] += fine_grid[I_fine[mask]-1, J_fine[mask]-1]
+        diagonal_count[mask] += 1
+        
+        # Bottom-right points
+        mask = np.logical_and(valid_ip1, valid_jm1)
+        diagonal_sum[mask] += fine_grid[I_fine[mask]+1, J_fine[mask]-1]
+        diagonal_count[mask] += 1
+        
+        # Top-left points
+        mask = np.logical_and(valid_im1, valid_jp1)
+        diagonal_sum[mask] += fine_grid[I_fine[mask]-1, J_fine[mask]+1]
+        diagonal_count[mask] += 1
+        
+        # Top-right points
+        mask = np.logical_and(valid_ip1, valid_jp1)
+        diagonal_sum[mask] += fine_grid[I_fine[mask]+1, J_fine[mask]+1]
+        diagonal_count[mask] += 1
+        
+        # Avoid division by zero
+        adjacent_count[adjacent_count == 0] = 1
+        diagonal_count[diagonal_count == 0] = 1
+        
+        # Combine with weights
+        coarse_grid = 0.25 * center_points + 0.125 * (adjacent_sum / adjacent_count) + 0.0625 * (diagonal_sum / diagonal_count)
         
         return coarse_grid
     
-    def _restrict_d_u(self, d_u, nx, ny, nx_coarse, ny_coarse):
+    def _interpolate(self, coarse_grid, m):
         """
-        Restrict d_u from fine grid to coarse grid.
-        
-        Parameters:
-        -----------
-        d_u : ndarray
-            d_u values on fine grid (nx+1, ny)
-        nx, ny : int
-            Fine grid dimensions
-        nx_coarse, ny_coarse : int
-            Coarse grid dimensions
-            
-        Returns:
-        --------
-        d_u_coarse : ndarray
-            d_u values on coarse grid (nx_coarse+1, ny_coarse)
-        """
-        d_u_coarse = np.zeros((nx_coarse+1, ny_coarse), order='F')
-        
-        # Create indices for coarse grid points
-        i_coarse = np.arange(nx_coarse+1)
-        j_coarse = np.arange(ny_coarse)
-        i_coarse_grid, j_coarse_grid = np.meshgrid(i_coarse, j_coarse, indexing='ij')
-        
-        # Map to fine grid
-        i_fine = i_coarse_grid * 2
-        j_fine = j_coarse_grid * 2
-        
-        # Direct injection for d_u
-        mask = (i_fine < nx+1) & (j_fine < ny)
-        d_u_coarse[mask] = d_u[i_fine[mask], j_fine[mask]]
-        
-        return d_u_coarse
-    
-    def _restrict_d_v(self, d_v, nx, ny, nx_coarse, ny_coarse):
-        """
-        Restrict d_v from fine grid to coarse grid.
-        
-        Parameters:
-        -----------
-        d_v : ndarray
-            d_v values on fine grid (nx, ny+1)
-        nx, ny : int
-            Fine grid dimensions
-        nx_coarse, ny_coarse : int
-            Coarse grid dimensions
-            
-        Returns:
-        --------
-        d_v_coarse : ndarray
-            d_v values on coarse grid (nx_coarse, ny_coarse+1)
-        """
-        d_v_coarse = np.zeros((nx_coarse, ny_coarse+1), order='F')
-        
-        # Create indices for coarse grid points
-        i_coarse = np.arange(nx_coarse)
-        j_coarse = np.arange(ny_coarse+1)
-        i_coarse_grid, j_coarse_grid = np.meshgrid(i_coarse, j_coarse, indexing='ij')
-        
-        # Map to fine grid
-        i_fine = i_coarse_grid * 2
-        j_fine = j_coarse_grid * 2
-        
-        # Direct injection for d_v
-        mask = (i_fine < nx) & (j_fine < ny+1)
-        d_v_coarse[mask] = d_v[i_fine[mask], j_fine[mask]]
-        
-        return d_v_coarse
-    
-    def _prolongate(self, coarse_grid, nx_coarse, ny_coarse, nx_fine, ny_fine):
-        """
-        Prolongate a coarse grid to a fine grid using bilinear interpolation.
+        Interpolates a coarse grid to a fine grid using bilinear interpolation.
         
         Parameters:
         -----------
         coarse_grid : ndarray
-            Coarse grid values (2D)
-        nx_coarse, ny_coarse : int
-            Coarse grid dimensions
-        nx_fine, ny_fine : int
-            Fine grid dimensions
+            The input coarse grid to be interpolated (2D)
+        m : int
+            Size of the target fine grid (m x m)
             
         Returns:
         --------
-        fine_grid : ndarray
-            Fine grid values (2D)
+        ndarray
+            The interpolated fine grid (2D)
         """
-        fine_grid = np.zeros((nx_fine, ny_fine), order='F')
+        # Reshape to 2D if needed
+        if coarse_grid.ndim == 1:
+            mc = int(np.sqrt(coarse_grid.size))
+            coarse_grid = coarse_grid.reshape((mc, mc), order='F')
+            
+        # Get coarse grid dimensions
+        mc = coarse_grid.shape[0]
         
-        # Create indices for fine grid points
-        i_fine = np.arange(nx_fine)
-        j_fine = np.arange(ny_fine)
-        i_fine_grid, j_fine_grid = np.meshgrid(i_fine, j_fine, indexing='ij')
+        # Create fine grid
+        fine_grid = np.zeros((m, m))
         
-        # Compute coarse grid indices for each fine grid point
-        i_coarse = np.minimum(i_fine_grid // 2, nx_coarse - 1)
-        j_coarse = np.minimum(j_fine_grid // 2, ny_coarse - 1)
+        # Handle edge cases for small grids
+        if m <= 3:
+            # Direct injection for coincident points
+            i_coarse = np.arange(mc)
+            j_coarse = np.arange(mc)
+            I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+            
+            # Calculate fine grid indices
+            I_fine = 2 * I_coarse + 1
+            J_fine = 2 * J_coarse + 1
+            
+            # Filter valid indices
+            mask = np.logical_and(I_fine < m, J_fine < m)
+            fine_grid[I_fine[mask], J_fine[mask]] = coarse_grid[I_coarse[mask], J_coarse[mask]]
+            
+            return fine_grid
         
         # Direct injection for coincident points
-        mask_direct = (i_fine_grid % 2 == 0) & (j_fine_grid % 2 == 0)
-        fine_grid[mask_direct] = coarse_grid[i_coarse[mask_direct], j_coarse[mask_direct]]
+        i_coarse = np.arange(mc)
+        j_coarse = np.arange(mc)
+        I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
         
-        # Horizontal interpolation
-        mask_h = (i_fine_grid % 2 == 1) & (j_fine_grid % 2 == 0)
-        mask_h_interior = mask_h & (i_coarse < nx_coarse - 1)
-        fine_grid[mask_h_interior] = 0.5 * (
-            coarse_grid[i_coarse[mask_h_interior], j_coarse[mask_h_interior]] + 
-            coarse_grid[i_coarse[mask_h_interior] + 1, j_coarse[mask_h_interior]]
+        # Calculate fine grid indices
+        I_fine = 2 * I_coarse + 1
+        J_fine = 2 * J_coarse + 1
+        
+        # Filter valid indices
+        mask = np.logical_and(I_fine < m, J_fine < m)
+        fine_grid[I_fine[mask], J_fine[mask]] = coarse_grid[I_coarse[mask], J_coarse[mask]]
+        
+        # Horizontal interpolation (odd rows, even columns)
+        i_coarse = np.arange(mc)
+        j_coarse = np.arange(mc-1)
+        I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+        
+        I_fine = 2 * I_coarse + 1
+        J_fine = 2 * J_coarse + 2
+        
+        mask = np.logical_and(I_fine < m, J_fine < m)
+        fine_grid[I_fine[mask], J_fine[mask]] = 0.5 * (
+            coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+            coarse_grid[I_coarse[mask], J_coarse[mask]+1]
         )
         
-        mask_h_boundary = mask_h & (i_coarse >= nx_coarse - 1)
-        fine_grid[mask_h_boundary] = coarse_grid[i_coarse[mask_h_boundary], j_coarse[mask_h_boundary]]
+        # Vertical interpolation (even rows, odd columns)
+        i_coarse = np.arange(mc-1)
+        j_coarse = np.arange(mc)
+        I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
         
-        # Vertical interpolation
-        mask_v = (i_fine_grid % 2 == 0) & (j_fine_grid % 2 == 1)
-        mask_v_interior = mask_v & (j_coarse < ny_coarse - 1)
-        fine_grid[mask_v_interior] = 0.5 * (
-            coarse_grid[i_coarse[mask_v_interior], j_coarse[mask_v_interior]] + 
-            coarse_grid[i_coarse[mask_v_interior], j_coarse[mask_v_interior] + 1]
+        I_fine = 2 * I_coarse + 2
+        J_fine = 2 * J_coarse + 1
+        
+        mask = np.logical_and(I_fine < m, J_fine < m)
+        fine_grid[I_fine[mask], J_fine[mask]] = 0.5 * (
+            coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+            coarse_grid[I_coarse[mask]+1, J_coarse[mask]]
         )
         
-        mask_v_boundary = mask_v & (j_coarse >= ny_coarse - 1)
-        fine_grid[mask_v_boundary] = coarse_grid[i_coarse[mask_v_boundary], j_coarse[mask_v_boundary]]
+        # Diagonal interpolation (even rows, even columns)
+        i_coarse = np.arange(mc-1)
+        j_coarse = np.arange(mc-1)
+        I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
         
-        # Diagonal interpolation
-        mask_d = (i_fine_grid % 2 == 1) & (j_fine_grid % 2 == 1)
+        I_fine = 2 * I_coarse + 2
+        J_fine = 2 * J_coarse + 2
         
-        # Full interior points
-        mask_d_interior = mask_d & (i_coarse < nx_coarse - 1) & (j_coarse < ny_coarse - 1)
-        fine_grid[mask_d_interior] = 0.25 * (
-            coarse_grid[i_coarse[mask_d_interior], j_coarse[mask_d_interior]] + 
-            coarse_grid[i_coarse[mask_d_interior] + 1, j_coarse[mask_d_interior]] + 
-            coarse_grid[i_coarse[mask_d_interior], j_coarse[mask_d_interior] + 1] + 
-            coarse_grid[i_coarse[mask_d_interior] + 1, j_coarse[mask_d_interior] + 1]
+        mask = np.logical_and(I_fine < m, J_fine < m)
+        fine_grid[I_fine[mask], J_fine[mask]] = 0.25 * (
+            coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+            coarse_grid[I_coarse[mask], J_coarse[mask]+1] + 
+            coarse_grid[I_coarse[mask]+1, J_coarse[mask]] + 
+            coarse_grid[I_coarse[mask]+1, J_coarse[mask]+1]
         )
-        
-        # Right boundary
-        mask_d_right = mask_d & (i_coarse >= nx_coarse - 1) & (j_coarse < ny_coarse - 1)
-        fine_grid[mask_d_right] = 0.5 * (
-            coarse_grid[i_coarse[mask_d_right], j_coarse[mask_d_right]] + 
-            coarse_grid[i_coarse[mask_d_right], j_coarse[mask_d_right] + 1]
-        )
-        
-        # Top boundary
-        mask_d_top = mask_d & (i_coarse < nx_coarse - 1) & (j_coarse >= ny_coarse - 1)
-        fine_grid[mask_d_top] = 0.5 * (
-            coarse_grid[i_coarse[mask_d_top], j_coarse[mask_d_top]] + 
-            coarse_grid[i_coarse[mask_d_top] + 1, j_coarse[mask_d_top]]
-        )
-        
-        # Top-right corner
-        mask_d_corner = mask_d & (i_coarse >= nx_coarse - 1) & (j_coarse >= ny_coarse - 1)
-        fine_grid[mask_d_corner] = coarse_grid[i_coarse[mask_d_corner], j_coarse[mask_d_corner]]
         
         return fine_grid
     
-    def _smooth(self, x, r, nx, ny, dx, dy, rho, d_u, d_v, num_iterations):
+    def _smooth(self, u, f, params, num_iterations=None):
         """
-        Apply smoother for a specified number of iterations.
+        Apply Jacobi smoother for a specified number of iterations.
         
         Parameters:
         -----------
-        x : ndarray
-            Current solution (2D)
-        r : ndarray
-            Current residual (2D)
-        nx, ny : int
-            Grid dimensions
-        dx, dy : float
-            Grid spacing
-        rho : float
-            Density
-        d_u, d_v : ndarray
-            Momentum equation coefficients
-        num_iterations : int
+        u : ndarray
+            Current solution (1D)
+        f : ndarray
+            Right-hand side (1D)
+        params : dict
+            Parameters for matrix-free operations
+        num_iterations : int, optional
             Number of smoothing iterations
             
         Returns:
         --------
-        x : ndarray
-            Smoothed solution (2D)
+        u : ndarray
+            Smoothed solution (1D)
         """
-        # Create coefficient matrix for diagonal extraction only
-        A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
-        D = A.diagonal()
-        D_inv = 1.0 / D
+        if num_iterations is None:
+            num_iterations = self.smoother_iterations
+            
+        omega = self.smoother_omega
+        nx, ny = params['nx'], params['ny']
+        dx, dy = params['dx'], params['dy']
+        rho = params['rho']
+        d_u, d_v = params['d_u'], params['d_v']
         
-        # Reshape to 1D for matrix-free operations
-        x_flat = x.reshape(-1, order='F')
-        r_flat = r.reshape(-1, order='F')
+        # Reshape u to 2D for easier manipulation
+        u_2d = u.reshape((nx, ny), order='F')
+        f_2d = f.reshape((nx, ny), order='F')
         
-        # Jacobi iteration using matrix-free approach
+        # Compute coefficients for the pressure equation
+        # East coefficients
+        aE = np.zeros((nx, ny))
+        aE[:-1, :] = rho * d_u[1:nx, :] * dy
+        
+        # West coefficients
+        aW = np.zeros((nx, ny))
+        aW[1:, :] = rho * d_u[1:nx, :] * dy
+        
+        # North coefficients
+        aN = np.zeros((nx, ny))
+        aN[:, :-1] = rho * d_v[:, 1:ny] * dx
+        
+        # South coefficients
+        aS = np.zeros((nx, ny))
+        aS[:, 1:] = rho * d_v[:, 1:ny] * dx
+        
+        # Diagonal coefficients
+        aP = aE + aW + aN + aS
+        
+        # Ensure reference point has proper coefficient
+        aP[0, 0] = 1.0
+        aE[0, 0] = 0.0
+        aN[0, 0] = 0.0
+        aW[0, 0] = 0.0
+        aS[0, 0] = 0.0
+        f_2d[0, 0] = 0.0
+        
+        # Avoid division by zero
+        aP[aP == 0] = 1.0
+        
+        # Pre-compute 1/aP for efficiency
+        inv_aP = 1.0 / aP
+        
+        # Create shifted arrays for neighbor values (pre-allocate once)
+        u_east = np.zeros_like(u_2d)
+        u_west = np.zeros_like(u_2d)
+        u_north = np.zeros_like(u_2d)
+        u_south = np.zeros_like(u_2d)
+        
+        # Vectorized Jacobi iteration
         for _ in range(num_iterations):
-            # Compute Ax using matrix-free approach
-            Ax = compute_Ap_product(x_flat, nx, ny, dx, dy, rho, d_u, d_v)
+            # Update shifted arrays for neighbor values
+            u_east[:-1, :] = u_2d[1:, :]
+            u_west[1:, :] = u_2d[:-1, :]
+            u_north[:, :-1] = u_2d[:, 1:]
+            u_south[:, 1:] = u_2d[:, :-1]
             
-            # Extract L+U part: Ax - Dx
-            L_plus_U_x = Ax - D * x_flat
+            # Jacobi update - fully vectorized
+            u_2d = (1 - omega) * u_2d + omega * (
+                (f_2d + aE * u_east + aW * u_west + aN * u_north + aS * u_south) * inv_aP
+            )
             
-            # Update x using Jacobi formula: x = (1-ω)x + ω D⁻¹(b - (L+U)x)
-            x_flat = (1 - self.smoother_omega) * x_flat + self.smoother_omega * D_inv * (r_flat - L_plus_U_x)
+            # Ensure reference pressure point remains zero
+            u_2d[0, 0] = 0.0
         
-        # Reshape back to 2D
-        return x_flat.reshape((nx, ny), order='F') 
+        # Flatten back to 1D
+        return u_2d.flatten('F')
+    
+    def _solve_directly(self, f, params):
+        """
+        Solve the 1x1 system directly.
+        
+        Parameters:
+        -----------
+        f : ndarray
+            Right-hand side (1D)
+        params : dict
+            Parameters for matrix-free operations
+            
+        Returns:
+        --------
+        u : ndarray
+            Solution (1D)
+        """
+        # For a 1x1 grid, the solution is simply f/aP
+        # But since we're enforcing the reference pressure point to be 0,
+        # the solution is just 0
+        return np.zeros_like(f)
+    
+    def _restrict_coefficients(self, d_u, d_v, nx, ny):
+        """
+        Restrict the momentum equation coefficients to a coarser grid.
+        
+        Parameters:
+        -----------
+        d_u, d_v : ndarray
+            Momentum equation coefficients on the fine grid
+        nx, ny : int
+            Dimensions of the fine grid
+            
+        Returns:
+        --------
+        d_u_coarse, d_v_coarse : ndarray
+            Momentum equation coefficients on the coarse grid
+        """
+        # Calculate coarse grid dimensions
+        nx_coarse = (nx + 1) // 2 - 1
+        ny_coarse = (ny + 1) // 2 - 1
+        
+        # Initialize coarse grid coefficients
+        d_u_coarse = np.zeros((nx_coarse + 1, ny_coarse))
+        d_v_coarse = np.zeros((nx_coarse, ny_coarse + 1))
+        
+        # Vectorized restriction for d_u (staggered in x-direction)
+        # Create indices for the fine grid points
+        i_fine = np.arange(0, min(2*nx_coarse+1, d_u.shape[0]), 2)
+        j_fine = np.arange(1, min(2*ny_coarse+1, d_u.shape[1]), 2)
+        I_fine, J_fine = np.meshgrid(i_fine, j_fine, indexing='ij')
+        
+        # Create masks for valid adjacent indices
+        valid_jm1 = J_fine > 0
+        valid_jp1 = J_fine < d_u.shape[1]-1
+        
+        # Initialize sum and count arrays
+        d_u_sum = np.zeros((nx_coarse + 1, ny_coarse))
+        d_u_count = np.ones((nx_coarse + 1, ny_coarse))  # Start with 1 to avoid division by zero
+        
+        # Add center points
+        d_u_sum += d_u[I_fine[:nx_coarse+1, :ny_coarse], J_fine[:nx_coarse+1, :ny_coarse]]
+        
+        # Add points below if available
+        mask = valid_jm1[:nx_coarse+1, :ny_coarse]
+        if np.any(mask):
+            d_u_sum[mask] += d_u[I_fine[:nx_coarse+1, :ny_coarse][mask], J_fine[:nx_coarse+1, :ny_coarse][mask]-1]
+            d_u_count[mask] += 1
+        
+        # Add points above if available
+        mask = valid_jp1[:nx_coarse+1, :ny_coarse]
+        if np.any(mask):
+            d_u_sum[mask] += d_u[I_fine[:nx_coarse+1, :ny_coarse][mask], J_fine[:nx_coarse+1, :ny_coarse][mask]+1]
+            d_u_count[mask] += 1
+        
+        # Average
+        d_u_coarse = d_u_sum / d_u_count
+        
+        # Vectorized restriction for d_v (staggered in y-direction)
+        # Create indices for the fine grid points
+        i_fine = np.arange(1, min(2*nx_coarse+1, d_v.shape[0]), 2)
+        j_fine = np.arange(0, min(2*ny_coarse+2, d_v.shape[1]), 2)
+        I_fine, J_fine = np.meshgrid(i_fine, j_fine, indexing='ij')
+        
+        # Create masks for valid adjacent indices
+        valid_im1 = I_fine > 0
+        valid_ip1 = I_fine < d_v.shape[0]-1
+        
+        # Initialize sum and count arrays
+        d_v_sum = np.zeros((nx_coarse, ny_coarse + 1))
+        d_v_count = np.ones((nx_coarse, ny_coarse + 1))  # Start with 1 to avoid division by zero
+        
+        # Add center points
+        d_v_sum += d_v[I_fine[:nx_coarse, :ny_coarse+1], J_fine[:nx_coarse, :ny_coarse+1]]
+        
+        # Add points to the left if available
+        mask = valid_im1[:nx_coarse, :ny_coarse+1]
+        if np.any(mask):
+            d_v_sum[mask] += d_v[I_fine[:nx_coarse, :ny_coarse+1][mask]-1, J_fine[:nx_coarse, :ny_coarse+1][mask]]
+            d_v_count[mask] += 1
+        
+        # Add points to the right if available
+        mask = valid_ip1[:nx_coarse, :ny_coarse+1]
+        if np.any(mask):
+            d_v_sum[mask] += d_v[I_fine[:nx_coarse, :ny_coarse+1][mask]+1, J_fine[:nx_coarse, :ny_coarse+1][mask]]
+            d_v_count[mask] += 1
+        
+        # Average
+        d_v_coarse = d_v_sum / d_v_count
+        
+        return d_u_coarse, d_v_coarse
+    
+    def _v_cycle(self, u, f, params, grid_calculations):
+        """
+        Performs one V-cycle of the multigrid method.
+        
+        Parameters:
+        -----------
+        u : ndarray
+            Initial guess for the solution (1D)
+        f : ndarray
+            Right-hand side (1D)
+        params : dict
+            Parameters for matrix-free operations
+        grid_calculations : list
+            List to track grid sizes used
+            
+        Returns:
+        --------
+        u : ndarray
+            Updated solution after one V-cycle (1D)
+        """
+        nx, ny = params['nx'], params['ny']
+        dx, dy = params['dx'], params['dy']
+        rho = params['rho']
+        d_u, d_v = params['d_u'], params['d_v']
+        
+        # Track grid size
+        grid_calculations.append(nx)
+        
+        # Base case: 1x1 grid (coarsest level)
+        if nx == 1 and ny == 1:
+            return self._solve_directly(f, params)
+        
+        # 1. Pre-smoothing
+        u = self._smooth(u, f, params, num_iterations=self.pre_smoothing)
+        
+        # 2. Compute residual: r = f - Au
+        Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
+        r = f - Au
+        
+        # 3. Restrict residual to coarser grid using full weighting
+        r_2d = r.reshape((nx, ny), order='F')
+        r_coarse = self._restrict(r_2d)
+        mc = r_coarse.shape[0]  # Size of coarse grid
+        
+        # 4. Create new parameters for coarse grid
+        coarse_params = params.copy()
+        coarse_params['nx'] = mc
+        coarse_params['ny'] = mc
+        coarse_params['dx'] = dx * 2
+        coarse_params['dy'] = dy * 2
+        
+        # 5. Restrict d_u and d_v to coarser grid using improved method
+        d_u_coarse, d_v_coarse = self._restrict_coefficients(d_u, d_v, nx, ny)
+        coarse_params['d_u'] = d_u_coarse
+        coarse_params['d_v'] = d_v_coarse
+        
+        # 6. Recursive call to solve on coarser grid
+        r_coarse_flat = r_coarse.flatten('F')
+        e_coarse = np.zeros_like(r_coarse_flat)
+        e_coarse = self._v_cycle(e_coarse, r_coarse_flat, coarse_params, grid_calculations)
+        
+        # 7. Prolongate error to fine grid
+        e_coarse_2d = e_coarse.reshape((mc, mc), order='F')
+        e_2d = self._interpolate(e_coarse_2d, nx)
+        e = e_2d.flatten('F')
+        
+        # 8. Update solution
+        u = u + e
+        
+        # 9. Post-smoothing
+        u = self._smooth(u, f, params, num_iterations=self.post_smoothing)
+        
+        return u

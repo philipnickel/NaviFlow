@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 import numpy as np
+from ...constructor.boundary_conditions import BoundaryConditionManager
 
 class Algorithm(ABC):
     """
@@ -24,7 +25,7 @@ class Algorithm(ABC):
             Solver for momentum equations
         velocity_updater : VelocityUpdater, optional
             Method to update velocities
-        boundary_conditions : dict, optional
+        boundary_conditions : dict or BoundaryConditionManager, optional
             Boundary conditions
         """
         self.mesh = mesh
@@ -32,7 +33,15 @@ class Algorithm(ABC):
         self.pressure_solver = pressure_solver
         self.momentum_solver = momentum_solver
         self.velocity_updater = velocity_updater
-        self.boundary_conditions = boundary_conditions or {}
+        
+        # Initialize boundary condition manager
+        if isinstance(boundary_conditions, BoundaryConditionManager):
+            self.bc_manager = boundary_conditions
+        else:
+            self.bc_manager = BoundaryConditionManager()
+            
+        # For backward compatibility
+        self.boundary_conditions = self.bc_manager.to_dict()
         
         # Initialize fields
         self.initialize_fields()
@@ -53,11 +62,12 @@ class Algorithm(ABC):
     
     def apply_boundary_conditions(self):
         """Apply boundary conditions to the fields."""
-        for boundary, conditions in self.boundary_conditions.items():
-            for field_type, values in conditions.items():
-                if field_type == 'velocity':
-                    self.u[:, self.mesh.ny-1] = values.get('u', 0.0)
-                    # Apply other boundary conditions as needed
+        nx, ny = self.mesh.get_dimensions()
+        
+        # Use the boundary condition manager to apply velocity boundary conditions
+        self.u, self.v = self.bc_manager.apply_velocity_boundary_conditions(
+            self.u, self.v, nx, ny
+        )
     
     def set_boundary_condition(self, boundary, condition_type, values=None):
         """
@@ -72,10 +82,11 @@ class Algorithm(ABC):
         values : dict, optional
             Values for the boundary condition
         """
-        if boundary not in self.boundary_conditions:
-            self.boundary_conditions[boundary] = {}
+        # Set the condition in the manager
+        self.bc_manager.set_condition(boundary, condition_type, values)
         
-        self.boundary_conditions[boundary][condition_type] = values or {}
+        # Update the boundary_conditions dictionary for backward compatibility
+        self.boundary_conditions = self.bc_manager.to_dict()
         
         # Apply the boundary condition
         self.apply_boundary_conditions()

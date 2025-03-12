@@ -1,5 +1,6 @@
+
 """
-Lid-driven cavity flow simulation using the object-oriented framework with multigrid solver.
+Lid-driven cavity flow simulation using the object-oriented framework.
 """
 
 import numpy as np
@@ -10,24 +11,19 @@ from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
 from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
-from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
+from naviflow_oo.solver.pressure_solver.direct import DirectPressureSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-import os
-
-# Create results directory
-results_dir = os.path.join(os.path.dirname(__file__), 'results')
-os.makedirs(results_dir, exist_ok=True)
 
 # Start timing
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63          # Grid size (2^6-1)
+nx, ny = 129, 129          # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.4              # Pressure relaxation factor
 alpha_u = 0.9              # Velocity relaxation factor
-max_iterations = 20        # Maximum number of iterations
+max_iterations = 20     # Maximum number of iterations
 tolerance = 1e-6           # Convergence tolerance
 
 # 2. Create mesh
@@ -45,15 +41,7 @@ print(f"Reynolds number: {fluid.get_reynolds_number()}")
 print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
-# Use multigrid solver for pressure correction
-pressure_solver = MultiGridSolver(
-    tolerance=1e-6,
-    max_iterations=50,
-    pre_smoothing=2,
-    post_smoothing=2,
-    smoother_iterations=3,
-    smoother_omega=0.8
-)
+pressure_solver = DirectPressureSolver()
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
@@ -92,21 +80,10 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'Multigrid Cavity Flow Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_multigrid_results.pdf'),
+    title=f'Cavity Flow Results (Re={reynolds})',
+    filename=f'cavity_Re{reynolds}_matrix_results.pdf',
     show=False
 )
 
-# 11. Plot convergence history of the pressure solver
-if hasattr(pressure_solver, 'residual_history') and pressure_solver.residual_history:
-    plt.figure(figsize=(10, 6))
-    plt.semilogy(range(1, len(pressure_solver.residual_history) + 1), pressure_solver.residual_history)
-    plt.grid(True)
-    plt.xlabel('Iteration')
-    plt.ylabel('Residual (log scale)')
-    plt.title('Multigrid Solver Convergence History')
-    plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, f'multigrid_convergence_Re{reynolds}.pdf'))
-    plt.close()
 
-print(f"Results saved to {results_dir}") 
+

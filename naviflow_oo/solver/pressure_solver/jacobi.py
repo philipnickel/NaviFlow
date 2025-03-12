@@ -1,21 +1,18 @@
 """
-Jacobi iterative solver for pressure correction equation.
+Matrix-free Jacobi iterative solver for pressure correction equation.
 """
 
 import numpy as np
-import scipy.sparse as sp
-from scipy.sparse.linalg import spsolve
 from .base_pressure_solver import PressureSolver
-from .helpers.coeff_matrix import get_coeff_mat
 from .helpers.rhs_construction import get_rhs
 
 class JacobiSolver(PressureSolver):
     """
-    Jacobi iterative solver for pressure correction equation.
+    Matrix-free Jacobi iterative solver for pressure correction equation.
     
     This solver uses the Jacobi iterative method to solve the pressure
-    correction equation. It is simple but may converge slowly for
-    ill-conditioned problems.
+    correction equation without explicitly forming the coefficient matrix.
+    It is simple but may converge slowly for ill-conditioned problems.
     """
     
     def __init__(self, tolerance=1e-6, max_iterations=1000, omega=1.0):
@@ -37,7 +34,7 @@ class JacobiSolver(PressureSolver):
     
     def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
         """
-        Solve the pressure correction equation using the Jacobi method.
+        Solve the pressure correction equation using the matrix-free Jacobi method.
         
         Parameters:
         -----------
@@ -63,24 +60,69 @@ class JacobiSolver(PressureSolver):
         self.residual_history = []
         
         # Get right-hand side of pressure correction equation
-        rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
-        
-        # Get coefficient matrix
-        A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
-        
-        # Extract diagonal and off-diagonal parts
-        D = A.diagonal()
-        D_inv = 1.0 / D
-        L_plus_U = A - sp.diags(D)
+        b = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
+        b_2d = b.reshape((nx, ny), order='F')
         
         # Initial guess
-        p_prime_flat = np.zeros_like(rhs)
+        p = np.zeros((nx, ny))
+        
+        # Set reference pressure point
+        p[0, 0] = 0.0
+        
+        # Pre-compute coefficient arrays for vectorized operations
+        # East coefficients (aE)
+        aE = np.zeros((nx, ny))
+        aE[:-1, :] = rho * d_u[1:nx, :] * dy
+        
+        # West coefficients (aW)
+        aW = np.zeros((nx, ny))
+        aW[1:, :] = rho * d_u[1:nx, :] * dy
+        
+        # North coefficients (aN)
+        aN = np.zeros((nx, ny))
+        aN[:, :-1] = rho * d_v[:, 1:ny] * dx
+        
+        # South coefficients (aS)
+        aS = np.zeros((nx, ny))
+        aS[:, 1:] = rho * d_v[:, 1:ny] * dx
+        
+        # Diagonal coefficients (aP)
+        aP = aE + aW + aN + aS
+        
+        # Ensure reference point has proper coefficient
+        aP[0, 0] = 1.0
+        aE[0, 0] = 0.0
+        aN[0, 0] = 0.0
+        
+        # Avoid division by zero
+        aP[aP == 0] = 1.0
         
         # Jacobi iteration
         for k in range(self.max_iterations):
-            # Compute residual
-            r = rhs - A @ p_prime_flat
-            res_norm = np.linalg.norm(r) / np.linalg.norm(rhs)
+            # Create shifted arrays for neighbor values
+            p_east = np.zeros_like(p)
+            p_west = np.zeros_like(p)
+            p_north = np.zeros_like(p)
+            p_south = np.zeros_like(p)
+            
+            p_east[:-1, :] = p[1:, :]
+            p_west[1:, :] = p[:-1, :]
+            p_north[:, :-1] = p[:, 1:]
+            p_south[:, 1:] = p[:, :-1]
+            
+            # Vectorized Jacobi update
+            p_new = (1 - self.omega) * p + self.omega * (
+                (aE * p_east + aW * p_west + aN * p_north + aS * p_south - b_2d) / aP
+            )
+            
+            # Ensure reference pressure point remains zero
+            p_new[0, 0] = 0.0
+            
+            # Calculate residual (excluding reference point)
+            mask = np.ones_like(p, dtype=bool)
+            mask[0, 0] = False
+            res = np.sum((p_new[mask] - p[mask])**2)
+            res_norm = np.sqrt(res) / ((nx * ny) - 1)
             self.residual_history.append(res_norm)
             
             # Check convergence
@@ -88,18 +130,11 @@ class JacobiSolver(PressureSolver):
                 print(f"Jacobi converged in {k+1} iterations, residual: {res_norm:.6e}")
                 break
             
-            # Jacobi update: x_{k+1} = (1-omega)*x_k + omega*D^{-1}*(b - (L+U)*x_k)
-            p_prime_flat_new = (1 - self.omega) * p_prime_flat + \
-                              self.omega * D_inv * (rhs - L_plus_U @ p_prime_flat)
-            
             # Update solution
-            p_prime_flat = p_prime_flat_new
+            p = p_new
         
         else:
             print(f"Jacobi did not converge in {self.max_iterations} iterations, "
                  f"final residual: {res_norm:.6e}")
         
-        # Reshape to 2D
-        p_prime = p_prime_flat.reshape((nx, ny), order='F')
-        
-        return p_prime 
+        return p 

@@ -28,7 +28,7 @@ class SimpleSolver(Algorithm):
             Solver for momentum equations
         velocity_updater : VelocityUpdater, optional
             Method to update velocities
-        boundary_conditions : dict, optional
+        boundary_conditions : dict or BoundaryConditionManager, optional
             Boundary conditions
         alpha_p, alpha_u : float
             Relaxation factors for pressure and velocity
@@ -92,11 +92,15 @@ class SimpleSolver(Algorithm):
             
             # Solve momentum equations with relaxation factor
             u_star, d_u = self.momentum_solver.solve_u_momentum(
-                self.mesh, self.fluid, self.u, self.v, p_star, relaxation_factor=self.alpha_u
+                self.mesh, self.fluid, self.u, self.v, p_star, 
+                relaxation_factor=self.alpha_u,
+                boundary_conditions=self.bc_manager
             )
             
             v_star, d_v = self.momentum_solver.solve_v_momentum(
-                self.mesh, self.fluid, self.u, self.v, p_star, relaxation_factor=self.alpha_u
+                self.mesh, self.fluid, self.u, self.v, p_star, 
+                relaxation_factor=self.alpha_u,
+                boundary_conditions=self.bc_manager
             )
             
             # Solve pressure correction equation
@@ -110,7 +114,7 @@ class SimpleSolver(Algorithm):
             
             # Update velocity
             self.u, self.v = self.velocity_updater.update_velocity(
-                self.mesh, u_star, v_star, p_prime, d_u, d_v, self.boundary_conditions
+                self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
             )
             
             # Calculate residuals
