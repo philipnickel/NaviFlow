@@ -27,17 +27,15 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 127, 127          # Grid size (2^6-1)
-reynolds = 100          # Reynolds number (higher)
+nx, ny = 511, 511          # Grid size (2^6-1)
+reynolds = 10000          # Reynolds number (higher)
 alpha_p = 0.3            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 100000      # Maximum number of SIMPLE iterations
+max_iterations = 150000      # Maximum number of SIMPLE iterations
 tolerance = 1e-9         # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
-print(f"Created mesh with {nx}x{ny} cells")
-print(f"Cell sizes: dx={mesh.dx:.6f}, dy={mesh.dy:.6f}")
 
 # 3. Define fluid properties
 fluid = FluidProperties(
@@ -45,24 +43,20 @@ fluid = FluidProperties(
     reynolds_number=reynolds,
     characteristic_velocity=1.0
 )
-print(f"Reynolds number: {fluid.get_reynolds_number()}")
-print(f"Calculated viscosity: {fluid.get_viscosity()}")
+
+
 
 # 4. Create solvers
 # Create a Jacobi smoother for the multigrid solver
-jacobi_smoother = JacobiSolver(
-    tolerance=1e-4,  # Not used for fixed iterations
-    max_iterations=50,  # Not used for fixed iterations
-    omega=0.8  # Weighted Jacobi for better convergence
-)
+jacobi_smoother = JacobiSolver()
 
 # Use F-cycle multigrid solver with Jacobi smoother for pressure correction
 pressure_solver = MultiGridSolver(
-    tolerance=1e-5,  # Tighter tolerance for pressure solver
+    tolerance=1e-4,  # Tighter tolerance for pressure solver
     max_iterations=15,  # More iterations per SIMPLE iteration
-    pre_smoothing=5,
-    post_smoothing=5,
-    smoother_iterations=5,
+    pre_smoothing=3,
+    post_smoothing=3,
+    smoother_iterations=3,
     smoother_omega=0.8,
     smoother=jacobi_smoother,
     cycle_type='f'  # Use F-cycle
