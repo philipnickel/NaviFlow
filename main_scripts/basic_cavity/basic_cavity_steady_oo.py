@@ -5,6 +5,7 @@ Lid-driven cavity flow simulation using the object-oriented framework.
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import os
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
@@ -61,9 +62,13 @@ algorithm.set_boundary_condition('bottom', 'wall')
 algorithm.set_boundary_condition('left', 'wall')
 algorithm.set_boundary_condition('right', 'wall')
 
+# Create results directory
+results_dir = os.path.join(os.path.dirname(__file__), 'results')
+os.makedirs(results_dir, exist_ok=True)
+
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir)
 
 # End timing
 end_time = time.time()
@@ -80,7 +85,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 # 10. Visualize results
 result.plot_combined_results(
     title=f'Cavity Flow Results (Re={reynolds})',
-    filename=f'cavity_Re{reynolds}_matrix_results.pdf',
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_matrix_results.pdf'),
     show=False
 )
 

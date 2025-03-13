@@ -6,7 +6,9 @@ This module provides the base class for all CFD algorithms in the NaviFlow frame
 
 from abc import ABC, abstractmethod
 import numpy as np
+import os
 from ...constructor.boundary_conditions import BoundaryConditionManager
+from ...utils.profiler import Profiler
 
 class BaseAlgorithm(ABC):
     """
@@ -54,6 +56,9 @@ class BaseAlgorithm(ABC):
         # For backward compatibility
         self.boundary_conditions = self.bc_manager.to_dict()
         
+        # Initialize profiler
+        self.profiler = Profiler(self.__class__.__name__, mesh, fluid)
+        
         # Initialize fields
         self.initialize_fields()
         
@@ -76,12 +81,16 @@ class BaseAlgorithm(ABC):
     
     def apply_boundary_conditions(self):
         """Apply boundary conditions to the fields."""
+        self.profiler.start_section()
+        
         nx, ny = self.mesh.get_dimensions()
         
         # Use the boundary condition manager to apply velocity boundary conditions
         self.u, self.v = self.bc_manager.apply_velocity_boundary_conditions(
             self.u, self.v, nx, ny
         )
+        
+        self.profiler.end_section('boundary_condition_time')
     
     def set_boundary_condition(self, boundary, condition_type, values=None):
         """
@@ -96,6 +105,8 @@ class BaseAlgorithm(ABC):
         values : dict, optional
             Values for the boundary condition
         """
+        self.profiler.start_section()
+        
         # Set the condition in the manager
         self.bc_manager.set_condition(boundary, condition_type, values)
         
@@ -104,6 +115,8 @@ class BaseAlgorithm(ABC):
         
         # Apply the boundary condition
         self.apply_boundary_conditions()
+        
+        self.profiler.end_section('boundary_condition_time')
     
     def calculate_divergence(self):
         """
@@ -144,6 +157,24 @@ class BaseAlgorithm(ABC):
         max_div = np.max(np.abs(interior_divergence))
         
         return max_div
+    
+    def save_profiling_data(self, filename=None, profile_dir='results/profiles'):
+        """
+        Save profiling data to a file.
+        
+        Parameters:
+        -----------
+        filename : str, optional
+            Name of the file to save the data to. If None, a default name is generated.
+        profile_dir : str, optional
+            Directory to save profiling data
+            
+        Returns:
+        --------
+        str
+            Path to the saved file
+        """
+        return self.profiler.save(filename, profile_dir)
     
     @abstractmethod
     def solve(self, max_iterations=1000, tolerance=1e-6):

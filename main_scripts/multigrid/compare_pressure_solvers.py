@@ -93,7 +93,9 @@ for solver_info in solvers:
         tolerance=tolerance,
         title=f"{solver_info['name']} Solver",
         save_plot=True,
-        filename=os.path.join(results_dir, f"{solver_info['name'].lower().replace(' ', '_')}_{problem_type}_{problem_size}")
+        filename=os.path.join(results_dir, f"{solver_info['name'].lower().replace(' ', '_')}_{problem_type}_{problem_size}"),
+        save_profile=True,
+        profile_dir=results_dir
     )
     
     # Add solver info to result

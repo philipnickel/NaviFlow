@@ -3,6 +3,7 @@ SIMPLE (Semi-Implicit Method for Pressure-Linked Equations) algorithm implementa
 """ 
 
 import numpy as np
+import os
 from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
 
@@ -43,7 +44,7 @@ class SimpleSolver(BaseAlgorithm):
         self.alpha_u = alpha_u
         
     
-    def solve(self, max_iterations=1000, tolerance=1e-6):
+    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles'):
         """
         Solve using the SIMPLE algorithm.
         
@@ -53,18 +54,24 @@ class SimpleSolver(BaseAlgorithm):
             Maximum number of iterations
         tolerance : float
             Convergence tolerance
+        save_profile : bool, optional
+            Whether to save profiling data to a file
+        profile_dir : str, optional
+            Directory to save profiling data
             
         Returns:
         --------
         SimulationResult
             Object containing the solution fields and convergence history
         """
+        # Start profiling
+        self.profiler.start()
+        
         # Get mesh dimensions and fluid properties
         nx, ny = self.mesh.get_dimensions()
         dx, dy = self.mesh.get_cell_sizes()
         rho = self.fluid.get_density()
         mu = self.fluid.get_viscosity()
-        
         
         # Initialize variables
         p_star = self.p.copy()
@@ -75,10 +82,15 @@ class SimpleSolver(BaseAlgorithm):
         iteration = 1
         max_res = 1000
         
+        self.profiler.start_section()  # Start timing other operations
+        
         while (iteration <= max_iterations) and (max_res > tolerance):
             # Store old values for convergence check
             u_old = self.u.copy()
             v_old = self.v.copy()
+            
+            self.profiler.end_section('other_time')  # End timing other operations
+            self.profiler.start_section()  # Start timing momentum solve
             
             # Solve momentum equations with relaxation factor
             u_star, d_u = self.momentum_solver.solve_u_momentum(
@@ -93,6 +105,9 @@ class SimpleSolver(BaseAlgorithm):
                 boundary_conditions=self.bc_manager
             )
             
+            self.profiler.end_section('momentum_solve_time')  # End timing momentum solve
+            self.profiler.start_section()  # Start timing pressure solve
+            
             # Solve pressure correction equation
             p_prime = self.pressure_solver.solve(
                 self.mesh, u_star, v_star, d_u, d_v, p_star
@@ -102,10 +117,16 @@ class SimpleSolver(BaseAlgorithm):
             self.p = p_star + self.alpha_p * p_prime
             p_star = self.p.copy()  # Update p_star for next iteration
             
+            self.profiler.end_section('pressure_solve_time')  # End timing pressure solve
+            self.profiler.start_section()  # Start timing velocity update
+            
             # Update velocity
             self.u, self.v = self.velocity_updater.update_velocity(
                 self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
             )
+            
+            self.profiler.end_section('velocity_update_time')  # End timing velocity update
+            self.profiler.start_section()  # Start timing other operations
             
             # Calculate residuals
             u_res = np.abs(self.u - u_old)
@@ -116,12 +137,34 @@ class SimpleSolver(BaseAlgorithm):
             # Print progress
             print(f"Iteration {iteration}, Residual: {max_res:.6e}")
             
+            # Update memory usage every 10 iterations
+            if iteration % 10 == 0:
+                self.profiler.update_memory_usage()
+                
             iteration += 1
+            
+        self.profiler.end_section('other_time')  # End timing other operations
+        
+        # Update profiling data
+        self.profiler.set_iterations(iteration - 1)
+        
+        # Set convergence information
+        final_residual = max_res
+        converged = max_res <= tolerance
+        self.profiler.set_convergence_info(
+            tolerance=tolerance,
+            final_residual=final_residual,
+            residual_history=self.residual_history,
+            converged=converged
+        )
+        
+        # End profiling
+        self.profiler.end()
         
         # Calculate divergence for final solution
         divergence = self.calculate_divergence()
         
-        # Create and return result object with the Reynolds number
+        # Create result object with the Reynolds number
         reynolds_value = self.fluid.get_reynolds_number()
         
         result = SimulationResult(
@@ -131,5 +174,15 @@ class SimpleSolver(BaseAlgorithm):
             divergence=divergence,
             reynolds=reynolds_value
         )
+        
+        # Save profiling data if requested
+        if save_profile:
+            os.makedirs(profile_dir, exist_ok=True)
+            filename = os.path.join(
+                profile_dir, 
+                f"SIMPLE_Re{int(reynolds_value)}_mesh{nx}x{ny}_profile.txt"
+            )
+            profile_path = self.save_profiling_data(filename)
+            print(f"Profiling data saved to: {profile_path}")
         
         return result

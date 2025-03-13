@@ -41,7 +41,9 @@ test_solver_convergence(
     tolerance=tolerance,
     title="Direct Solver",
     save_plot=True,
-    filename=os.path.join(results_dir, f"direct_{problem_type}_{problem_size}")
+    filename=os.path.join(results_dir, f"direct_{problem_type}_{problem_size}"),
+    save_profile=True,
+    profile_dir=results_dir
 )
 
 # Test CG Solver
@@ -57,7 +59,9 @@ test_solver_convergence(
     tolerance=tolerance,
     title="CG Solver",
     save_plot=True,
-    filename=os.path.join(results_dir, f"cg_{problem_type}_{problem_size}")
+    filename=os.path.join(results_dir, f"cg_{problem_type}_{problem_size}"),
+    save_profile=True,
+    profile_dir=results_dir
 )
 
 # Test Jacobi Solver
@@ -73,7 +77,9 @@ test_solver_convergence(
     tolerance=tolerance,
     title="Jacobi Solver",
     save_plot=True,
-    filename=os.path.join(results_dir, f"jacobi_{problem_type}_{problem_size}")
+    filename=os.path.join(results_dir, f"jacobi_{problem_type}_{problem_size}"),
+    save_profile=True,
+    profile_dir=results_dir
 )
 
 # Test Weighted Jacobi Solver
@@ -89,7 +95,9 @@ test_solver_convergence(
     tolerance=tolerance,
     title="Weighted Jacobi Solver (omega=0.8)",
     save_plot=True,
-    filename=os.path.join(results_dir, f"weighted_jacobi_0.8_{problem_type}_{problem_size}")
+    filename=os.path.join(results_dir, f"weighted_jacobi_0.8_{problem_type}_{problem_size}"),
+    save_profile=True,
+    profile_dir=results_dir
 )
 
 # Show all plots

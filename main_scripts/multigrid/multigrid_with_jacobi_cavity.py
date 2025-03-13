@@ -29,7 +29,7 @@ nx, ny = 63, 63           # Grid size (2^6-1)
 reynolds = 100           # Reynolds number
 alpha_p = 0.4            # Pressure relaxation factor
 alpha_u = 0.9            # Velocity relaxation factor
-max_iterations = 100000      # Maximum number of iterations
+max_iterations = 100      # Maximum number of iterations
 tolerance = 1e-9         # Convergence tolerance
 
 # 2. Create mesh
@@ -86,7 +86,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir)
 
 # End timing
 end_time = time.time()

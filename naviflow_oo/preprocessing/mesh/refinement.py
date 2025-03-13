@@ -1,3 +1,0 @@
-"""
-Mesh refinement strategies.
-""" 

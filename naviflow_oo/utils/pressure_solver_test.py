@@ -8,6 +8,7 @@ pressure solvers.
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import os
 from ..preprocessing.mesh.structured import StructuredMesh
 from ..solver.pressure_solver.helpers.rhs_construction import get_rhs
 from ..solver.pressure_solver.helpers.coeff_matrix import get_coeff_mat
@@ -112,7 +113,8 @@ def generate_test_problem(nx=65, ny=65, problem_type='poisson'):
 
 def test_solver_convergence(solver, problem_size=65, problem_type='poisson', 
                            max_iterations=1000, tolerance=1e-6, 
-                           title=None, save_plot=False, filename=None):
+                           title=None, save_plot=False, filename=None,
+                           save_profile=False, profile_dir=None):
     """
     Test the convergence of a pressure solver on a specified problem.
     
@@ -134,6 +136,10 @@ def test_solver_convergence(solver, problem_size=65, problem_type='poisson',
         Whether to save the plot to a file
     filename : str, optional
         Filename for the saved plot
+    save_profile : bool, optional
+        Whether to save profiling data
+    profile_dir : str, optional
+        Directory to save profiling data
         
     Returns:
     --------
@@ -179,7 +185,12 @@ def test_solver_convergence(solver, problem_size=65, problem_type='poisson',
     error = None
     if 'exact_solution' in problem_data:
         exact = problem_data['exact_solution']
-        error = np.max(np.abs(p_prime - exact))
+        # Ensure p_prime has the same shape as exact for comparison
+        if p_prime.ndim == 1 and exact.ndim == 2:
+            p_prime_reshaped = p_prime.reshape(exact.shape, order='F')
+            error = np.max(np.abs(p_prime_reshaped - exact))
+        else:
+            error = np.max(np.abs(p_prime - exact))
     
     # Print results
     solver_name = solver.__class__.__name__
@@ -209,6 +220,50 @@ def test_solver_convergence(solver, problem_size=65, problem_type='poisson',
         
         if save_plot and filename:
             plt.savefig(f"{filename}_convergence.png")
+    
+    # Save profiling data if requested
+    if save_profile:
+        # Create a simple profiler if the solver doesn't have one
+        if not hasattr(solver, 'profiler'):
+            from .profiler import Profiler
+            
+            # Create a mock fluid object with a get_reynolds_number method
+            class MockFluid:
+                def get_reynolds_number(self):
+                    return 0
+                    
+            mock_fluid = MockFluid()
+            
+            solver.profiler = Profiler(solver.__class__.__name__, problem_data['mesh'], mock_fluid)
+            solver.profiler.start()
+            solver.profiler.end()
+        
+        # Set convergence information
+        final_residual = convergence_history[-1] if convergence_history else None
+        converged = final_residual is not None and final_residual <= tolerance
+        
+        solver.profiler.set_iterations(len(convergence_history))
+        solver.profiler.set_convergence_info(
+            tolerance=tolerance,
+            final_residual=final_residual,
+            residual_history=convergence_history,
+            converged=converged
+        )
+        
+        # Generate filename if not provided
+        if filename is None:
+            solver_name = solver.__class__.__name__
+            profile_filename = f"{solver_name}_{problem_type}_{nx}x{ny}_profile.txt"
+        else:
+            profile_filename = f"{filename}_profile.txt"
+        
+        # Save the profile
+        if profile_dir:
+            profile_path = solver.profiler.save(os.path.join(profile_dir, profile_filename), profile_dir)
+        else:
+            profile_path = solver.profiler.save(profile_filename)
+            
+        print(f"Profiling data saved to: {profile_path}")
     
     # Return results
     return {

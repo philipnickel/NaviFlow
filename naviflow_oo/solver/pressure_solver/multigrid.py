@@ -503,7 +503,20 @@ class MultiGridSolver(PressureSolver):
         rho = params['rho']
         d_u, d_v = params['d_u'], params['d_v']
         
-        return self.smoother.perform_iteration(u, f, nx, ny, dx, dy, rho, d_u, d_v, num_iterations)
+        # Use the solve method with smoother mode parameters
+        return self.smoother.solve(
+            p=u, 
+            b=f, 
+            nx=nx, 
+            ny=ny, 
+            dx=dx, 
+            dy=dy, 
+            rho=rho, 
+            d_u=d_u, 
+            d_v=d_v, 
+            num_iterations=num_iterations,
+            track_residuals=False
+        )
   
     def _solve_directly(self, f, params):
         """

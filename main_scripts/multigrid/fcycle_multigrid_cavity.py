@@ -31,8 +31,8 @@ nx, ny = 511, 511          # Grid size (2^6-1)
 reynolds = 10000          # Reynolds number (higher)
 alpha_p = 0.3            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 150000      # Maximum number of SIMPLE iterations
-tolerance = 1e-9         # Convergence tolerance
+max_iterations = 10      # Maximum number of SIMPLE iterations
+tolerance = 1e-8         # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -83,7 +83,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation with F-cycle multigrid solver...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir)
 
 # End timing
 end_time = time.time()
