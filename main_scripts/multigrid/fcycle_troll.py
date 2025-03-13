@@ -1,6 +1,8 @@
 """
-Lid-driven cavity flow simulation using the object-oriented framework with multigrid solver
-that uses JacobiSolver as the smoother.
+Lid-driven cavity flow simulation using the object-oriented framework with F-cycle multigrid solver.
+
+This script tests the F-cycle multigrid solver for the lid-driven cavity problem.
+F-cycles provide better convergence than V-cycles by combining aspects of V-cycles and W-cycles.
 """
 
 import numpy as np
@@ -25,12 +27,12 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63           # Grid size (2^6-1)
-reynolds = 100           # Reynolds number
-alpha_p = 0.4            # Pressure relaxation factor
-alpha_u = 0.9            # Velocity relaxation factor
-max_iterations = 100000      # Maximum number of iterations
-tolerance = 1e-9         # Convergence tolerance
+nx, ny = 127, 127          # Grid size (2^6-1)
+reynolds = 3200          # Reynolds number (higher)
+alpha_p = 0.1            # Pressure relaxation factor
+alpha_u = 0.4            # Velocity relaxation factor
+max_iterations = 1000      # Maximum number of SIMPLE iterations
+tolerance = 1e-4         # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -54,15 +56,16 @@ jacobi_smoother = JacobiSolver(
     omega=0.8  # Weighted Jacobi for better convergence
 )
 
-# Use multigrid solver with Jacobi smoother for pressure correction
+# Use F-cycle multigrid solver with Jacobi smoother for pressure correction
 pressure_solver = MultiGridSolver(
-    tolerance=1e-3,
-    max_iterations=50,
-    pre_smoothing=2,
-    post_smoothing=2,
-    smoother_iterations=2,
+    tolerance=1e-5,  # Tighter tolerance for pressure solver
+    max_iterations=15,  # More iterations per SIMPLE iteration
+    pre_smoothing=5,
+    post_smoothing=5,
+    smoother_iterations=5,
     smoother_omega=0.8,
-    smoother=jacobi_smoother  # Use the Jacobi smoother
+    smoother=jacobi_smoother,
+    cycle_type='f'  # Use F-cycle
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -80,12 +83,12 @@ algorithm = SimpleSolver(
 
 # 6. Set boundary conditions
 algorithm.set_boundary_condition('top', 'velocity', {'u': 1.0, 'v': 0.0})
-algorithm.set_boundary_condition('bottom', 'wall')
-algorithm.set_boundary_condition('left', 'wall')
+algorithm.set_boundary_condition('bottom', 'velocity', {'u': -1.0, 'v': 0.0})
+algorithm.set_boundary_condition('left', 'velocity', {'u': 0.0, 'v': -2.0})
 algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
-print("Starting simulation...")
+print("Starting simulation with F-cycle multigrid solver...")
 result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance)
 
 # End timing
@@ -93,7 +96,7 @@ end_time = time.time()
 elapsed_time = end_time - start_time
 
 # 8. Print results
-print(f"Simulation completed in {elapsed_time:.2f} seconds")
+print(f"F-cycle simulation completed in {elapsed_time:.2f} seconds")
 print(f"Total Iterations = {result.iterations}")
 
 # 9. Check mass conservation
@@ -102,21 +105,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'Multigrid with Jacobi Smoother Cavity Flow Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_multigrid_jacobi_results.pdf'),
+    title=f'F-cycle Multigrid Cavity Flow Results (Re={reynolds})',
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_fcycle_multigrid_results.pdf'),
     show=False
 )
-
-# 11. Plot convergence history of the pressure solver
-if hasattr(pressure_solver, 'residual_history') and pressure_solver.residual_history:
-    plt.figure(figsize=(10, 6))
-    plt.semilogy(range(1, len(pressure_solver.residual_history) + 1), pressure_solver.residual_history)
-    plt.grid(True)
-    plt.xlabel('Iteration')
-    plt.ylabel('Residual (log scale)')
-    plt.title('Multigrid with Jacobi Smoother Convergence History')
-    plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, f'multigrid_jacobi_convergence_Re{reynolds}.pdf'))
-    plt.close()
-
-print(f"Results saved to {results_dir}") 

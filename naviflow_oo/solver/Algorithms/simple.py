@@ -3,12 +3,16 @@ SIMPLE (Semi-Implicit Method for Pressure-Linked Equations) algorithm implementa
 """ 
 
 import numpy as np
-from . import Algorithm
+from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
 
-class SimpleSolver(Algorithm):
+class SimpleSolver(BaseAlgorithm):
     """
     SIMPLE algorithm implementation.
+    
+    The SIMPLE (Semi-Implicit Method for Pressure-Linked Equations) algorithm
+    is a widely used method for solving the Navier-Stokes equations for incompressible flows.
+    It uses a predictor-corrector approach to handle the pressure-velocity coupling.
     """
     def __init__(self, mesh, fluid, pressure_solver=None, momentum_solver=None, 
                  velocity_updater=None, boundary_conditions=None, 
@@ -38,18 +42,6 @@ class SimpleSolver(Algorithm):
         self.alpha_p = alpha_p
         self.alpha_u = alpha_u
         
-        # Set default solvers if not provided
-        if self.pressure_solver is None:
-            from ..pressure_solver.direct import DirectPressureSolver
-            self.pressure_solver = DirectPressureSolver()
-            
-        if self.momentum_solver is None:
-            from ..momentum_solver.standard import StandardMomentumSolver
-            self.momentum_solver = StandardMomentumSolver()
-            
-        if self.velocity_updater is None:
-            from ..velocity_solver.standard import StandardVelocityUpdater
-            self.velocity_updater = StandardVelocityUpdater()
     
     def solve(self, max_iterations=1000, tolerance=1e-6):
         """
@@ -73,13 +65,11 @@ class SimpleSolver(Algorithm):
         rho = self.fluid.get_density()
         mu = self.fluid.get_viscosity()
         
-        print(f"DEBUG: Fluid object in SimpleSolver.solve: {self.fluid}")
-        print(f"DEBUG: Reynolds number at start of SimpleSolver.solve: {self.fluid.get_reynolds_number()}")
         
         # Initialize variables
         p_star = self.p.copy()
         p_prime = np.zeros((nx, ny))
-        residuals = []
+        self.residual_history = []  # Reset residual history
         
         # Main iteration loop
         iteration = 1
@@ -121,7 +111,7 @@ class SimpleSolver(Algorithm):
             u_res = np.abs(self.u - u_old)
             v_res = np.abs(self.v - v_old)
             max_res = max(np.max(u_res), np.max(v_res))
-            residuals.append(max_res)
+            self.residual_history.append(max_res)
             
             # Print progress
             print(f"Iteration {iteration}, Residual: {max_res:.6e}")
@@ -129,17 +119,15 @@ class SimpleSolver(Algorithm):
             iteration += 1
         
         # Calculate divergence for final solution
-        from ...postprocessing.validation.cavity_flow import calculate_divergence
-        divergence = calculate_divergence(self.u, self.v, dx, dy)
+        divergence = self.calculate_divergence()
         
         # Create and return result object with the Reynolds number
         reynolds_value = self.fluid.get_reynolds_number()
-        print(f"DEBUG: Reynolds number in SimpleSolver.solve: {reynolds_value}")
         
         result = SimulationResult(
             self.u, self.v, self.p, self.mesh, 
             iterations=iteration-1, 
-            residuals=residuals,
+            residuals=self.residual_history,
             divergence=divergence,
             reynolds=reynolds_value
         )
