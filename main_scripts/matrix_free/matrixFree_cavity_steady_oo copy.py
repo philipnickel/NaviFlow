@@ -19,12 +19,12 @@ from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 129, 129          # Grid size
+nx, ny = 127, 127          # Grid size
 reynolds = 100             # Reynolds number
-alpha_p = 0.4              # Pressure relaxation factor
-alpha_u = 0.9              # Velocity relaxation factor
+alpha_p = 0.3              # Pressure relaxation factor
+alpha_u = 0.7              # Velocity relaxation factor
 max_iterations = 100000    # Maximum number of iterations (reduced for quick test)
-tolerance = 1e-9           # Convergence tolerance
+tolerance = 1e-7           # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -42,7 +42,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=1e-7, max_iterations=1000)
+pressure_solver = MatrixFreeCGSolver(tolerance=1e-5, max_iterations=1000)
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 

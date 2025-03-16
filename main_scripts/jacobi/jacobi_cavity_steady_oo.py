@@ -23,7 +23,7 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 129, 129          # Grid size
+nx, ny = 65, 65          # Grid size
 reynolds = 100           # Reynolds number
 alpha_p = 0.4            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.7            # Velocity relaxation factor
@@ -93,19 +93,5 @@ result.plot_combined_results(
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_jacobi_results.pdf'),
     show=False
 )
-
-# 11. Plot convergence history of the pressure solver
-if hasattr(pressure_solver, 'residual_history') and pressure_solver.residual_history:
-    plt.figure(figsize=(10, 6))
-    plt.semilogy(range(1, len(pressure_solver.residual_history) + 1), pressure_solver.residual_history)
-    plt.grid(True)
-    plt.xlabel('Iteration')
-    plt.ylabel('Residual (log scale)')
-    plt.title('Jacobi Solver Convergence History')
-    plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, f'jacobi_convergence_Re{reynolds}.pdf'))
-    plt.close()
-
-print(f"Results saved to {results_dir}")
 
 

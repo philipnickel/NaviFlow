@@ -702,3 +702,38 @@ class MultiGridSolver(PressureSolver):
         u = self._smooth(u, f, params, num_iterations=self.post_smoothing)
         
         return u
+    
+    def get_solver_info(self):
+        """
+        Get information about the solver's performance.
+        
+        Returns:
+        --------
+        dict
+            Dictionary containing solver performance metrics
+        """
+        # Get smoother info if available
+        smoother_info = {}
+        if hasattr(self.smoother, 'get_solver_info'):
+            smoother_info = self.smoother.get_solver_info()
+        
+        info = {
+            'name': 'MultiGridSolver',
+            'inner_iterations_history': [],  # We don't track this directly
+            'total_inner_iterations': 0,     # We don't track this directly
+            'convergence_rate': None         # We don't track this directly
+        }
+        
+        # Add solver-specific information
+        info['solver_specific'] = {
+            'cycle_type': self.cycle_type,
+            'pre_smoothing': self.pre_smoothing,
+            'post_smoothing': self.post_smoothing,
+            'smoother_iterations': self.smoother_iterations,
+            'smoother_omega': self.smoother_omega,
+            'smoother_type': smoother_info.get('name', 'Unknown'),
+            'tolerance': self.tolerance,
+            'max_iterations': self.max_iterations
+        }
+        
+        return info

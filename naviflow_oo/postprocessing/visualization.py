@@ -74,7 +74,7 @@ def _ensure_output_directory(filename, output_dir=None):
     return full_path
 
 
-def plot_velocity_field(u, v, x, y, title=None, filename=None, cmap='jet', 
+def plot_velocity_field(u, v, x, y, title=None, filename=None, cmap='coolwarm', 
                         show=True, figsize=(8, 6), colorbar=True, levels=50,
                         output_dir=None):
     """
@@ -174,7 +174,7 @@ def plot_velocity_field(u, v, x, y, title=None, filename=None, cmap='jet',
 
 
 def plot_streamlines(u, v, x, y, title=None, filename=None, density=1.0, color='black',
-                    show=True, figsize=(8, 6), background_field=None, cmap='jet',
+                    show=True, figsize=(8, 6), background_field=None, cmap='coolwarm',
                     output_dir=None):
     """
     Plot streamlines of the velocity field.
@@ -353,7 +353,7 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
     
     # 1. Plot velocity magnitude (left)
-    im1 = ax1.matshow(u_mag.T, cmap='jet', origin='lower', aspect='auto')
+    im1 = ax1.matshow(u_mag.T, cmap='coolwarm', origin='lower', aspect='auto')
     plt.colorbar(im1, ax=ax1, label='Velocity magnitude')
     
     # Set proper ticks for the axes
@@ -377,7 +377,7 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
     # Create proper meshgrid for contourf and streamplot
     X, Y = np.meshgrid(x, y)
     
-    im2 = ax2.contourf(X, Y, p.T, 50, cmap='jet')
+    im2 = ax2.contourf(X, Y, p.T, 50, cmap='coolwarm')
     plt.colorbar(im2, ax=ax2, label='Pressure')
     
     # Plot streamlines - use the same meshgrid for both

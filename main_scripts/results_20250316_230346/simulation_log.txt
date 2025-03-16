@@ -1,0 +1,18 @@
+2025-03-16 23:03:46 - Starting simulations at 2025-03-16 23:03:46
+2025-03-16 23:03:46 - Results directory: /Users/philipnickel/Documents/GitHub/NaviFlow/main_scripts/results_20250316_230346
+2025-03-16 23:03:46 - Global parameters:
+2025-03-16 23:03:46 -   Mesh size: 127x127
+2025-03-16 23:03:46 -   Max iterations: 100000
+2025-03-16 23:03:46 -   SIMPLE tolerance: 1e-08
+2025-03-16 23:03:46 -   Inner solver tolerance: 1e-07
+2025-03-16 23:03:46 -   Inner solver max iterations: 1000
+2025-03-16 23:03:46 -   Alpha_p: 0.3
+2025-03-16 23:03:46 -   Alpha_u: 0.7
+2025-03-16 23:03:46 - Reynolds numbers: [100, 400, 1000, 3200, 5000, 7500, 10000]
+2025-03-16 23:03:46 - 
+==================================================
+2025-03-16 23:03:46 - Running simulations for Reynolds number 100
+2025-03-16 23:03:46 - ==================================================
+2025-03-16 23:03:46 - 
+Running direct solver for Re=100
+2025-03-16 23:03:46 - Starting direct solver simulation for Re=100 on 127x127 mesh

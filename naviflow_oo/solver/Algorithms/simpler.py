@@ -91,10 +91,14 @@ class SimplerSolver(BaseAlgorithm):
         p_star = self.p.copy()
         p_prime = np.zeros((nx, ny))
         self.residual_history = []  # Reset residual history
+        self.momentum_residual_history = []  # Track momentum residuals
+        self.pressure_residual_history = []  # Track pressure residuals
         
         # Main iteration loop
         iteration = 1
         max_res = 1000
+        momentum_res = 1000
+        pressure_res = 1000
         
         self.profiler.start_section()  # Start timing other operations
         
@@ -102,6 +106,7 @@ class SimplerSolver(BaseAlgorithm):
             # Store old values for convergence check
             u_old = self.u.copy()
             v_old = self.v.copy()
+            p_old = self.p.copy()
             
             self.profiler.end_section('other_time')  # End timing other operations
             self.profiler.start_section()  # Start timing first momentum solve
@@ -119,15 +124,25 @@ class SimplerSolver(BaseAlgorithm):
                 boundary_conditions=self.bc_manager
             )
             
+            # Calculate first momentum residual
+            u_momentum_res1 = np.abs(u_star - self.u)
+            v_momentum_res1 = np.abs(v_star - self.v)
+            momentum_res1 = max(np.max(u_momentum_res1), np.max(v_momentum_res1))
+            
             self.profiler.end_section('momentum_solve_time')  # End timing first momentum solve
             self.profiler.start_section()  # Start timing pressure solve
             
             # Step 2: Solve pressure equation (not pressure correction) to get p
             # This is the key difference between SIMPLE and SIMPLER
             # In SIMPLER, we solve for p directly using u* and v*
+            p_old_before_update = self.p.copy()
             self.p = self.pressure_solver.solve(
                 self.mesh, u_star, v_star, d_u, d_v, np.zeros_like(p_star)
             )
+            
+            # Calculate pressure equation residual
+            pressure_eq_res = np.max(np.abs(self.p - p_old_before_update))
+            
             p_star = self.p.copy()
             
             self.profiler.end_section('pressure_solve_time')  # End timing pressure solve
@@ -147,6 +162,14 @@ class SimplerSolver(BaseAlgorithm):
                 boundary_conditions=self.bc_manager
             )
             
+            # Calculate second momentum residual
+            u_momentum_res2 = np.abs(u_star - self.u)
+            v_momentum_res2 = np.abs(v_star - self.v)
+            momentum_res2 = max(np.max(u_momentum_res2), np.max(v_momentum_res2))
+            
+            # Use the maximum of both momentum residuals
+            momentum_res = max(momentum_res1, momentum_res2)
+            
             self.profiler.end_section('momentum_solve_time')  # End timing second momentum solve
             self.profiler.start_section()  # Start timing pressure correction solve
             
@@ -154,6 +177,12 @@ class SimplerSolver(BaseAlgorithm):
             p_prime = self.pressure_solver.solve(
                 self.mesh, u_star, v_star, d_u, d_v, p_star
             )
+            
+            # Calculate pressure correction residual
+            pressure_corr_res = np.max(np.abs(p_prime))
+            
+            # Use the maximum of both pressure residuals
+            pressure_res = max(pressure_eq_res, pressure_corr_res)
             
             self.profiler.end_section('pressure_correction_time')  # End timing pressure correction solve
             self.profiler.start_section()  # Start timing velocity update
@@ -166,14 +195,29 @@ class SimplerSolver(BaseAlgorithm):
             self.profiler.end_section('velocity_update_time')  # End timing velocity update
             self.profiler.start_section()  # Start timing other operations
             
-            # Calculate residuals
+            # Calculate total residual
             u_res = np.abs(self.u - u_old)
             v_res = np.abs(self.v - v_old)
             max_res = max(np.max(u_res), np.max(v_res))
-            self.residual_history.append(max_res)
             
-            # Print progress
-            print(f"Iteration {iteration}, Residual: {max_res:.6e}")
+            # Store residual history
+            self.residual_history.append(max_res)
+            self.momentum_residual_history.append(momentum_res)
+            self.pressure_residual_history.append(pressure_res)
+            
+            # Add detailed residual data to profiler
+            self.profiler.add_residual_data(
+                iteration=iteration,
+                total_residual=max_res,
+                momentum_residual=momentum_res,
+                pressure_residual=pressure_res
+            )
+            
+            # Print progress with all residuals
+            print(f"Iteration {iteration}, "
+                  f"Total Residual: {max_res:.6e}, "
+                  f"Momentum Residual: {momentum_res:.6e}, "
+                  f"Pressure Residual: {pressure_res:.6e}")
             
             # Update memory usage every 10 iterations
             if iteration % 10 == 0:
@@ -195,6 +239,16 @@ class SimplerSolver(BaseAlgorithm):
             residual_history=self.residual_history,
             converged=converged
         )
+        
+        # Collect pressure solver performance metrics if available
+        if hasattr(self.pressure_solver, 'get_solver_info'):
+            solver_info = self.pressure_solver.get_solver_info()
+            self.profiler.set_pressure_solver_info(
+                solver_name=solver_info.get('name', self.pressure_solver.__class__.__name__),
+                inner_iterations=solver_info.get('inner_iterations_history'),
+                convergence_rate=solver_info.get('convergence_rate'),
+                solver_specific=solver_info.get('solver_specific')
+            )
         
         # End profiling
         self.profiler.end()

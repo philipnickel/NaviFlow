@@ -31,6 +31,9 @@ class JacobiSolver(PressureSolver):
         super().__init__(tolerance=tolerance, max_iterations=max_iterations)
         self.omega = omega
         self.residual_history = []
+        self.inner_iterations_history = []
+        self.total_inner_iterations = 0
+        self.convergence_rates = []
     
     def solve(self, mesh=None, u_star=None, v_star=None, d_u=None, d_v=None, p_star=None, 
               p=None, b=None, nx=None, ny=None, dx=None, dy=None, rho=1.0, num_iterations=None, 
@@ -88,7 +91,10 @@ class JacobiSolver(PressureSolver):
         # Reset residual history if tracking
         if track_residuals:
             self.residual_history = []
-            
+        
+        # Track inner iterations for this solve
+        inner_iterations = 0
+        
         # Check if p_star is 2D to determine the expected output shape
         p_star_is_2d = p_star is not None and p_star.ndim == 2
             
@@ -160,6 +166,9 @@ class JacobiSolver(PressureSolver):
             # Ensure reference pressure point remains zero
             p_new[0, 0] = 0.0
             
+            # Increment inner iteration counter
+            inner_iterations += 1
+            
             # Check convergence if tracking residuals
             if track_residuals:
                 # Calculate residual using true residual: r = b - Ap
@@ -179,6 +188,11 @@ class JacobiSolver(PressureSolver):
                     
                 self.residual_history.append(res_norm)
                 
+                # Calculate convergence rate if we have enough iterations
+                if k >= 2 and self.residual_history[-2] > 1e-15:
+                    conv_rate = self.residual_history[-1] / self.residual_history[-2]
+                    self.convergence_rates.append(conv_rate)
+                
                 # Also check relative change in solution
                 if k > 0:
                     change = np.linalg.norm(p_new - p_2d) / (np.linalg.norm(p_new) + 1e-15)
@@ -196,6 +210,10 @@ class JacobiSolver(PressureSolver):
             # Update solution
             p_2d = p_new
         
+        # Store inner iterations for this solve
+        self.inner_iterations_history.append(inner_iterations)
+        self.total_inner_iterations += inner_iterations
+        
         # Return in the same format as input or as expected by the caller
         if p_star_is_2d:
             return p_2d
@@ -203,3 +221,32 @@ class JacobiSolver(PressureSolver):
             return p_2d.flatten('F')
         else:
             return p_2d 
+    
+    def get_solver_info(self):
+        """
+        Get information about the solver's performance.
+        
+        Returns:
+        --------
+        dict
+            Dictionary containing solver performance metrics
+        """
+        info = {
+            'name': 'JacobiSolver',
+            'inner_iterations_history': self.inner_iterations_history,
+            'total_inner_iterations': self.total_inner_iterations
+        }
+        
+        # Calculate average convergence rate if available
+        if self.convergence_rates:
+            avg_conv_rate = sum(self.convergence_rates) / len(self.convergence_rates)
+            info['convergence_rate'] = avg_conv_rate
+        
+        # Add solver-specific information
+        info['solver_specific'] = {
+            'omega': self.omega,
+            'tolerance': self.tolerance,
+            'max_iterations': self.max_iterations
+        }
+        
+        return info 

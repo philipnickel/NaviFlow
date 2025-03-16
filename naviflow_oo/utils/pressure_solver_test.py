@@ -250,6 +250,17 @@ def test_solver_convergence(solver, problem_size=65, problem_type='poisson',
             converged=converged
         )
         
+        # Add detailed residual data for each iteration
+        if convergence_history:
+            for i, res in enumerate(convergence_history):
+                # For pressure solvers, the total residual is the pressure residual
+                solver.profiler.add_residual_data(
+                    iteration=i+1,
+                    total_residual=res,
+                    momentum_residual=0.0,  # Not applicable for pressure solvers
+                    pressure_residual=res
+                )
+        
         # Generate filename if not provided
         if filename is None:
             solver_name = solver.__class__.__name__

@@ -19,12 +19,12 @@ from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 129, 129          # Grid size
-reynolds = 100             # Reynolds number
-alpha_p = 0.4              # Pressure relaxation factor
-alpha_u = 0.9              # Velocity relaxation factor
-max_iterations = 20     # Maximum number of iterations
-tolerance = 1e-6           # Convergence tolerance
+nx, ny = 127, 127          # Grid size
+reynolds = 400             # Reynolds number
+alpha_p = 0.1              # Pressure relaxation factor
+alpha_u = 0.7              # Velocity relaxation factor
+max_iterations = 100     # Maximum number of iterations
+tolerance = 1e-4           # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -68,7 +68,7 @@ os.makedirs(results_dir, exist_ok=True)
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True)
 
 # End timing
 end_time = time.time()

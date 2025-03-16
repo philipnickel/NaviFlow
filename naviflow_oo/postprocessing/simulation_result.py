@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from .visualization import plot_velocity_field, plot_combined_results_matrix
 from .validation import BenchmarkData
+from .validation.cavity_flow import calculate_infinity_norm_error
 
 class SimulationResult:
     """
@@ -40,6 +41,7 @@ class SimulationResult:
         self.residuals = residuals or []
         self.divergence = divergence
         self.reynolds = reynolds
+        self.infinity_norm_error = None
     
     def plot_velocity_field(self, title=None, filename=None, show=True):
         """
@@ -210,3 +212,38 @@ class SimulationResult:
         # Consider validation successful if error is below threshold
         threshold = 0.1  # 10% error threshold
         return max_u_error < threshold and max_v_error < threshold 
+    
+    def calculate_infinity_norm_error(self):
+        """
+        Calculate the infinity norm error against Ghia data.
+        
+        Returns:
+        --------
+        float
+            Infinity norm error
+        """
+        if self.reynolds is None:
+            raise ValueError("Reynolds number must be set to calculate infinity norm error")
+        
+        self.infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.reynolds)
+        return self.infinity_norm_error 
+
+    def save_solution(self, filename):
+        """
+        Save the solution fields to a NumPy .npz file.
+        
+        Parameters:
+        -----------
+        filename : str
+            Path to save the solution file
+        """
+        np.savez(
+            filename,
+            u=self.u,
+            v=self.v,
+            p=self.p,
+            x=self.mesh.x,
+            y=self.mesh.y,
+            reynolds=self.reynolds
+        )
+        return filename 
