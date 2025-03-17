@@ -117,6 +117,10 @@ class SimplecSolver(BaseAlgorithm):
             momentum_res = max(np.max(u_momentum_res), np.max(v_momentum_res))
             
             # SIMPLEC modification: Vectorized adjustment of d_u and d_v coefficients
+            # Get diagonal coefficients from momentum equations
+            aP_u = 1.0 / (d_u * self.alpha_u)  # Original d_u = alpha_u/aP
+            aP_v = 1.0 / (d_v * self.alpha_u)  # Original d_v = alpha_u/aP
+            
             # Create masks for non-zero coefficients
             d_u_mask = d_u != 0
             d_v_mask = d_v != 0
@@ -125,9 +129,12 @@ class SimplecSolver(BaseAlgorithm):
             d_u_simplec = d_u.copy()
             d_v_simplec = d_v.copy()
             
-            # Vectorized modification of coefficients
-            d_u_simplec[d_u_mask] = d_u[d_u_mask] / (1 - self.alpha_u)
-            d_v_simplec[d_v_mask] = d_v[d_v_mask] / (1 - self.alpha_u)
+            # Vectorized modification of coefficients using SIMPLEC formula
+            # d_simplec = 1/(aP - sum(aN)) where aN are neighbor coefficients
+            # In the momentum solver, d = alpha_u/aP, so aP = alpha_u/d
+            # For SIMPLEC: d_simplec = d/(1 - (1-alpha_u))
+            d_u_simplec[d_u_mask] = d_u[d_u_mask] / (1 - (1 - self.alpha_u))
+            d_v_simplec[d_v_mask] = d_v[d_v_mask] / (1 - (1 - self.alpha_u))
             
             # Solve pressure correction equation with modified coefficients
             p_prime = self.pressure_solver.solve(
