@@ -1,30 +1,40 @@
 """
-Lid-driven cavity flow simulation using the object-oriented framework with matrix-free solver.
+Lid-driven cavity flow simulation using the object-oriented framework with Preconditioned CG solver.
+
+This script tests the SIMPLE algorithm with a Preconditioned Conjugate Gradient solver for the lid-driven cavity problem.
+The solver uses PyAMG as a preconditioner to accelerate convergence of the conjugate gradient method.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 import os
+import sys
+
+# Add the parent directory to the path if needed
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
-from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
-from naviflow_oo.solver.pressure_solver.matrix_free_cg import MatrixFreeCGSolver
+from naviflow_oo.solver.pressure_solver.preconditioned_cg_solver import PreconditionedCGSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
+
+# Create results directory
+results_dir = os.path.join(os.path.dirname(__file__), 'results')
+os.makedirs(results_dir, exist_ok=True)
 
 # Start timing
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 127, 127          # Grid size
-reynolds = 100             # Reynolds number
-alpha_p = 0.3              # Pressure relaxation factor
-alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 10000    # Maximum number of iterations (reduced for quick test)
-tolerance = 1e-5           # Convergence tolerance
+nx, ny = 127, 127           # Grid size (smaller for quick testing)
+reynolds = 100            # Reynolds number
+alpha_p = 0.1             # Pressure relaxation factor
+alpha_u = 0.7             # Velocity relaxation factor
+max_iterations = 10000     
+tolerance = 1e-5          # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -41,8 +51,15 @@ print(f"Reynolds number: {fluid.get_reynolds_number()}")
 print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
-# Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=1e-5, max_iterations=1000)
+# Use Preconditioned CG solver for pressure correction
+pressure_solver = PreconditionedCGSolver(
+    tolerance=1e-8,
+    max_iterations=1000,
+    smoother='gauss_seidel',
+    presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),
+    postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),
+    cycle_type='F'
+)
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
@@ -63,12 +80,8 @@ algorithm.set_boundary_condition('bottom', 'wall')
 algorithm.set_boundary_condition('left', 'wall')
 algorithm.set_boundary_condition('right', 'wall')
 
-# Create results directory
-results_dir = os.path.join(os.path.dirname(__file__), 'results')
-os.makedirs(results_dir, exist_ok=True)
-
 # 7. Solve the problem
-print("Starting simulation...")
+print("Starting simulation with SIMPLE algorithm and Preconditioned CG solver...")
 result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
 
 # End timing
@@ -85,8 +98,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'Matrix-Free Cavity Flow Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_matrix_free_results.pdf'),
+    title=f'Preconditioned CG Cavity Flow Results (Re={reynolds})',
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_preconditioned_cg_results.pdf'),
     show=False
 )
-
