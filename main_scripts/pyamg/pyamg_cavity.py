@@ -53,7 +53,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use PyAMG solver for pressure correction
 pressure_solver = PyAMGSolver(
-    tolerance=1e-6,
+    tolerance=1e-8,
     max_iterations=100,
     smoother='gauss_seidel',
     presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),

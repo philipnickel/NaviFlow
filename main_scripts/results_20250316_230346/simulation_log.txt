@@ -16,3 +16,24 @@
 2025-03-16 23:03:46 - 
 Running direct solver for Re=100
 2025-03-16 23:03:46 - Starting direct solver simulation for Re=100 on 127x127 mesh
+2025-03-16 23:53:48 - Simulation completed in 3002.12 seconds
+2025-03-16 23:53:48 - Total Iterations = 16292
+2025-03-16 23:53:48 - Maximum absolute divergence: 2.625677e-14
+2025-03-16 23:53:49 - Completed Re=100 with direct solver in 3002.12s (16292 iterations)
+2025-03-16 23:53:49 - 
+Running jacobi solver for Re=100
+2025-03-16 23:53:49 - Starting jacobi solver simulation for Re=100 on 127x127 mesh
+2025-03-17 03:54:09 - Simulation completed in 14419.63 seconds
+2025-03-17 03:54:09 - Total Iterations = 16293
+2025-03-17 03:54:09 - Maximum absolute divergence: 9.803966e-04
+2025-03-17 03:54:10 - Completed Re=100 with jacobi solver in 14419.63s (16293 iterations)
+2025-03-17 03:54:10 - 
+Running matrix_free_cg solver for Re=100
+2025-03-17 03:54:10 - Starting matrix_free_cg solver simulation for Re=100 on 127x127 mesh
+2025-03-17 04:56:06 - Simulation completed in 3715.84 seconds
+2025-03-17 04:56:06 - Total Iterations = 16860
+2025-03-17 04:56:06 - Maximum absolute divergence: 2.060077e-04
+2025-03-17 04:56:06 - Completed Re=100 with matrix_free_cg solver in 3715.84s (16860 iterations)
+2025-03-17 04:56:06 - 
+Running multigrid_vcycle solver for Re=100
+2025-03-17 04:56:06 - Starting multigrid_vcycle solver simulation for Re=100 on 127x127 mesh
