@@ -33,7 +33,7 @@ nx, ny = 127, 127           # Grid size (smaller for quick testing)
 reynolds = 100            # Reynolds number
 alpha_p = 0.1             # Pressure relaxation factor
 alpha_u = 0.7             # Velocity relaxation factor
-max_iterations = 10000     
+max_iterations = 100     
 tolerance = 1e-5          # Convergence tolerance
 
 # 2. Create mesh
