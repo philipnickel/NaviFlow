@@ -134,4 +134,77 @@ class UpwindDiscretization(ConvectionDiscretization):
         return d_face + np.maximum(0, -u_face)
     
     def get_name(self):
-        return "First-order Upwind" 
+        return "First-order Upwind"
+
+
+class QuickDiscretization(ConvectionDiscretization):
+    """QUICK (Quadratic Upstream Interpolation for Convective Kinematics) discretization scheme."""
+    
+    def calculate_flux_coefficients(self, u_face, d_face, cell_peclet):
+        """
+        Calculate flux coefficients using the QUICK scheme.
+        
+        Note: This is a simplified implementation that adapts the QUICK scheme
+        to the flux coefficient framework. A full QUICK implementation would 
+        require additional information about neighboring cells.
+        
+        For this simplified implementation, we use a blend of central and upwind
+        differencing with a weight that depends on the Peclet number.
+        """
+        # Upwind component
+        upwind_component = max(0, -u_face)
+        
+        # Central differencing component approximation
+        # For small Peclet numbers, we want more central differencing
+        central_weight = max(0, 1.0 - 0.5 * abs(cell_peclet))
+        central_component = 0.5 * d_face * central_weight
+        
+        # QUICK is typically more accurate than upwind at moderate Peclet numbers
+        # Blend upwind and central differencing based on Peclet number
+        if abs(cell_peclet) < 10:
+            # For moderate Peclet numbers, use a blend
+            return d_face + upwind_component + central_component
+        else:
+            # For high Peclet numbers, revert to upwind
+            return d_face + upwind_component
+    
+    def calculate_flux_coefficients_vectorized(self, u_face, d_face, cell_peclet):
+        """
+        Vectorized version of the QUICK scheme calculation.
+        
+        Parameters:
+        -----------
+        u_face : ndarray
+            Array of velocities at the faces
+        d_face : float or ndarray
+            Diffusion coefficient at the faces
+        cell_peclet : ndarray
+            Array of cell Peclet numbers
+            
+        Returns:
+        --------
+        ndarray
+            Array of flux coefficients
+        """
+        # Upwind component
+        upwind_component = np.maximum(0, -u_face)
+        
+        # Central differencing component approximation
+        abs_peclet = np.abs(cell_peclet)
+        central_weight = np.maximum(0, 1.0 - 0.5 * abs_peclet)
+        central_component = 0.5 * d_face * central_weight
+        
+        # QUICK blending based on Peclet number
+        # Create a mask for where Peclet number is less than 10
+        moderate_peclet_mask = abs_peclet < 10
+        
+        # Initialize with the upwind scheme
+        result = np.full_like(u_face, d_face) + upwind_component
+        
+        # Apply the QUICK blend only where Peclet number is moderate
+        result[moderate_peclet_mask] += central_component[moderate_peclet_mask]
+        
+        return result
+    
+    def get_name(self):
+        return "QUICK" 
