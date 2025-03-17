@@ -57,7 +57,7 @@ class BaseAlgorithm(ABC):
         self.boundary_conditions = self.bc_manager.to_dict()
         
         # Initialize profiler
-        self.profiler = Profiler(self.__class__.__name__, mesh, fluid)
+        self.profiler = Profiler(self.__class__.__name__, mesh, fluid, algorithm=self)
         
         # Initialize fields
         self.initialize_fields()

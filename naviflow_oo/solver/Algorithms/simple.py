@@ -93,7 +93,6 @@ class SimpleSolver(BaseAlgorithm):
         momentum_res = 1000
         pressure_res = 1000
         
-        self.profiler.start_section()  # Start timing other operations
         
         while (iteration <= max_iterations) and (max_res > tolerance):
             # Store old values for convergence check
@@ -101,8 +100,6 @@ class SimpleSolver(BaseAlgorithm):
             v_old = self.v.copy()
             p_old = self.p.copy()
             
-            self.profiler.end_section('other_time')  # End timing other operations
-            self.profiler.start_section()  # Start timing momentum solve
             
             # Solve momentum equations with relaxation factor
             u_star, d_u = self.momentum_solver.solve_u_momentum(
@@ -122,22 +119,11 @@ class SimpleSolver(BaseAlgorithm):
             v_momentum_res = np.abs(v_star - self.v)
             momentum_res = max(np.max(u_momentum_res), np.max(v_momentum_res))
             
-            self.profiler.end_section('momentum_solve_time')  # End timing momentum solve
-            self.profiler.start_section()  # Start timing pressure solve
             
             # Solve pressure correction equation
-            # Handle both old and new interfaces
-            try:
-                # Try new interface that returns both p_prime and inner_iterations
-                p_prime, inner_iterations = self.pressure_solver.solve(
-                    self.mesh, u_star, v_star, d_u, d_v, p_star
-                )
-            except ValueError:
-                # Fall back to old interface that only returns p_prime
-                p_prime = self.pressure_solver.solve(
-                    self.mesh, u_star, v_star, d_u, d_v, p_star
-                )
-                inner_iterations = None
+            p_prime = self.pressure_solver.solve(
+                self.mesh, u_star, v_star, d_u, d_v, p_star
+            )
             
             # Update pressure with relaxation
             self.p = p_star + self.alpha_p * p_prime
@@ -147,16 +133,12 @@ class SimpleSolver(BaseAlgorithm):
             
             p_star = self.p.copy()  # Update p_star for next iteration
             
-            self.profiler.end_section('pressure_solve_time')  # End timing pressure solve
-            self.profiler.start_section()  # Start timing velocity update
             
             # Update velocity
             self.u, self.v = self.velocity_updater.update_velocity(
                 self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
             )
             
-            self.profiler.end_section('velocity_update_time')  # End timing velocity update
-            self.profiler.start_section()  # Start timing other operations
             
             # Calculate total residual
             u_res = np.abs(self.u - u_old)
@@ -193,13 +175,9 @@ class SimpleSolver(BaseAlgorithm):
                   f"Momentum Residual: {momentum_res:.6e}, "
                   f"Pressure Residual: {pressure_res:.6e}")
             
-            # Update memory usage every 10 iterations
-            if iteration % 10 == 0:
-                self.profiler.update_memory_usage()
                 
             iteration += 1
             
-        self.profiler.end_section('other_time')  # End timing other operations
         
         # Update profiling data
         self.profiler.set_iterations(iteration - 1)

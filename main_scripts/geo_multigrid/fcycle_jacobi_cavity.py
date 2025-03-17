@@ -24,11 +24,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 255, 255          # Smaller grid size for testing
-reynolds = 5000           # Lower Reynolds number for faster convergence
+nx, ny = 127, 127          # Smaller grid size for testing
+reynolds = 100           # Lower Reynolds number for faster convergence
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 100000      # Reduced number of iterations for testing
+max_iterations = 100      # Reduced number of iterations for testing
 tolerance = 1e-3         # Convergence tolerance
 
 # 2. Create mesh
@@ -47,7 +47,7 @@ jacobi_smoother = JacobiSolver()
 
 # Use F-cycle multigrid solver with Jacobi smoother for pressure correction
 pressure_solver = MultiGridSolver(
-    tolerance=1e-5,  # Tighter tolerance for pressure solver
+    tolerance=1e-3,  # Tighter tolerance for pressure solver
     max_iterations=100,  # More iterations per SIMPLE iteration
     pre_smoothing=5,
     post_smoothing=5,
@@ -78,7 +78,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation with SIMPLE algorithm and F-cycle multigrid solver...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
 
 # End timing
 end_time = time.time()

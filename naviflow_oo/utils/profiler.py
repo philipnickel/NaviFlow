@@ -21,7 +21,7 @@ class Profiler:
     and other performance metrics for CFD algorithms and solvers.
     """
     
-    def __init__(self, algorithm_name, mesh, fluid):
+    def __init__(self, algorithm_name, mesh, fluid, algorithm=None):
         """
         Initialize the profiler.
         
@@ -33,10 +33,13 @@ class Profiler:
             The computational mesh
         fluid : FluidProperties
             Fluid properties
+        algorithm : BaseAlgorithm, optional
+            The algorithm instance being profiled
         """
         self.algorithm_name = algorithm_name
         self.mesh = mesh
         self.fluid = fluid
+        self.algorithm = algorithm
         self.initialize()
     
     def initialize(self):
@@ -47,11 +50,6 @@ class Profiler:
         self.profiling_data = {
             'total_time': 0.0,
             'cpu_time': 0.0,
-            'momentum_solve_time': 0.0,
-            'pressure_solve_time': 0.0,
-            'velocity_update_time': 0.0,
-            'boundary_condition_time': 0.0,
-            'other_time': 0.0,
             'iterations': 0,
             'memory_usage': [],
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -74,8 +72,6 @@ class Profiler:
                 'total_residuals': [],
                 'momentum_residuals': [],
                 'pressure_residuals': [],
-                'rss_values': [],
-                'vms_values': [],
                 'infinity_norm_errors': []  # Added for tracking infinity norm errors
             },
             'pressure_solver_info': {
@@ -90,12 +86,7 @@ class Profiler:
             }
         }
         
-        # For tracking time spent in each part of the algorithm
-        self._start_time = None
-        self._start_cpu_time = None
-        self._section_start_time = None
-        self._section_start_cpu_time = None
-    
+     
     def _get_detailed_processor_info(self):
         """Get detailed processor information based on the platform."""
         basic_info = platform.processor()
@@ -142,14 +133,12 @@ class Profiler:
         """Start profiling."""
         self._start_time = time.time()
         self._start_cpu_time = time.process_time()
-        self.update_memory_usage()
     
     def end(self):
         """End profiling and calculate total time."""
         if self._start_time is not None:
             self.profiling_data['total_time'] = time.time() - self._start_time
             self.profiling_data['cpu_time'] = time.process_time() - self._start_cpu_time
-            self.update_memory_usage()
     
     def start_section(self):
         """Start timing a section."""
@@ -185,17 +174,8 @@ class Profiler:
                 
             self._section_start_time = None
             self._section_start_cpu_time = None
-    
-    def update_memory_usage(self):
-        """Update memory usage statistics."""
-        process = psutil.Process(os.getpid())
-        memory_info = process.memory_info()
-        self.profiling_data['memory_usage'].append({
-            'timestamp': time.time() - self._start_time if self._start_time else 0,
-            'rss': memory_info.rss / (1024 ** 2),  # MB
-            'vms': memory_info.vms / (1024 ** 2)   # MB
-        })
-    
+
+
     def set_iterations(self, iterations):
         """Set the number of iterations performed."""
         self.profiling_data['iterations'] = iterations
@@ -248,12 +228,7 @@ class Profiler:
             wall_time = 0.0
             cpu_time = 0.0
             
-        # Get current memory usage
-        process = psutil.Process(os.getpid())
-        memory_info = process.memory_info()
-        rss = memory_info.rss / (1024 ** 2)  # MB
-        vms = memory_info.vms / (1024 ** 2)  # MB
-        
+       
         # Store the data
         self.profiling_data['detailed_residuals']['iterations'].append(iteration)
         self.profiling_data['detailed_residuals']['wall_times'].append(wall_time)
@@ -261,8 +236,6 @@ class Profiler:
         self.profiling_data['detailed_residuals']['total_residuals'].append(total_residual)
         self.profiling_data['detailed_residuals']['momentum_residuals'].append(momentum_residual)
         self.profiling_data['detailed_residuals']['pressure_residuals'].append(pressure_residual)
-        self.profiling_data['detailed_residuals']['rss_values'].append(rss)
-        self.profiling_data['detailed_residuals']['vms_values'].append(vms)
         
         # Always append infinity norm error (None if not provided)
         # This ensures alignment with iteration count
@@ -348,22 +321,6 @@ class Profiler:
         else:
             avg_time_per_iteration = 0
             
-        # Calculate percentages
-        total_time = self.profiling_data['total_time']
-        if total_time > 0:
-            momentum_percent = (self.profiling_data['momentum_solve_time'] / total_time) * 100
-            pressure_percent = (self.profiling_data['pressure_solve_time'] / total_time) * 100
-            velocity_percent = (self.profiling_data['velocity_update_time'] / total_time) * 100
-            boundary_percent = (self.profiling_data['boundary_condition_time'] / total_time) * 100
-            other_percent = (self.profiling_data['other_time'] / total_time) * 100
-        else:
-            momentum_percent = pressure_percent = velocity_percent = boundary_percent = other_percent = 0
-        
-        # Get peak memory usage
-        if self.profiling_data['memory_usage']:
-            peak_memory = max(item['rss'] for item in self.profiling_data['memory_usage'])
-        else:
-            peak_memory = 0
         
         # Write the profiling data to the file
         with open(filename, 'w') as f:
@@ -376,12 +333,46 @@ class Profiler:
             f.write(f"Mesh Size: {self.mesh.get_dimensions()[0]}x{self.mesh.get_dimensions()[1]}\n")
             f.write(f"Reynolds Number: {self.fluid.get_reynolds_number()}\n\n")
             
+            # Add algorithm and solver parameters section
+            f.write("ALGORITHM AND SOLVER PARAMETERS\n")
+            f.write("-" * 80 + "\n")
+            
+            # Add algorithm-specific parameters
+            if hasattr(self, 'algorithm') and self.algorithm is not None:
+                if hasattr(self.algorithm, 'alpha_p'):
+                    f.write(f"Pressure Relaxation Factor (alpha_p): {self.algorithm.alpha_p:.3f}\n")
+                if hasattr(self.algorithm, 'alpha_u'):
+                    f.write(f"Velocity Relaxation Factor (alpha_u): {self.algorithm.alpha_u:.3f}\n")
+            
+            # Add pressure solver parameters
+            if hasattr(self, 'algorithm') and self.algorithm is not None and self.algorithm.pressure_solver is not None:
+                pressure_solver = self.algorithm.pressure_solver
+                f.write(f"Pressure Solver: {pressure_solver.__class__.__name__}\n")
+                
+                # Add solver-specific parameters
+                if hasattr(pressure_solver, 'tolerance'):
+                    f.write(f"Pressure Solver Tolerance: {pressure_solver.tolerance:.6e}\n")
+                if hasattr(pressure_solver, 'max_iterations'):
+                    f.write(f"Pressure Solver Max Iterations: {pressure_solver.max_iterations}\n")
+                if hasattr(pressure_solver, 'matrix_free'):
+                    f.write(f"Matrix-Free Mode: {pressure_solver.matrix_free}\n")
+                if hasattr(pressure_solver, 'smoother'):
+                    f.write(f"Smoother Type: {pressure_solver.smoother}\n")
+                if hasattr(pressure_solver, 'cycle_type'):
+                    f.write(f"Multigrid Cycle Type: {pressure_solver.cycle_type}\n")
+            
+            # Add momentum solver parameters
+            if hasattr(self, 'algorithm') and self.algorithm is not None and self.algorithm.momentum_solver is not None:
+                momentum_solver = self.algorithm.momentum_solver
+                f.write(f"Momentum Solver: {momentum_solver.__class__.__name__}\n")
+            
+            f.write("\n")
+            
             f.write("SYSTEM INFORMATION\n")
             f.write("-" * 80 + "\n")
             f.write(f"Platform: {self.profiling_data['system_info']['platform']}\n")
             f.write(f"Processor: {self.profiling_data['system_info']['processor']}\n")
             f.write(f"Python Version: {self.profiling_data['system_info']['python_version']}\n")
-            f.write(f"Total System Memory: {self.profiling_data['system_info']['memory_total']:.2f} GB\n\n")
             
             f.write("CONVERGENCE INFORMATION\n")
             f.write("-" * 80 + "\n")
@@ -403,42 +394,8 @@ class Profiler:
             f.write(f"Total CPU Time: {self.profiling_data['cpu_time']:.4f} seconds\n")
             f.write(f"Total Iterations: {self.profiling_data['iterations']}\n")
             f.write(f"Average Wall Time per Iteration: {avg_time_per_iteration:.4f} seconds\n")
-            f.write(f"Peak Memory Usage: {peak_memory:.2f} MB\n\n")
             
-            f.write("TIME BREAKDOWN (WALL TIME)\n")
-            f.write("-" * 80 + "\n")
-            f.write(f"Momentum Equations: {self.profiling_data['momentum_solve_time']:.4f} seconds ({momentum_percent:.2f}%)\n")
-            f.write(f"Pressure Equation: {self.profiling_data['pressure_solve_time']:.4f} seconds ({pressure_percent:.2f}%)\n")
-            f.write(f"Velocity Update: {self.profiling_data['velocity_update_time']:.4f} seconds ({velocity_percent:.2f}%)\n")
-            f.write(f"Boundary Conditions: {self.profiling_data['boundary_condition_time']:.4f} seconds ({boundary_percent:.2f}%)\n")
-            f.write(f"Other Operations: {self.profiling_data['other_time']:.4f} seconds ({other_percent:.2f}%)\n\n")
-            
-            # Add CPU time breakdown if available
-            if 'momentum_solve_time_cpu' in self.profiling_data:
-                f.write("TIME BREAKDOWN (CPU TIME)\n")
-                f.write("-" * 80 + "\n")
-                
-                # Calculate CPU time percentages
-                cpu_total = self.profiling_data['cpu_time']
-                if cpu_total > 0:
-                    momentum_cpu = self.profiling_data.get('momentum_solve_time_cpu', 0.0)
-                    pressure_cpu = self.profiling_data.get('pressure_solve_time_cpu', 0.0)
-                    velocity_cpu = self.profiling_data.get('velocity_update_time_cpu', 0.0)
-                    boundary_cpu = self.profiling_data.get('boundary_condition_time_cpu', 0.0)
-                    other_cpu = self.profiling_data.get('other_time_cpu', 0.0)
-                    
-                    momentum_cpu_percent = (momentum_cpu / cpu_total) * 100
-                    pressure_cpu_percent = (pressure_cpu / cpu_total) * 100
-                    velocity_cpu_percent = (velocity_cpu / cpu_total) * 100
-                    boundary_cpu_percent = (boundary_cpu / cpu_total) * 100
-                    other_cpu_percent = (other_cpu / cpu_total) * 100
-                    
-                    f.write(f"Momentum Equations: {momentum_cpu:.4f} seconds ({momentum_cpu_percent:.2f}%)\n")
-                    f.write(f"Pressure Equation: {pressure_cpu:.4f} seconds ({pressure_cpu_percent:.2f}%)\n")
-                    f.write(f"Velocity Update: {velocity_cpu:.4f} seconds ({velocity_cpu_percent:.2f}%)\n")
-                    f.write(f"Boundary Conditions: {boundary_cpu:.4f} seconds ({boundary_cpu_percent:.2f}%)\n")
-                    f.write(f"Other Operations: {other_cpu:.4f} seconds ({other_cpu_percent:.2f}%)\n\n")
-            
+        
             # Add pressure solver information if available
             if 'pressure_solver_info' in self.profiling_data:
                 pressure_info = self.profiling_data['pressure_solver_info']
@@ -476,9 +433,9 @@ class Profiler:
                 has_inf_norm = 'infinity_norm_errors' in detailed and len(detailed['infinity_norm_errors']) > 0
                 
                 if has_inf_norm:
-                    f.write(f"{'Iter':>5} {'Wall Time':>12} {'CPU Time':>12} {'Total Res':>12} {'Momentum Res':>12} {'Pressure Res':>12} {'Inf Norm Err':>12} {'RSS (MB)':>12} {'VMS (MB)':>12}\n")
+                    f.write(f"{'Iter':>5} {'Wall Time':>12} {'CPU Time':>12} {'Total Res':>12} {'Momentum Res':>12} {'Pressure Res':>12} {'Inf Norm Err':>12}\n")
                 else:
-                    f.write(f"{'Iter':>5} {'Wall Time':>12} {'CPU Time':>12} {'Total Res':>12} {'Momentum Res':>12} {'Pressure Res':>12} {'RSS (MB)':>12} {'VMS (MB)':>12}\n")
+                    f.write(f"{'Iter':>5} {'Wall Time':>12} {'CPU Time':>12} {'Total Res':>12} {'Momentum Res':>12} {'Pressure Res':>12}\n")
                 
                 for i in range(len(detailed['iterations'])):
                     # Prepare the common part of the line
@@ -496,48 +453,10 @@ class Profiler:
                             line += f"{inf_norm_value:12.6e} "
                         else:
                             line += f"{'N/A':>12} "
-                    
-                    # Add memory usage
-                    line += f"{detailed['rss_values'][i]:12.2f} " \
-                            f"{detailed['vms_values'][i]:12.2f}"
-                    
+                   
                     f.write(line + "\n")
                 f.write("\n")
             
-            # Add simple residual history if available but no detailed history
-            elif residual_history and len(residual_history) > 0:
-                f.write("RESIDUAL HISTORY\n")
-                f.write("-" * 80 + "\n")
-                f.write("Iteration    Residual\n")
         
-        # Also save detailed residual history as CSV for data processing
-        if detailed['iterations'] and len(detailed['iterations']) > 0:
-            # Create CSV filename by replacing .txt with .csv
-            csv_filename = os.path.splitext(filename)[0] + '_residuals.csv'
-            
-            with open(csv_filename, 'w') as f:
-                # Write header
-                header = "Iteration,Wall_Time,CPU_Time,Total_Residual,Momentum_Residual,Pressure_Residual"
-                if has_inf_norm:
-                    header += ",Infinity_Norm_Error"
-                header += ",RSS_MB,VMS_MB"
-                f.write(header + "\n")
-                
-                # Write data rows
-                for i in range(len(detailed['iterations'])):
-                    row = f"{detailed['iterations'][i]},{detailed['wall_times'][i]},{detailed['cpu_times'][i]}"
-                    row += f",{detailed['total_residuals'][i]},{detailed['momentum_residuals'][i]},{detailed['pressure_residuals'][i]}"
-                    
-                    if has_inf_norm:
-                        inf_norm_value = detailed['infinity_norm_errors'][i] if i < len(detailed['infinity_norm_errors']) else None
-                        if inf_norm_value is not None:
-                            row += f",{inf_norm_value}"
-                        else:
-                            row += ","  # Empty value for CSV
-                    
-                    row += f",{detailed['rss_values'][i]},{detailed['vms_values'][i]}"
-                    f.write(row + "\n")
-            
-            print(f"Detailed residual history also saved as CSV: {csv_filename}")
         
         return os.path.abspath(filename) 
