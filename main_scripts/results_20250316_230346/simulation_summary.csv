@@ -1,4 +1,0 @@
-Solver,Reynolds,MeshSize,Iterations,Time(s),Converged,MaxDivergence
-direct,100,127,16292,3002.12,True,2.625677e-14
-jacobi,100,127,16293,14419.63,True,9.803966e-04
-matrix_free_cg,100,127,16860,3715.84,True,2.060077e-04

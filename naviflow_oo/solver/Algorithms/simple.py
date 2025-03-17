@@ -234,7 +234,7 @@ class SimpleSolver(BaseAlgorithm):
             os.makedirs(profile_dir, exist_ok=True)
             filename = os.path.join(
                 profile_dir, 
-                f"SIMPLE_Re{int(reynolds_value)}_mesh{nx}x{ny}_profile.txt"
+                f"SIMPLE_Re{int(reynolds_value)}_mesh{nx}x{ny}_profile.h5"
             )
             profile_path = self.save_profiling_data(filename)
             print(f"Profiling data saved to: {profile_path}")

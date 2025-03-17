@@ -28,7 +28,7 @@ nx, ny = 127, 127          # Smaller grid size for testing
 reynolds = 100           # Lower Reynolds number for faster convergence
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 100      # Reduced number of iterations for testing
+max_iterations = 10      # Reduced number of iterations for testing
 tolerance = 1e-3         # Convergence tolerance
 
 # 2. Create mesh
@@ -92,4 +92,3 @@ print(f"Total Iterations = {result.iterations}")
 max_div = result.get_max_divergence()
 print(f"Maximum absolute divergence: {max_div:.6e}")
 
-print(f"Profiling data saved to {os.path.join(results_dir, f'SIMPLE_Re{reynolds}_mesh{nx}x{ny}_profile.txt')}")

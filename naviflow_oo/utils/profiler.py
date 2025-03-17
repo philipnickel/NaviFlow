@@ -12,6 +12,7 @@ import platform
 import subprocess
 from datetime import datetime
 import numpy as np
+import pandas as pd
 
 class Profiler:
     """
@@ -288,7 +289,7 @@ class Profiler:
     
     def save(self, filename=None, profile_dir='results/profiles'):
         """
-        Save profiling data to a file.
+        Save profiling data to an HDF5 file with a more natural structure.
         
         Parameters:
         -----------
@@ -309,154 +310,145 @@ class Profiler:
             reynolds = int(self.fluid.get_reynolds_number())
             filename = os.path.join(
                 profile_dir, 
-                f"{self.algorithm_name}_Re{reynolds}_mesh{nx}x{ny}_profile.txt"
+                f"{self.algorithm_name}_Re{reynolds}_mesh{nx}x{ny}_profile.h5"
             )
         
         # Ensure the directory exists
         os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
         
-        # Calculate derived metrics
-        if self.profiling_data['iterations'] > 0:
-            avg_time_per_iteration = self.profiling_data['total_time'] / self.profiling_data['iterations']
-        else:
-            avg_time_per_iteration = 0
-            
+        # Create a nested dictionary for metadata with logical grouping
+        metadata = {
+            'simulation': {
+                'algorithm': self.algorithm_name,
+                'timestamp': self.profiling_data['timestamp'],
+                'mesh_size': {
+                    'x': self.mesh.get_dimensions()[0],
+                    'y': self.mesh.get_dimensions()[1]
+                },
+                'reynolds_number': self.fluid.get_reynolds_number()
+            },
+            'performance': {
+                'total_time': self.profiling_data['total_time'],
+                'cpu_time': self.profiling_data['cpu_time'],
+                'iterations': self.profiling_data['iterations'],
+                'avg_time_per_iteration': self.profiling_data['total_time'] / self.profiling_data['iterations'] if self.profiling_data['iterations'] > 0 else 0
+            },
+            'convergence': {
+                'tolerance': self.profiling_data['convergence_info']['tolerance'],
+                'final_residual': self.profiling_data['convergence_info']['final_residual'],
+                'converged': self.profiling_data['convergence_info']['converged']
+            },
+            'system': {
+                'platform': self.profiling_data['system_info']['platform'],
+                'processor': self.profiling_data['system_info']['processor'],
+                'python_version': self.profiling_data['system_info']['python_version']
+            }
+        }
         
-        # Write the profiling data to the file
-        with open(filename, 'w') as f:
-            f.write("=" * 80 + "\n")
-            f.write(f"NAVIFLOW PROFILING REPORT\n")
-            f.write("=" * 80 + "\n\n")
+        # Add algorithm parameters if available
+        if self.algorithm:
+            algorithm_params = {}
             
-            f.write(f"Algorithm: {self.algorithm_name}\n")
-            f.write(f"Timestamp: {self.profiling_data['timestamp']}\n")
-            f.write(f"Mesh Size: {self.mesh.get_dimensions()[0]}x{self.mesh.get_dimensions()[1]}\n")
-            f.write(f"Reynolds Number: {self.fluid.get_reynolds_number()}\n\n")
+            # Get relaxation factors
+            if hasattr(self.algorithm, 'alpha_p'):
+                algorithm_params['alpha_p'] = self.algorithm.alpha_p
+            if hasattr(self.algorithm, 'alpha_u'):
+                algorithm_params['alpha_u'] = self.algorithm.alpha_u
             
-            # Add algorithm and solver parameters section
-            f.write("ALGORITHM AND SOLVER PARAMETERS\n")
-            f.write("-" * 80 + "\n")
+            if algorithm_params:
+                metadata['algorithm'] = algorithm_params
             
-            # Add algorithm-specific parameters
-            if hasattr(self, 'algorithm') and self.algorithm is not None:
-                if hasattr(self.algorithm, 'alpha_p'):
-                    f.write(f"Pressure Relaxation Factor (alpha_p): {self.algorithm.alpha_p:.3f}\n")
-                if hasattr(self.algorithm, 'alpha_u'):
-                    f.write(f"Velocity Relaxation Factor (alpha_u): {self.algorithm.alpha_u:.3f}\n")
-            
-            # Add pressure solver parameters
-            if hasattr(self, 'algorithm') and self.algorithm is not None and self.algorithm.pressure_solver is not None:
+            # Get pressure solver info
+            if hasattr(self.algorithm, 'pressure_solver') and self.algorithm.pressure_solver:
                 pressure_solver = self.algorithm.pressure_solver
-                f.write(f"Pressure Solver: {pressure_solver.__class__.__name__}\n")
+                pressure_solver_params = {
+                    'type': pressure_solver.__class__.__name__
+                }
                 
-                # Add solver-specific parameters
+                # Get solver parameters
                 if hasattr(pressure_solver, 'tolerance'):
-                    f.write(f"Pressure Solver Tolerance: {pressure_solver.tolerance:.6e}\n")
+                    pressure_solver_params['tolerance'] = pressure_solver.tolerance
                 if hasattr(pressure_solver, 'max_iterations'):
-                    f.write(f"Pressure Solver Max Iterations: {pressure_solver.max_iterations}\n")
+                    pressure_solver_params['max_iterations'] = pressure_solver.max_iterations
                 if hasattr(pressure_solver, 'matrix_free'):
-                    f.write(f"Matrix-Free Mode: {pressure_solver.matrix_free}\n")
-                if hasattr(pressure_solver, 'smoother'):
-                    f.write(f"Smoother Type: {pressure_solver.smoother}\n")
+                    pressure_solver_params['matrix_free'] = pressure_solver.matrix_free
+                    
+                # Get multigrid-specific parameters
+                multigrid_params = {}
                 if hasattr(pressure_solver, 'cycle_type'):
-                    f.write(f"Multigrid Cycle Type: {pressure_solver.cycle_type}\n")
+                    multigrid_params['cycle_type'] = pressure_solver.cycle_type
+                if hasattr(pressure_solver, 'pre_smoothing'):
+                    multigrid_params['pre_smoothing'] = pressure_solver.pre_smoothing
+                if hasattr(pressure_solver, 'post_smoothing'):
+                    multigrid_params['post_smoothing'] = pressure_solver.post_smoothing
+                
+                # Get smoother info
+                smoother_params = {}
+                if hasattr(pressure_solver, 'smoother'):
+                    if hasattr(pressure_solver.smoother, '__class__'):
+                        smoother_params['type'] = pressure_solver.smoother.__class__.__name__
+                    else:
+                        smoother_params['type'] = str(pressure_solver.smoother)
+                if hasattr(pressure_solver, 'smoother_iterations'):
+                    smoother_params['iterations'] = pressure_solver.smoother_iterations
+                if hasattr(pressure_solver, 'smoother_omega'):
+                    smoother_params['omega'] = pressure_solver.smoother_omega
+                    
+                if smoother_params:
+                    pressure_solver_params['smoother'] = smoother_params
+                if multigrid_params:
+                    pressure_solver_params['multigrid'] = multigrid_params
+                    
+                metadata['pressure_solver'] = pressure_solver_params
             
-            # Add momentum solver parameters
-            if hasattr(self, 'algorithm') and self.algorithm is not None and self.algorithm.momentum_solver is not None:
+            # Get momentum solver info
+            if hasattr(self.algorithm, 'momentum_solver') and self.algorithm.momentum_solver:
                 momentum_solver = self.algorithm.momentum_solver
-                f.write(f"Momentum Solver: {momentum_solver.__class__.__name__}\n")
+                metadata['momentum_solver'] = {
+                    'type': momentum_solver.__class__.__name__
+                }
+        
+        # Create residual history DataFrame
+        detailed = self.profiling_data['detailed_residuals']
+        if detailed['iterations'] and len(detailed['iterations']) > 0:
+            residual_data = {
+                'iteration': detailed['iterations'],
+                'wall_time': detailed['wall_times'],
+                'cpu_time': detailed['cpu_times'],
+                'total_residual': detailed['total_residuals'],
+                'momentum_residual': detailed['momentum_residuals'],
+                'pressure_residual': detailed['pressure_residuals']
+            }
+            if 'infinity_norm_errors' in detailed and len(detailed['infinity_norm_errors']) > 0:
+                residual_data['infinity_norm_error'] = detailed['infinity_norm_errors']
+            residual_df = pd.DataFrame(residual_data)
+        else:
+            residual_df = pd.DataFrame()
+
+        # Save to HDF5 file
+        import h5py
+        
+        with h5py.File(filename, 'w') as f:
+            # Store metadata as attributes in groups
+            for group_name, group_data in metadata.items():
+                group = f.create_group(group_name)
+                self._store_dict_to_h5_group(group, group_data)
             
-            f.write("\n")
-            
-            f.write("SYSTEM INFORMATION\n")
-            f.write("-" * 80 + "\n")
-            f.write(f"Platform: {self.profiling_data['system_info']['platform']}\n")
-            f.write(f"Processor: {self.profiling_data['system_info']['processor']}\n")
-            f.write(f"Python Version: {self.profiling_data['system_info']['python_version']}\n")
-            
-            f.write("CONVERGENCE INFORMATION\n")
-            f.write("-" * 80 + "\n")
-            tolerance = self.profiling_data['convergence_info']['tolerance']
-            final_residual = self.profiling_data['convergence_info']['final_residual']
-            converged = self.profiling_data['convergence_info']['converged']
-            
-            f.write(f"Convergence Tolerance: {tolerance:.6e}\n")
-            f.write(f"Final Residual: {final_residual:.6e}\n")
-            
-            if converged:
-                f.write(f"Status: Converged after {self.profiling_data['iterations']} iterations\n\n")
+            # Store residual history as a dataset
+            if not residual_df.empty:
+                residual_group = f.create_group('residual_history')
+                for col in residual_df.columns:
+                    residual_group.create_dataset(col, data=residual_df[col].values)
+        
+        return os.path.abspath(filename)
+
+    def _store_dict_to_h5_group(self, group, data):
+        """Helper method to recursively store a dictionary in an HDF5 group"""
+        for key, value in data.items():
+            if isinstance(value, dict):
+                # Create a new group for nested dictionaries
+                subgroup = group.create_group(key)
+                self._store_dict_to_h5_group(subgroup, value)
             else:
-                f.write(f"Status: Did not converge (reached maximum iterations)\n\n")
-            
-            f.write("PERFORMANCE SUMMARY\n")
-            f.write("-" * 80 + "\n")
-            f.write(f"Total Wall Time: {self.profiling_data['total_time']:.4f} seconds\n")
-            f.write(f"Total CPU Time: {self.profiling_data['cpu_time']:.4f} seconds\n")
-            f.write(f"Total Iterations: {self.profiling_data['iterations']}\n")
-            f.write(f"Average Wall Time per Iteration: {avg_time_per_iteration:.4f} seconds\n")
-            
-        
-            # Add pressure solver information if available
-            if 'pressure_solver_info' in self.profiling_data:
-                pressure_info = self.profiling_data['pressure_solver_info']
-                if pressure_info.get('name') is not None:
-                    f.write("PRESSURE SOLVER INFORMATION\n")
-                    f.write("-" * 80 + "\n")
-                    f.write(f"Solver: {pressure_info['name']}\n")
-                    
-                    if pressure_info.get('total_inner_iterations', 0) > 0:
-                        f.write(f"Total Inner Iterations: {pressure_info['total_inner_iterations']}\n")
-                        f.write(f"Average Inner Iterations per Outer: {pressure_info['avg_inner_iterations_per_outer']:.2f}\n")
-                        f.write(f"Maximum Inner Iterations: {pressure_info['max_inner_iterations']}\n")
-                        f.write(f"Minimum Inner Iterations: {pressure_info['min_inner_iterations']}\n")
-                    
-                    if pressure_info.get('convergence_rate') is not None:
-                        f.write(f"Average Convergence Rate: {pressure_info['convergence_rate']:.6f}\n")
-                    
-                    # Add solver-specific information
-                    if pressure_info.get('solver_specific'):
-                        f.write("\nSolver-Specific Information:\n")
-                        for key, value in pressure_info['solver_specific'].items():
-                            if isinstance(value, float):
-                                f.write(f"  {key}: {value:.6f}\n")
-                            else:
-                                f.write(f"  {key}: {value}\n")
-                    f.write("\n")
-            
-            # Add detailed residual history if available
-            detailed = self.profiling_data['detailed_residuals']
-            if detailed['iterations'] and len(detailed['iterations']) > 0:
-                f.write("DETAILED RESIDUAL HISTORY\n")
-                f.write("-" * 80 + "\n")
-                
-                # Check if infinity norm errors are available
-                has_inf_norm = 'infinity_norm_errors' in detailed and len(detailed['infinity_norm_errors']) > 0
-                
-                if has_inf_norm:
-                    f.write(f"{'Iter':>5} {'Wall Time':>12} {'CPU Time':>12} {'Total Res':>12} {'Momentum Res':>12} {'Pressure Res':>12} {'Inf Norm Err':>12}\n")
-                else:
-                    f.write(f"{'Iter':>5} {'Wall Time':>12} {'CPU Time':>12} {'Total Res':>12} {'Momentum Res':>12} {'Pressure Res':>12}\n")
-                
-                for i in range(len(detailed['iterations'])):
-                    # Prepare the common part of the line
-                    line = f"{detailed['iterations'][i]:5d} " \
-                           f"{detailed['wall_times'][i]:12.4f} " \
-                           f"{detailed['cpu_times'][i]:12.4f} " \
-                           f"{detailed['total_residuals'][i]:12.6e} " \
-                           f"{detailed['momentum_residuals'][i]:12.6e} " \
-                           f"{detailed['pressure_residuals'][i]:12.6e} "
-                    
-                    # Add infinity norm error if available
-                    if has_inf_norm:
-                        inf_norm_value = detailed['infinity_norm_errors'][i] if i < len(detailed['infinity_norm_errors']) else None
-                        if inf_norm_value is not None:
-                            line += f"{inf_norm_value:12.6e} "
-                        else:
-                            line += f"{'N/A':>12} "
-                   
-                    f.write(line + "\n")
-                f.write("\n")
-            
-        
-        
-        return os.path.abspath(filename) 
+                # Store simple values as attributes
+                group.attrs[key] = value 
