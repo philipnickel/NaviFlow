@@ -31,10 +31,10 @@ start_time = time.time()
 # 1. Set up simulation parameters
 nx, ny = 127, 127          # Grid size (63x63 to match MATLAB example)
 reynolds = 100           # Reynolds number
-alpha_p = 0.3            # Pressure relaxation factor
+alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
 max_iterations = 100000    # Maximum number of iterations
-tolerance = 1e-9         # Convergence tolerance
+tolerance = 1e-5         # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
