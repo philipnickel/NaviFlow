@@ -118,8 +118,8 @@ class SimplecSolver(BaseAlgorithm):
             
             # SIMPLEC modification: Vectorized adjustment of d_u and d_v coefficients
             # Get diagonal coefficients from momentum equations
-            aP_u = 1.0 / (d_u * self.alpha_u)  # Original d_u = alpha_u/aP
-            aP_v = 1.0 / (d_v * self.alpha_u)  # Original d_v = alpha_u/aP
+            aP_u = np.where(d_u != 0, 1.0 / (d_u * self.alpha_u), 0)
+            aP_v = np.where(d_v != 0, 1.0 / (d_v * self.alpha_u), 0)
             
             # Create masks for non-zero coefficients
             d_u_mask = d_u != 0
@@ -129,19 +129,34 @@ class SimplecSolver(BaseAlgorithm):
             d_u_simplec = d_u.copy()
             d_v_simplec = d_v.copy()
             
-            # Vectorized modification of coefficients using SIMPLEC formula
-            # d_simplec = 1/(aP - sum(aN)) where aN are neighbor coefficients
-            # In the momentum solver, d = alpha_u/aP, so aP = alpha_u/d
-            # For SIMPLEC: d_simplec = d/(1 - (1-alpha_u))
-            d_u_simplec[d_u_mask] = d_u[d_u_mask] / (1 - (1 - self.alpha_u))
-            d_v_simplec[d_v_mask] = d_v[d_v_mask] / (1 - (1 - self.alpha_u))
+            # Calculate SIMPLEC correction with stability factor
+            stability_factor = 0.95  # Slightly under-correct to prevent oscillations
+            d_u_simplec[d_u_mask] = stability_factor * d_u[d_u_mask] / (1 - (1 - self.alpha_u))
+            d_v_simplec[d_v_mask] = stability_factor * d_v[d_v_mask] / (1 - (1 - self.alpha_u))
             
-            # Solve pressure correction equation with modified coefficients
+            # Add stability bounds
+            d_u_simplec = np.clip(d_u_simplec, 0, 1e2)
+            d_v_simplec = np.clip(d_v_simplec, 0, 1e2)
+            
+            # Solve pressure correction equation
             p_prime = self.pressure_solver.solve(
                 self.mesh, u_star, v_star, d_u_simplec, d_v_simplec, p_star
             )
             
-            # Update pressure with relaxation
+            # Apply pressure correction smoothing
+            p_prime_smooth = np.zeros_like(p_prime)
+            p_prime_smooth[1:-1, 1:-1] = (
+                0.6 * p_prime[1:-1, 1:-1] +
+                0.1 * (p_prime[2:, 1:-1] + p_prime[:-2, 1:-1] +
+                      p_prime[1:-1, 2:] + p_prime[1:-1, :-2])
+            )
+            p_prime = p_prime_smooth
+            
+            # Update pressure with dynamic relaxation
+            if iteration > 1:
+                prev_res = self.residual_history[-1]
+                if max_res > prev_res:
+                    self.alpha_p *= 0.95  # Reduce relaxation if residual increased
             self.p = p_star + self.alpha_p * p_prime
             
             # Calculate pressure residual

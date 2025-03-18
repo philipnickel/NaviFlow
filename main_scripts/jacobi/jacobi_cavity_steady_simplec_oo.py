@@ -23,12 +23,12 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 129, 129          # Grid size
+nx, ny = 129, 129        # Grid size
 reynolds = 100           # Reynolds number
-alpha_p = 0.2            # Pressure relaxation factor (typically lower for SIMPLEC)
-alpha_u = 0.8            # Velocity relaxation factor (can be higher with SIMPLEC)
-max_iterations = 100000  # Maximum number of iterations
-tolerance = 1e-5         # Convergence tolerance
+alpha_p = 0.15          # Start with very conservative pressure relaxation
+alpha_u = 0.5           # Conservative velocity relaxation
+max_iterations = 50000   # Maximum number of iterations
+tolerance = 1e-8        # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -47,9 +47,9 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Jacobi solver for pressure correction
 pressure_solver = JacobiSolver(
-    tolerance=1e-4,  # Relaxed tolerance for inner iterations
-    max_iterations=50,  # Fewer iterations per SIMPLEC iteration
-    omega=0.5  # Weighted Jacobi for better convergence
+    tolerance=1e-6,
+    max_iterations=300,  # More inner iterations
+    omega=0.6           # Conservative Jacobi relaxation
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -74,11 +74,9 @@ algorithm.set_boundary_condition('right', 'wall')
 # 7. Solve the problem
 print("Starting simulation...")
 result = algorithm.solve(
-    max_iterations=max_iterations, 
-    tolerance=tolerance, 
-    save_profile=False,
-    profile_dir=results_dir,
-    track_infinity_norm=True
+    max_iterations=50000,
+    tolerance=1e-8,
+    save_profile=False
 )
 
 # End timing
