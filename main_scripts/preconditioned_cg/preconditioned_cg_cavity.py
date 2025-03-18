@@ -120,25 +120,8 @@ algorithm.set_boundary_condition('right', 'wall')
 if not args.quiet:
     print(f"Starting simulation with SIMPLE algorithm and Preconditioned CG solver using {args.scheme} discretization...")
 
-# If quiet mode is active, redirect stdout to suppress progress output
-if args.quiet:
-    original_stdout = sys.stdout
-    sys.stdout = open(os.devnull, 'w')
 
-try:
-    result = algorithm.solve(
-        max_iterations=max_iterations, 
-        tolerance=tolerance, 
-        save_profile=not args.quiet, 
-        profile_dir=results_dir, 
-        track_infinity_norm=not args.quiet, 
-        infinity_norm_interval=10
-    )
-finally:
-    # Restore stdout
-    if args.quiet:
-        sys.stdout.close()
-        sys.stdout = original_stdout
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True args.quiet, infinity_norm_interval=10)
 
 # End timing
 end_time = time.time()

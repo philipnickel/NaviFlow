@@ -1,0 +1,7 @@
+Simulation Parameters:
+Mesh: 256x256
+Reynolds: 5000.0
+Scheme: power_law
+Iterations: 8674
+Max Divergence: 3.961776e-05
+Runtime: 5936.02 seconds
