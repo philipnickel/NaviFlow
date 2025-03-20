@@ -84,8 +84,8 @@ else:
 
 # Use Preconditioned CG solver for pressure correction
 pressure_solver = PreconditionedCGSolver(
-    tolerance=1e-8,
-    max_iterations=1000,
+    tolerance=1e-12,
+    max_iterations=100000,
     smoother='gauss_seidel',
     presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),
     postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),

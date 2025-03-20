@@ -185,8 +185,8 @@ class JacobiSolver(PressureSolver):
                     res_norm = r_norm / b_norm
                 else:
                     res_norm = r_norm
-                    
                 self.residual_history.append(res_norm)
+                #print(f"Residual Jacobi: {res_norm}")
                 
                 # Calculate convergence rate if we have enough iterations
                 if k >= 2 and self.residual_history[-2] > 1e-15:

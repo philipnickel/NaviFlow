@@ -30,10 +30,10 @@ start_time = time.time()
 
 # 1. Set up simulation parameters
 nx, ny = 127, 127          # Grid size (63x63 to match MATLAB example)
-reynolds = 100           # Reynolds number
+reynolds = 10000           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 100000    # Maximum number of iterations
+max_iterations = 3# Maximum number of iterations
 tolerance = 1e-5         # Convergence tolerance
 
 # 2. Create mesh
@@ -53,8 +53,8 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use PyAMG solver for pressure correction
 pressure_solver = PyAMGSolver(
-    tolerance=1e-8,
-    max_iterations=100,
+    tolerance=1e-5,
+    max_iterations=100000,
     smoother='gauss_seidel',
     presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
     postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
@@ -82,16 +82,16 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation with SIMPLE algorithm and PyAMG solver...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
 
 # End timing
 end_time = time.time()
 elapsed_time = end_time - start_time
-
 # 8. Print results
 print(f"Simulation completed in {elapsed_time:.2f} seconds")
 print(f"Total Iterations = {result.iterations}")
 
+"""
 # 9. Check mass conservation
 max_div = result.get_max_divergence()
 print(f"Maximum absolute divergence: {max_div:.6e}")
@@ -100,5 +100,6 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'PyAMG Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_pyamg_results.pdf'),
-    show=True
+    show=False
 )
+"""

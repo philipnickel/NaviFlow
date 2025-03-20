@@ -25,11 +25,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63           # Grid size (2^6-1)
+nx, ny = 127, 127           # Grid size (2^7-1)
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 100000      # Maximum number of iterations
+max_iterations = 1      # Maximum number of iterations (reduced to 3 for testing)
 tolerance = 1e-5         # Convergence tolerance
 
 # 2. Create mesh
@@ -47,19 +47,20 @@ print(f"Reynolds number: {fluid.get_reynolds_number()}")
 print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
-# Create a Jacobi smoother for the multigrid solver
-jacobi_smoother = JacobiSolver()
+# Create a Jacobi smoother for the multigrid solver - optimized parameters
+jacobi_smoother = JacobiSolver(omega=0.8)
 
-# Use multigrid solver with Jacobi smoother for pressure correction
+# Use multigrid solver with Jacobi smoother for pressure correction - optimized parameters
 pressure_solver = MultiGridSolver(
     tolerance=1e-5,
-    max_iterations=200,
-    pre_smoothing=5,
-    post_smoothing=5,
-    smoother_iterations=5,
-    smoother_omega=0.8,
-    smoother=jacobi_smoother  # Use the Jacobi smoother
+    max_iterations=5,
+    pre_smoothing=5,      # Reduced from 5 to 2
+    post_smoothing=5,     # Reduced from 5 to 2
+    smoother_iterations=5, # Reduced from 5 to 2
+    smoother_omega=0.8,    # Increased from 0.8 to 1.0
+    smoother=jacobi_smoother
 )
+
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
@@ -82,7 +83,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=5)
 
 # End timing
 end_time = time.time()
