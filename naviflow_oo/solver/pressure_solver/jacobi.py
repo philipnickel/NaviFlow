@@ -182,7 +182,7 @@ class JacobiSolver(PressureSolver):
                 
                 # Check solution change
                 if k > 0:
-                    change = np.linalg.norm(p_new - p_2d) / (np.linalg.norm(p_new) + 1e-15)
+                    change = np.linalg.norm(p_new - p_2d) / (np.linalg.norm(p_new) )
                     if change < self.tolerance * 0.1:
                         print(f"Jacobi converged in {k+1} iterations, solution change: {change:.6e}")
                         p_2d = p_new

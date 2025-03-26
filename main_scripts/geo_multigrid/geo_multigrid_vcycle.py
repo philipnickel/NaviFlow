@@ -29,7 +29,7 @@ os.makedirs(debug_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63           # Grid size (2^6-1)
+nx, ny = 127, 127           # Grid size (2^6-1)
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
@@ -62,7 +62,7 @@ pressure_solver = MultiGridSolver(
     max_iterations=1,  # Only 1 multigrid iteration for debugging
     pre_smoothing=5,  # 3 pre-smoothing steps
     post_smoothing=5,  # 3 post-smoothing steps
-    smoother_omega=0.8,  # Adjusted relaxation factor for better performance
+    smoother_omega=0.9,  # Adjusted relaxation factor for better performance
     smoother=jacobi_smoother,  # Use the Jacobi smoother
 )
 momentum_solver = StandardMomentumSolver()
@@ -111,3 +111,47 @@ result.plot_combined_results(
 
 # After the simulation completes, plot the V-cycle results
 algorithm.pressure_solver.plot_vcycle_results(os.path.join(debug_dir, 'vcycle_analysis.pdf'))
+
+# Load benchmark pressure data from arrays_cg127x127
+print("Loading benchmark pressure data...")
+benchmark_path = os.path.join(os.path.dirname(__file__), 'multigrid_debugging', 'arrays_cg127x127', 'p_prime.npy')
+benchmark_p = np.load(benchmark_path)
+print(f"Benchmark pressure shape: {benchmark_p.shape}")
+
+# Create pressure comparison plot
+plt.figure(figsize=(15, 5))
+
+# Plot current solution
+plt.subplot(1, 3, 1)
+plt.contourf(result.p, levels=50, cmap='viridis')
+plt.colorbar()
+plt.title('Current Solution')
+plt.xlabel('x')
+plt.ylabel('y')
+
+# Plot benchmark solution
+plt.subplot(1, 3, 2)
+plt.contourf(benchmark_p, levels=50, cmap='viridis')
+plt.colorbar()
+plt.title('Benchmark Solution')
+plt.xlabel('x')
+plt.ylabel('y')
+
+# Plot difference
+plt.subplot(1, 3, 3)
+diff = result.p - benchmark_p
+plt.contourf(diff, levels=50, cmap='RdBu')
+plt.colorbar()
+plt.title('Difference (Current - Benchmark)')
+plt.xlabel('x')
+plt.ylabel('y')
+
+plt.tight_layout()
+plt.savefig(os.path.join(debug_dir, 'pressure_comparison.pdf'))
+plt.close()# Calculate and print error metrics
+max_error = np.max(np.abs(diff))
+mean_error = np.mean(np.abs(diff))
+print("\nPressure Comparison Results:")
+print(f"Maximum absolute error: {max_error:.6e}")
+print(f"Mean absolute error: {mean_error:.6e}")
+
