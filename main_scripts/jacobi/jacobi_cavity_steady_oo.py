@@ -23,12 +23,12 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 65, 65          # Grid size
+nx, ny = 127, 127          # Grid size
 reynolds = 100           # Reynolds number
-alpha_p = 0.4            # Pressure relaxation factor (lower for stability)
+alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 1     # Maximum number of iterations
-tolerance = 1e-9         # Convergence tolerance
+max_iterations = 10000     # Maximum number of iterations
+tolerance = 1e-5         # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -47,8 +47,8 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Jacobi solver for pressure correction
 pressure_solver = JacobiSolver(
-    tolerance=1e-3,  # Relaxed tolerance for inner iterations
-    max_iterations=100,  # Fewer iterations per SIMPLE iteration
+    tolerance=1e-5,  # Relaxed tolerance for inner iterations
+    max_iterations=10000,  # Fewer iterations per SIMPLE iteration
     omega=0.8  # Weighted Jacobi for better convergence
 )
 momentum_solver = StandardMomentumSolver()

@@ -1,227 +1,329 @@
 """
-Helper functions for multigrid operations (restriction and prolongation).
+Helper functions for the multigrid solver.
 """
 
 import numpy as np
 
-
-def restrict(fine_array, nx, ny, dx, dy):
+def restrict(fine_grid):
     """
-    Standard full-weighting restriction from an nx x ny grid 
-    down to roughly half in each dimension.
+    Restricts a fine grid to a coarse grid using injection with averaging.
+    Includes proper scaling to maintain magnitudes between levels.
     
     Parameters:
     -----------
-    fine_array : ndarray
-        Fine grid array to restrict
+    fine_grid : ndarray
+        The input fine grid to be restricted (2D)
+        
+    Returns:
+    --------
+    ndarray
+        The restricted grid (2D)
+    """
+    # Reshape to 2D if needed
+    if fine_grid.ndim == 1:
+        m = int(np.sqrt(fine_grid.size))
+        fine_grid = fine_grid.reshape((m, m), order='F')
+        
+    m = fine_grid.shape[0]
+    mc = (m + 1) // 2 - 1  # Size of coarse grid
+    
+    # Print initial grid statistics
+    print(f"\nFine grid ({m}x{m}) statistics:")
+    print(f"Min: {np.min(fine_grid):.6f}, Max: {np.max(fine_grid):.6f}, Mean: {np.mean(fine_grid):.6f}")
+    print(f"Number of negative values: {np.sum(fine_grid < 0)}")
+    
+    # Create coarse grid
+    coarse_grid = np.zeros((mc, mc))
+    
+    # Vectorized restriction with simple averaging
+    # Create indices for the fine grid points that correspond to coarse grid points
+    i_fine = np.arange(1, m, 2)[:mc]
+    j_fine = np.arange(1, m, 2)[:mc]
+    I_fine, J_fine = np.meshgrid(i_fine, j_fine, indexing='ij')
+    
+    # Center points (weight 1/2)
+    center_points = fine_grid[I_fine, J_fine]
+    
+    # Print center points statistics
+    print(f"\nCenter points statistics:")
+    print(f"Min: {np.min(center_points):.6f}, Max: {np.max(center_points):.6f}, Mean: {np.mean(center_points):.6f}")
+    print(f"Number of negative values: {np.sum(center_points < 0)}")
+    
+    # Adjacent points (weight 1/8)
+    # Create masks for valid adjacent indices
+    valid_im1 = I_fine > 0
+    valid_ip1 = I_fine < m-1
+    valid_jm1 = J_fine > 0
+    valid_jp1 = J_fine < m-1
+    
+    # Initialize adjacent sum with zeros
+    adjacent_sum = np.zeros((mc, mc))
+    
+    # Add valid adjacent points
+    adjacent_count = np.zeros((mc, mc))
+    
+    # Left points
+    mask = valid_im1
+    adjacent_sum[mask] += fine_grid[I_fine[mask]-1, J_fine[mask]]
+    adjacent_count[mask] += 1
+    
+    # Right points
+    mask = valid_ip1
+    adjacent_sum[mask] += fine_grid[I_fine[mask]+1, J_fine[mask]]
+    adjacent_count[mask] += 1
+    
+    # Bottom points
+    mask = valid_jm1
+    adjacent_sum[mask] += fine_grid[I_fine[mask], J_fine[mask]-1]
+    adjacent_count[mask] += 1
+    
+    # Top points
+    mask = valid_jp1
+    adjacent_sum[mask] += fine_grid[I_fine[mask], J_fine[mask]+1]
+    adjacent_count[mask] += 1
+    
+    # Print adjacent points statistics
+    print(f"\nAdjacent points statistics:")
+    print(f"Min: {np.min(adjacent_sum):.6f}, Max: {np.max(adjacent_sum):.6f}, Mean: {np.mean(adjacent_sum):.6f}")
+    print(f"Number of negative values: {np.sum(adjacent_sum < 0)}")
+    
+    # Avoid division by zero
+    adjacent_count[adjacent_count == 0] = 1
+    
+    # Normalize adjacent points first
+    adjacent_avg = adjacent_sum / adjacent_count
+    
+    # Print normalized adjacent points statistics
+    print(f"\nNormalized adjacent points statistics:")
+    print(f"Min: {np.min(adjacent_avg):.6f}, Max: {np.max(adjacent_avg):.6f}, Mean: {np.mean(adjacent_avg):.6f}")
+    print(f"Number of negative values: {np.sum(adjacent_avg < 0)}")
+    
+    # Combine with weights that preserve magnitude
+    coarse_grid = 0.5 * center_points + 0.125 * adjacent_avg
+    
+    # Print pre-scaling statistics
+    print(f"\nPre-scaling statistics:")
+    print(f"Min: {np.min(coarse_grid):.6f}, Max: {np.max(coarse_grid):.6f}, Mean: {np.mean(coarse_grid):.6f}")
+    print(f"Number of negative values: {np.sum(coarse_grid < 0)}")
+    
+    # Scale to maintain proper magnitude between levels
+    # This accounts for the grid size change
+    scale_factor = (m + 1) / (mc + 1)
+    coarse_grid *= scale_factor
+    
+    # Print final statistics
+    print(f"\nFinal coarse grid ({mc}x{mc}) statistics:")
+    print(f"Scale factor: {scale_factor:.6f}")
+    print(f"Min: {np.min(coarse_grid):.6f}, Max: {np.max(coarse_grid):.6f}, Mean: {np.mean(coarse_grid):.6f}")
+    print(f"Number of negative values: {np.sum(coarse_grid < 0)}")
+    
+    return coarse_grid
+
+def interpolate(coarse_grid, m):
+    """
+    Interpolates a coarse grid to a fine grid using bilinear interpolation.
+    
+    Parameters:
+    -----------
+    coarse_grid : ndarray
+        The input coarse grid to be interpolated (2D)
+    m : int
+        Size of the target fine grid (m x m)
+        
+    Returns:
+    --------
+    ndarray
+        The interpolated fine grid (2D)
+    """
+    # Reshape to 2D if needed
+    if coarse_grid.ndim == 1:
+        mc = int(np.sqrt(coarse_grid.size))
+        coarse_grid = coarse_grid.reshape((mc, mc), order='F')
+        
+    # Get coarse grid dimensions
+    mc = coarse_grid.shape[0]
+    
+    # Create fine grid
+    fine_grid = np.zeros((m, m))
+    
+    # Handle edge cases for small grids
+    if m <= 3:
+        # Direct injection for coincident points
+        i_coarse = np.arange(mc)
+        j_coarse = np.arange(mc)
+        I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+        
+        # Calculate fine grid indices
+        I_fine = 2 * I_coarse + 1
+        J_fine = 2 * J_coarse + 1
+        
+        # Filter valid indices
+        mask = np.logical_and(I_fine < m, J_fine < m)
+        fine_grid[I_fine[mask], J_fine[mask]] = coarse_grid[I_coarse[mask], J_coarse[mask]]
+        
+        return fine_grid
+    
+    # Direct injection for coincident points
+    i_coarse = np.arange(mc)
+    j_coarse = np.arange(mc)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    # Calculate fine grid indices
+    I_fine = 2 * I_coarse + 1
+    J_fine = 2 * J_coarse + 1
+    
+    # Filter valid indices
+    mask = np.logical_and(I_fine < m, J_fine < m)
+    fine_grid[I_fine[mask], J_fine[mask]] = coarse_grid[I_coarse[mask], J_coarse[mask]]
+    
+    # Horizontal interpolation (odd rows, even columns)
+    i_coarse = np.arange(mc)
+    j_coarse = np.arange(mc-1)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    I_fine = 2 * I_coarse + 1
+    J_fine = 2 * J_coarse + 2
+    
+    mask = np.logical_and(I_fine < m, J_fine < m)
+    fine_grid[I_fine[mask], J_fine[mask]] = 0.5 * (
+        coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+        coarse_grid[I_coarse[mask], J_coarse[mask]+1]
+    )
+    
+    # Vertical interpolation (even rows, odd columns)
+    i_coarse = np.arange(mc-1)
+    j_coarse = np.arange(mc)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    I_fine = 2 * I_coarse + 2
+    J_fine = 2 * J_coarse + 1
+    
+    mask = np.logical_and(I_fine < m, J_fine < m)
+    fine_grid[I_fine[mask], J_fine[mask]] = 0.5 * (
+        coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+        coarse_grid[I_coarse[mask]+1, J_coarse[mask]]
+    )
+    
+    # Diagonal interpolation (even rows, even columns)
+    i_coarse = np.arange(mc-1)
+    j_coarse = np.arange(mc-1)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    I_fine = 2 * I_coarse + 2
+    J_fine = 2 * J_coarse + 2
+    
+    mask = np.logical_and(I_fine < m, J_fine < m)
+    fine_grid[I_fine[mask], J_fine[mask]] = 0.25 * (
+        coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+        coarse_grid[I_coarse[mask]+1, J_coarse[mask]] +
+        coarse_grid[I_coarse[mask], J_coarse[mask]+1] +
+        coarse_grid[I_coarse[mask]+1, J_coarse[mask]+1]
+    )
+    
+    # Handle boundary values
+    # Left boundary
+    fine_grid[1:-1, 0] = fine_grid[1:-1, 1]
+    # Right boundary
+    fine_grid[1:-1, -1] = fine_grid[1:-1, -2]
+    # Bottom boundary
+    fine_grid[0, 1:-1] = fine_grid[1, 1:-1]
+    # Top boundary
+    fine_grid[-1, 1:-1] = fine_grid[-2, 1:-1]
+    # Corners
+    fine_grid[0, 0] = fine_grid[1, 1]
+    fine_grid[0, -1] = fine_grid[1, -2]
+    fine_grid[-1, 0] = fine_grid[-2, 1]
+    fine_grid[-1, -1] = fine_grid[-2, -2]
+    
+    return fine_grid
+
+def restrict_coefficients(d_u, d_v, nx, ny):
+    """
+    Restrict the momentum equation coefficients to a coarser grid using arithmetic averaging.
+    This maintains better magnitude consistency between levels compared to harmonic averaging.
+    
+    Parameters:
+    -----------
+    d_u, d_v : ndarray
+        Momentum equation coefficients on the fine grid
     nx, ny : int
-        Fine grid dimensions
-    dx, dy : float
-        Fine grid cell sizes
+        Dimensions of the fine grid
         
     Returns:
     --------
-    coarse_array : ndarray
-        Restricted array (flattened)
-    nx_c, ny_c : int
-        Coarse grid dimensions
-    dx_c, dy_c : float
-        Coarse grid cell sizes
+    d_u_coarse, d_v_coarse : ndarray
+        Momentum equation coefficients on the coarse grid
     """
-    # Convert to 2D
-    fine_2d = fine_array.reshape((nx, ny), order='F')
+    # Calculate coarse grid dimensions
+    nx_coarse = (nx + 1) // 2 - 1
+    ny_coarse = (ny + 1) // 2 - 1
     
-    # Next coarser level sizes - modify to use 2^k-1 coarsening pattern
-    nx_c = max(1, (nx + 1)//2 - 1)  # For 2^k-1 grid sizes
-    ny_c = max(1, (ny + 1)//2 - 1)
-    dx_c = dx * 2
-    dy_c = dy * 2
+    # Initialize coarse grid coefficients
+    d_u_coarse = np.zeros((nx_coarse + 1, ny_coarse))
+    d_v_coarse = np.zeros((nx_coarse, ny_coarse + 1))
     
-    coarse_2d = np.zeros((nx_c, ny_c), dtype=fine_2d.dtype)
+    # Vectorized restriction for d_u (staggered in x-direction)
+    # Create indices for the fine grid points
+    i_fine = np.arange(0, min(2*nx_coarse+1, d_u.shape[0]), 2)
+    j_fine = np.arange(1, min(2*ny_coarse+1, d_u.shape[1]), 2)
+    I_fine, J_fine = np.meshgrid(i_fine, j_fine, indexing='ij')
     
-    # Full weighting standard stencil (in index terms):
-    #   coarse(i,j) = 1/16 [  fine(2i, 2j)*4 
-    #                       + fine(2i±1,2j)*2 
-    #                       + fine(2i,2j±1)*2
-    #                       + fine(2i±1,2j±1)*1  ]
-    #
-    # We'll clamp indices to be within range.
-
-    for i_c in range(nx_c):
-        i_f = 2 * i_c
-        for j_c in range(ny_c):
-            j_f = 2 * j_c
-
-            w_sum = 0.0
-            w_fac = 0.0
-
-            # Center (4 weight)
-            if i_f < nx and j_f < ny:
-                w_sum += 4.0 * fine_2d[i_f, j_f]
-                w_fac += 4.0
-
-            # Offsets ±1 in i, j => must check boundary
-            for di in [-1, 1]:
-                i_n = i_f + di
-                if 0 <= i_n < nx and j_f < ny:
-                    w_sum += 2.0 * fine_2d[i_n, j_f]
-                    w_fac += 2.0
-
-            for dj in [-1, 1]:
-                j_n = j_f + dj
-                if i_f < nx and 0 <= j_n < ny:
-                    w_sum += 2.0 * fine_2d[i_f, j_n]
-                    w_fac += 2.0
-
-            # Diagonals
-            for di in [-1, 1]:
-                for dj in [-1, 1]:
-                    i_n = i_f + di
-                    j_n = j_f + dj
-                    if 0 <= i_n < nx and 0 <= j_n < ny:
-                        w_sum += fine_2d[i_n, j_n]
-                        w_fac += 1.0
-
-            # Normalize by actual weights used (handles boundaries properly)
-            if w_fac > 0:
-                coarse_2d[i_c, j_c] = w_sum / w_fac
-            else:
-                coarse_2d[i_c, j_c] = 0.0
-
-    return coarse_2d.flatten('F'), nx_c, ny_c, dx_c, dy_c
-
-
-def restrict_coefficient(fine_array, nx_f, ny_f, nx_c, ny_c):
-    """
-    Simple restriction for coefficients like d_u and d_v.
-    Takes every other point from the fine grid, following 2^k-1 grid pattern.
+    # Create masks for valid adjacent indices
+    valid_jm1 = J_fine > 0
+    valid_jp1 = J_fine < d_u.shape[1]-1
     
-    Parameters:
-    -----------
-    fine_array : ndarray
-        Fine grid coefficient array
-    nx_f, ny_f : int
-        Fine grid dimensions
-    nx_c, ny_c : int
-        Coarse grid dimensions
-        
-    Returns:
-    --------
-    coarse_array : ndarray
-        Restricted coefficient array
-    """
-    if fine_array is None:
-        return None
-        
-    # Ensure the array has the right shape
-    fine_array_2d = fine_array
-    if fine_array.ndim == 1:
-        fine_array_2d = fine_array.reshape((nx_f, ny_f), order='F')
+    # Initialize sum and count arrays for arithmetic averaging
+    d_u_sum = np.zeros((nx_coarse + 1, ny_coarse))
+    d_u_count = np.ones((nx_coarse + 1, ny_coarse))
     
-    # Initialize the coarse array
-    coarse_array = np.zeros((nx_c, ny_c), dtype=fine_array_2d.dtype)
+    # Add center points
+    d_u_sum += d_u[I_fine[:nx_coarse+1, :ny_coarse], J_fine[:nx_coarse+1, :ny_coarse]]
     
-    # Compute proper ratio for 2^k-1 grid pattern
-    ratio_x = (nx_f - 1) / (nx_c - 1) if nx_c > 1 else nx_f
-    ratio_y = (ny_f - 1) / (ny_c - 1) if ny_c > 1 else ny_f
+    # Add points below if available
+    mask = valid_jm1[:nx_coarse+1, :ny_coarse]
+    if np.any(mask):
+        d_u_sum[mask] += d_u[I_fine[:nx_coarse+1, :ny_coarse][mask], J_fine[:nx_coarse+1, :ny_coarse][mask]-1]
+        d_u_count[mask] += 1
     
-    # Take points according to the 2^k-1 pattern
-    for i_c in range(nx_c):
-        # Calculate fine grid index - evenly distribute points
-        i_f = min(int(i_c * ratio_x), nx_f-1)
-        
-        for j_c in range(ny_c):
-            # Calculate fine grid index - evenly distribute points
-            j_f = min(int(j_c * ratio_y), ny_f-1)
-            
-            coarse_array[i_c, j_c] = fine_array_2d[i_f, j_f]
-            
-    return coarse_array
-
-
-def interpolate(coarse_array, nx_c, ny_c, nx_f, ny_f):
-    """
-    Bilinear interpolation from (nx_c x ny_c) to (nx_f x ny_f),
-    accounting for 2^k-1 grid pattern.
+    # Add points above if available
+    mask = valid_jp1[:nx_coarse+1, :ny_coarse]
+    if np.any(mask):
+        d_u_sum[mask] += d_u[I_fine[:nx_coarse+1, :ny_coarse][mask], J_fine[:nx_coarse+1, :ny_coarse][mask]+1]
+        d_u_count[mask] += 1
     
-    Parameters:
-    -----------
-    coarse_array : ndarray
-        Coarse grid array to interpolate
-    nx_c, ny_c : int
-        Coarse grid dimensions
-    nx_f, ny_f : int
-        Fine grid dimensions
-        
-    Returns:
-    --------
-    fine_array : ndarray
-        Interpolated array on the fine grid (flattened)
-    """
-    coarse_2d = coarse_array.reshape((nx_c, ny_c), order='F')
-    fine_2d = np.zeros((nx_f, ny_f), dtype=coarse_2d.dtype)
-
-    # Compute proper mapping ratios for 2^k-1 grid pattern
-    ratio_x = (nx_f - 1) / max(1, nx_c - 1)
-    ratio_y = (ny_f - 1) / max(1, ny_c - 1)
+    # Arithmetic average
+    d_u_coarse = d_u_sum / d_u_count
     
-    # For each point in the fine grid
-    for i_f in range(nx_f):
-        # Find its fractional position in coarse grid coordinates
-        x_c = i_f / ratio_x if nx_c > 1 else 0
-        i_c_low = min(int(x_c), nx_c-1)
-        i_c_high = min(i_c_low + 1, nx_c-1)
-        wx = x_c - i_c_low if i_c_high > i_c_low else 0.0
-        
-        for j_f in range(ny_f):
-            y_c = j_f / ratio_y if ny_c > 1 else 0
-            j_c_low = min(int(y_c), ny_c-1)
-            j_c_high = min(j_c_low + 1, ny_c-1)
-            wy = y_c - j_c_low if j_c_high > j_c_low else 0.0
-            
-            # Bilinear interpolation weights
-            w00 = (1.0 - wx) * (1.0 - wy)
-            w10 = wx * (1.0 - wy)
-            w01 = (1.0 - wx) * wy
-            w11 = wx * wy
-            
-            # Use only valid weights based on available points
-            if i_c_high == i_c_low and j_c_high == j_c_low:
-                # Only one point available
-                fine_2d[i_f, j_f] = coarse_2d[i_c_low, j_c_low]
-            elif i_c_high == i_c_low:
-                # Only j-direction interpolation
-                fine_2d[i_f, j_f] = (1.0 - wy) * coarse_2d[i_c_low, j_c_low] + wy * coarse_2d[i_c_low, j_c_high]
-            elif j_c_high == j_c_low:
-                # Only i-direction interpolation
-                fine_2d[i_f, j_f] = (1.0 - wx) * coarse_2d[i_c_low, j_c_low] + wx * coarse_2d[i_c_high, j_c_low]
-            else:
-                # Full bilinear interpolation
-                fine_2d[i_f, j_f] = (w00 * coarse_2d[i_c_low, j_c_low] +
-                                     w10 * coarse_2d[i_c_high, j_c_low] +
-                                     w01 * coarse_2d[i_c_low, j_c_high] +
-                                     w11 * coarse_2d[i_c_high, j_c_high])
+    # Vectorized restriction for d_v (staggered in y-direction)
+    # Create indices for the fine grid points
+    i_fine = np.arange(1, min(2*nx_coarse+1, d_v.shape[0]), 2)
+    j_fine = np.arange(0, min(2*ny_coarse+2, d_v.shape[1]), 2)
+    I_fine, J_fine = np.meshgrid(i_fine, j_fine, indexing='ij')
     
-    return fine_2d.flatten('F')
-
-
-def solve_directly(f):
-    """
-    Direct solve on the coarsest grid (typically 1x1).
+    # Create masks for valid adjacent indices
+    valid_im1 = I_fine > 0
+    valid_ip1 = I_fine < d_v.shape[0]-1
     
-    On a 1x1 grid with a pinned reference pressure, we typically set p'=0.
-    Alternatively for a direct solve for p'[0], one could use:
-        return f / aP
-    for some appropriate aP value.
+    # Initialize sum and count arrays for arithmetic averaging
+    d_v_sum = np.zeros((nx_coarse, ny_coarse + 1))
+    d_v_count = np.ones((nx_coarse, ny_coarse + 1))
     
-    Parameters:
-    -----------
-    f : ndarray
-        Right-hand side on the coarsest grid
-        
-    Returns:
-    --------
-    solution : ndarray
-        Solution on the coarsest grid
-    """
-    return np.zeros_like(f) 
+    # Add center points
+    d_v_sum += d_v[I_fine[:nx_coarse, :ny_coarse+1], J_fine[:nx_coarse, :ny_coarse+1]]
+    
+    # Add points to the left if available
+    mask = valid_im1[:nx_coarse, :ny_coarse+1]
+    if np.any(mask):
+        d_v_sum[mask] += d_v[I_fine[:nx_coarse, :ny_coarse+1][mask]-1, J_fine[:nx_coarse, :ny_coarse+1][mask]]
+        d_v_count[mask] += 1
+    
+    # Add points to the right if available
+    mask = valid_ip1[:nx_coarse, :ny_coarse+1]
+    if np.any(mask):
+        d_v_sum[mask] += d_v[I_fine[:nx_coarse, :ny_coarse+1][mask]+1, J_fine[:nx_coarse, :ny_coarse+1][mask]]
+        d_v_count[mask] += 1
+    
+    # Arithmetic average
+    d_v_coarse = d_v_sum / d_v_count
+    
+    return d_u_coarse, d_v_coarse

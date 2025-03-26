@@ -302,11 +302,11 @@ def plot_results(results_file, output_dir="results"):
     mesh_sizes = sorted(df['Mesh Size'].unique())
     tolerances = sorted(df['Tolerance'].unique())
     
-    # Colors and markers for different solvers
+    # Colors for different solvers using coolwarm-inspired colors
     solver_styles = {
-        'AMG': {'color': 'blue', 'marker': 'o', 'label': 'Algebraic Multigrid'},
-        'CG': {'color': 'red', 'marker': 's', 'label': 'Conjugate Gradient'},
-        'PCG': {'color': 'green', 'marker': '^', 'label': 'Preconditioned CG'}
+        'AMG': {'color': '#3b4cc0', 'marker': 'o', 'label': 'Algebraic Multigrid'},  # Cool blue
+        'CG': {'color': '#b40426', 'marker': 's', 'label': 'Conjugate Gradient'},     # Warm red
+        'PCG': {'color': '#6b439b', 'marker': '^', 'label': 'Preconditioned CG'}      # Purple (middle)
     }
     
     # Line styles for different tolerances
@@ -345,6 +345,10 @@ def plot_results(results_file, output_dir="results"):
     # ----- COMBINED PLOT WITH ALL TOLERANCES -----
     plt.figure(figsize=(12, 8))
     
+    # Create a coolwarm gradient for tolerances
+    cmap = plt.cm.coolwarm
+    tolerance_colors = [cmap(i/len(tolerances)) for i in range(len(tolerances))]
+    
     # Plot wall time vs mesh size for each solver and tolerance
     for i, tol in enumerate(tolerances):
         line_style = tolerance_styles[i % len(tolerance_styles)]
@@ -356,7 +360,7 @@ def plot_results(results_file, output_dir="results"):
             plt.plot(
                 tol_data['Mesh Size'], 
                 tol_data[time_col], 
-                color=style['color'], 
+                color=tolerance_colors[i],  # Use coolwarm gradient color based on tolerance
                 marker=style['marker'], 
                 linestyle=line_style,
                 label=label
@@ -379,11 +383,15 @@ def plot_results(results_file, output_dir="results"):
     fig, axs = plt.subplots(2, 2, figsize=(15, 12), sharex=True, sharey=True)
     axs = axs.flat
     
+    # Use a coolwarm colormap for the tolerance panels
+    cmap = plt.cm.coolwarm
+    colors = [cmap(i/4) for i in range(len(solver_styles))]
+    
     # Plot titles for each panel (one tolerance per panel)
     panel_titles = [f"Tolerance = {tol:.1e}" for tol in tolerances[:4]]  # Use up to 4 tolerances
     
     # Create each panel
-    for i, tol in enumerate(tolerances[:4]):  # Use up to 4 tolerances
+    for i, tol in enumerate(tolerances[:4]):
         if i >= len(axs):  # In case we have fewer than 4 tolerances
             break
             
@@ -391,13 +399,13 @@ def plot_results(results_file, output_dir="results"):
         # Filter data for this tolerance
         tol_data = df[df['Tolerance'] == tol]
         
-        # Add all solvers to each tolerance panel
-        for solver_key, style in solver_styles.items():
+        # Add all solvers to each tolerance panel with coolwarm colors
+        for j, (solver_key, style) in enumerate(solver_styles.items()):
             time_col = f'{solver_key} Time (s)'
             ax.plot(
                 tol_data['Mesh Size'],
                 tol_data[time_col],
-                color=style['color'],
+                color=colors[j],  # Use coolwarm color
                 marker=style['marker'],
                 label=style['label']
             )
@@ -447,9 +455,9 @@ def plot_only():
 if __name__ == "__main__":
     
     
-    #plot_only()
+    plot_only()
         
-    run_and_plot()
+    #run_and_plot()
 
 
 

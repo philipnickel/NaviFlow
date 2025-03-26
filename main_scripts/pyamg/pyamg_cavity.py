@@ -33,7 +33,7 @@ nx, ny = 127, 127          # Grid size (63x63 to match MATLAB example)
 reynolds = 10000           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 3# Maximum number of iterations
+max_iterations = 1# Maximum number of iterations
 tolerance = 1e-5         # Convergence tolerance
 
 # 2. Create mesh
@@ -54,7 +54,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # Use PyAMG solver for pressure correction
 pressure_solver = PyAMGSolver(
     tolerance=1e-5,
-    max_iterations=100000,
+    max_iterations=100,
     smoother='gauss_seidel',
     presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
     postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),

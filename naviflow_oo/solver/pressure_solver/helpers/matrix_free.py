@@ -35,22 +35,22 @@ def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v):
     # East coefficients
     aE = np.zeros_like(p)
     if imax > 1:
-        aE[:-1, :] = rho * d_u_padded[1:-1, :] * dy
+        aE[:-1, :] = rho * d_u_padded[1:-1, :] / dy  # Scale by 1/dy since d_u already includes dy^2
     
     # West coefficients
     aW = np.zeros_like(p)
     if imax > 1:
-        aW[1:, :] = rho * d_u_padded[1:-1, :] * dy
+        aW[1:, :] = rho * d_u_padded[1:-1, :] / dy  # Scale by 1/dy since d_u already includes dy^2
     
     # North coefficients
     aN = np.zeros_like(p)
     if jmax > 1:
-        aN[:, :-1] = rho * d_v_padded[:, 1:-1] * dx
+        aN[:, :-1] = rho * d_v_padded[:, 1:-1] / dx  # Scale by 1/dx since d_v already includes dx^2
     
     # South coefficients
     aS = np.zeros_like(p)
     if jmax > 1:
-        aS[:, 1:] = rho * d_v_padded[:, 1:-1] * dx
+        aS[:, 1:] = rho * d_v_padded[:, 1:-1] / dx  # Scale by 1/dx since d_v already includes dx^2
     
     # Sum all coefficients to get diagonal (aP)
     aP = aE + aW + aN + aS

@@ -30,11 +30,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 511, 511           # Grid size (smaller for quick testing)
-reynolds = 10000           # Reynolds number
+nx, ny = 5, 5           # Grid size (smaller for quick testing)
+reynolds = 100           # Reynolds number
 alpha_p = 0.1             # Pressure relaxation factor
 alpha_u = 0.7             # Velocity relaxation factor
-max_iterations = 5     
+max_iterations = 1     
 tolerance = 1e-5          # Convergence tolerance
 
 # 2. Create mesh

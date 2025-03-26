@@ -21,15 +21,19 @@ from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
 
+# Create debug output directory
+debug_dir = 'debug_output'
+os.makedirs(debug_dir, exist_ok=True)
+
 # Start timing
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 127, 127           # Grid size (2^7-1)
+nx, ny = 63, 63           # Grid size (2^6-1)
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 1      # Maximum number of iterations (reduced to 3 for testing)
+max_iterations = 1       # Just 1 iteration for debugging
 tolerance = 1e-5         # Convergence tolerance
 
 # 2. Create mesh
@@ -43,24 +47,24 @@ fluid = FluidProperties(
     reynolds_number=reynolds,
     characteristic_velocity=1.0
 )
+
+
 print(f"Reynolds number: {fluid.get_reynolds_number()}")
 print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
-# Create a Jacobi smoother for the multigrid solver - optimized parameters
-jacobi_smoother = JacobiSolver(omega=0.8)
+# Create a Jacobi smoother for the multigrid solver
+jacobi_smoother = JacobiSolver(tolerance=1e-12, omega=0.9)
 
-# Use multigrid solver with Jacobi smoother for pressure correction - optimized parameters
+# Use multigrid solver with Jacobi smoother for pressure correction
 pressure_solver = MultiGridSolver(
-    tolerance=1e-5,
-    max_iterations=5,
-    pre_smoothing=5,      # Reduced from 5 to 2
-    post_smoothing=5,     # Reduced from 5 to 2
-    smoother_iterations=5, # Reduced from 5 to 2
-    smoother_omega=0.8,    # Increased from 0.8 to 1.0
-    smoother=jacobi_smoother
+    tolerance=1e-8,  # Tighter tolerance
+    max_iterations=1,  # Only 1 multigrid iteration for debugging
+    pre_smoothing=5,  # 3 pre-smoothing steps
+    post_smoothing=5,  # 3 post-smoothing steps
+    smoother_omega=0.8,  # Adjusted relaxation factor for better performance
+    smoother=jacobi_smoother,  # Use the Jacobi smoother
 )
-
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
@@ -83,7 +87,8 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=5)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, 
+                         track_infinity_norm=True, infinity_norm_interval=5)
 
 # End timing
 end_time = time.time()
@@ -103,3 +108,6 @@ result.plot_combined_results(
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_multigrid_jacobi_results.pdf'),
     show=False
 )
+
+# After the simulation completes, plot the V-cycle results
+algorithm.pressure_solver.plot_vcycle_results(os.path.join(debug_dir, 'vcycle_analysis.pdf'))

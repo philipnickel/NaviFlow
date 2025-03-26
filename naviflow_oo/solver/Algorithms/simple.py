@@ -118,13 +118,21 @@ class SimpleSolver(BaseAlgorithm):
             u_momentum_res = np.abs(u_star - self.u)
             v_momentum_res = np.abs(v_star - self.v)
             momentum_res = max(np.max(u_momentum_res), np.max(v_momentum_res))
-            
-            
-            # Solve pressure correction equation
+            # save u_star, v_star, d_u, d_v, p_star to file
+            np.save('main_scripts/geo_multigrid/multigrid_debugging/arrays_5x5/u_star.npy', u_star)
+            np.save('main_scripts/geo_multigrid/multigrid_debugging/arrays_5x5/v_star.npy', v_star)
+            np.save('main_scripts/geo_multigrid/multigrid_debugging/arrays_5x5/d_u.npy', d_u)
+            np.save('main_scripts/geo_multigrid/multigrid_debugging/arrays_5x5/d_v.npy', d_v)
+            np.save('main_scripts/geo_multigrid/multigrid_debugging/arrays_5x5/p_star.npy', p_star)
+            # mesh
+            np.save('main_scripts/geo_multigrid/multigrid_debugging/arrays_5x5/mesh.npy', self.mesh)
+              # Solve pressure correction equation
             p_prime = self.pressure_solver.solve(
                 self.mesh, u_star, v_star, d_u, d_v, p_star
             )
-            
+            # save p_prime to file
+            np.save('main_scripts/geo_multigrid/multigrid_debugging/arrays_5x5/p_prime.npy', p_prime)
+
             # Update pressure with relaxation
             self.p = p_star + self.alpha_p * p_prime
             
