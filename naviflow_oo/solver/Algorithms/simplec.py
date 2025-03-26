@@ -116,31 +116,18 @@ class SimplecSolver(BaseAlgorithm):
             v_momentum_res = np.abs(v_star - self.v)
             momentum_res = max(np.max(u_momentum_res), np.max(v_momentum_res))
             
-            # SIMPLEC modification: Vectorized adjustment of d_u and d_v coefficients
-            # Get diagonal coefficients from momentum equations
-            aP_u = np.where(d_u != 0, 1.0 / (d_u * self.alpha_u), 0)
-            aP_v = np.where(d_v != 0, 1.0 / (d_v * self.alpha_u), 0)
+            # Add SIMPLEC modification to d_u and d_v
+            d_u_simplec = d_u / (1 - (1 - self.alpha_u))
+            d_v_simplec = d_v / (1 - (1 - self.alpha_u))
             
-            # Create masks for non-zero coefficients
-            d_u_mask = d_u != 0
-            d_v_mask = d_v != 0
-            
-            # Initialize modified coefficients
-            d_u_simplec = d_u.copy()
-            d_v_simplec = d_v.copy()
-            
-            # Calculate SIMPLEC correction with stability factor
-            stability_factor = 0.95  # Slightly under-correct to prevent oscillations
-            d_u_simplec[d_u_mask] = stability_factor * d_u[d_u_mask] / (1 - (1 - self.alpha_u))
-            d_v_simplec[d_v_mask] = stability_factor * d_v[d_v_mask] / (1 - (1 - self.alpha_u))
-            
-            # Add stability bounds
-            d_u_simplec = np.clip(d_u_simplec, 0, 1e2)
-            d_v_simplec = np.clip(d_v_simplec, 0, 1e2)
-            
-            # Solve pressure correction equation
+            # Use modified coefficients in pressure correction
             p_prime = self.pressure_solver.solve(
-                self.mesh, u_star, v_star, d_u_simplec, d_v_simplec, p_star
+                mesh=self.mesh,
+                u_star=u_star,
+                v_star=v_star,
+                d_u=d_u_simplec,  # Use SIMPLEC modified coefficient
+                d_v=d_v_simplec,  # Use SIMPLEC modified coefficient
+                p_star=p_star
             )
             
             # Apply pressure correction smoothing
@@ -164,9 +151,11 @@ class SimplecSolver(BaseAlgorithm):
             
             p_star = self.p.copy()
             
-            # Update velocity with modified coefficients
+            # Use modified coefficients in velocity correction
             self.u, self.v = self.velocity_updater.update_velocity(
-                self.mesh, u_star, v_star, p_prime, d_u_simplec, d_v_simplec, self.bc_manager
+                self.mesh, u_star, v_star, p_prime, 
+                d_u_simplec, d_v_simplec,  # Use SIMPLEC modified coefficients
+                self.bc_manager
             )
             
             # Calculate total residual

@@ -8,6 +8,7 @@ from .base_pressure_solver import PressureSolver
 from .helpers.rhs_construction import get_rhs
 from .helpers.matrix_free import compute_Ap_product
 from .jacobi import JacobiSolver
+from .helpers.spectral_radius_damping import find_optimal_damping, estimate_optimal_damping
 
 class MultiGridSolver(PressureSolver):
     """
@@ -24,8 +25,8 @@ class MultiGridSolver(PressureSolver):
     
     def __init__(self, tolerance=1e-6, max_iterations=100, 
                  pre_smoothing=3, post_smoothing=3,
-                 smoother_iterations=2, smoother_omega=0.8,
-                 smoother=None, cycle_type='v'):
+                 smoother_iterations=2, smoother_omega=None,
+                 smoother=None, cycle_type='v', auto_omega=True):
         """
         Initialize the multigrid solver.
         
@@ -42,11 +43,13 @@ class MultiGridSolver(PressureSolver):
         smoother_iterations : int, optional
             Number of iterations for the smoother
         smoother_omega : float, optional
-            Relaxation factor for the smoother (0.8 is often good for Jacobi)
+            Relaxation factor for the smoother (if None and auto_omega=True, will be computed)
         smoother : PressureSolver, optional
             External smoother to use (if None, will use internal Jacobi smoother)
         cycle_type : str, optional
             Type of multigrid cycle to use ('v' for V-cycle, 'f' for F-cycle)
+        auto_omega : bool, optional
+            Whether to automatically compute optimal damping parameter
         """
         super().__init__(tolerance=tolerance, max_iterations=max_iterations)
         self.pre_smoothing = pre_smoothing
@@ -55,12 +58,13 @@ class MultiGridSolver(PressureSolver):
         self.smoother_omega = smoother_omega
         self.residual_history = []
         self.cycle_type = cycle_type.lower()
+        self.auto_omega = auto_omega
         
-        # Initialize smoother
+        # Initialize smoother (will be updated in solve if auto_omega is True)
         self.smoother = smoother if smoother is not None else JacobiSolver(
             tolerance=1e-4,  # Not used for fixed iterations
             max_iterations=1000,  # Not used for fixed iterations
-            omega=smoother_omega
+            omega=smoother_omega if smoother_omega is not None else 0.8
         )
         
     def _is_valid_grid_size(self, n):
@@ -81,6 +85,42 @@ class MultiGridSolver(PressureSolver):
         k = math.log2(n + 1)
         return k.is_integer() and k >= 1
         
+    def _compute_optimal_omega(self, mesh, d_u, d_v):
+        """
+        Compute the optimal damping parameter for the Jacobi smoother.
+        
+        Parameters:
+        -----------
+        mesh : StructuredMesh
+            The computational mesh
+        d_u, d_v : ndarray
+            Momentum equation coefficients
+            
+        Returns:
+        --------
+        float
+            Optimal damping parameter
+        """
+        nx, ny = mesh.get_dimensions()
+        dx, dy = mesh.get_cell_sizes()
+        rho = 1.0  # This should come from fluid properties
+        
+        # First try the fast estimation
+        estimated_omega = estimate_optimal_damping(nx, ny, dx, dy, rho, d_u, d_v)
+        
+        # If the estimation is close to 1.0, use it directly
+        if abs(estimated_omega - 1.0) < 0.1:
+            return estimated_omega
+            
+        # Otherwise, compute the exact optimal value
+        optimal_omega, spectral_radius = find_optimal_damping(nx, ny, dx, dy, rho, d_u, d_v)
+        
+        # If the spectral radius is too high, use the estimated value
+        if spectral_radius > 0.95:
+            return estimated_omega
+            
+        return optimal_omega
+
     def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
         """
         Solve the pressure correction equation using the matrix-free multigrid method.
@@ -111,6 +151,16 @@ class MultiGridSolver(PressureSolver):
         if nx != ny:
             raise ValueError(f"Only square grids are supported. Got {nx}x{ny}.")
         
+        # Compute optimal damping parameter if needed
+        if self.auto_omega and self.smoother_omega is None:
+            optimal_omega = self._compute_optimal_omega(mesh, d_u, d_v)
+            self.smoother_omega = optimal_omega
+            self.smoother = JacobiSolver(
+                tolerance=1e-4,
+                max_iterations=1000,
+                omega=optimal_omega
+            )
+            print(f"Computed optimal damping parameter: {optimal_omega:.3f}")
         
         dx, dy = mesh.get_cell_sizes()
         rho = 1.0  # This should come from fluid properties

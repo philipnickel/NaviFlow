@@ -53,7 +53,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use PyAMG solver for pressure correction
 pressure_solver = PyAMGSolver(
-    tolerance=1e-8,
+    tolerance=1e-5,
     max_iterations=100,
     smoother='gauss_seidel',
     presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
@@ -82,7 +82,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation with SIMPLE algorithm and PyAMG solver...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
 
 # End timing
 end_time = time.time()
@@ -100,5 +100,5 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'PyAMG Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_pyamg_results.pdf'),
-    show=True
+    show=False
 )

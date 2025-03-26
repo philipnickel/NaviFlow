@@ -1,0 +1,180 @@
+{
+  "columns":[
+    [
+      "Algorithm",
+      "alpha_p"
+    ],
+    [
+      "Algorithm",
+      "alpha_u"
+    ],
+    [
+      "Algorithm",
+      "convergence_converged"
+    ],
+    [
+      "Algorithm",
+      "convergence_final_residual"
+    ],
+    [
+      "Algorithm",
+      "convergence_tolerance"
+    ],
+    [
+      "Momentum Solver",
+      "type"
+    ],
+    [
+      "Performance",
+      "avg_time_per_iteration"
+    ],
+    [
+      "Performance",
+      "cpu_time"
+    ],
+    [
+      "Performance",
+      "iterations"
+    ],
+    [
+      "Performance",
+      "total_time"
+    ],
+    [
+      "Pressure Solver",
+      "matrix_free"
+    ],
+    [
+      "Pressure Solver",
+      "max_iterations"
+    ],
+    [
+      "Pressure Solver",
+      "tolerance"
+    ],
+    [
+      "Pressure Solver",
+      "type"
+    ],
+    [
+      "Simulation",
+      "algorithm"
+    ],
+    [
+      "Simulation",
+      "reynolds_number"
+    ],
+    [
+      "Simulation",
+      "timestamp"
+    ],
+    [
+      "System",
+      "platform"
+    ],
+    [
+      "System",
+      "processor"
+    ],
+    [
+      "System",
+      "python_version"
+    ]
+  ],
+  "index":[
+    "Basic Cavity",
+    "Matrix Free",
+    "Preconditioned Cg",
+    "Pyamg"
+  ],
+  "data":[
+    [
+      0.1,
+      0.7,
+      true,
+      0.0000099952,
+      0.00001,
+      "StandardMomentumSolver",
+      0.1597799693,
+      7385.443691,
+      4769,
+      761.9906737804,
+      null,
+      1000,
+      0.000001,
+      "DirectPressureSolver",
+      "SimpleSolver",
+      100,
+      "2025-03-18 23:16:57",
+      "macOS-14.4.1-arm64-arm-64bit",
+      "Apple M2 Pro",
+      "3.12.2"
+    ],
+    [
+      0.1,
+      0.7,
+      true,
+      0.0000099941,
+      0.00001,
+      "StandardMomentumSolver",
+      0.0250123854,
+      116.82826,
+      4769,
+      119.2840659618,
+      null,
+      100000,
+      0.00001,
+      "MatrixFreeCGSolver",
+      "SimpleSolver",
+      100,
+      "2025-03-18 15:45:08",
+      "macOS-14.4.1-arm64-arm-64bit",
+      "Apple M2 Pro",
+      "3.12.2"
+    ],
+    [
+      0.1,
+      0.7,
+      true,
+      0.0000099954,
+      0.00001,
+      "StandardMomentumSolver",
+      0.120456332,
+      5572.662081,
+      4769,
+      574.4562470913,
+      null,
+      100000,
+      0.00001,
+      "PreconditionedCGSolver",
+      "SimpleSolver",
+      100,
+      "2025-03-18 15:48:13",
+      "macOS-14.4.1-arm64-arm-64bit",
+      "Apple M2 Pro",
+      "3.12.2"
+    ],
+    [
+      0.1,
+      0.7,
+      true,
+      0.0000099952,
+      0.00001,
+      "StandardMomentumSolver",
+      0.1013668721,
+      4507.404192,
+      4769,
+      483.418612957,
+      true,
+      100,
+      0.00001,
+      "PyAMGSolver",
+      "SimpleSolver",
+      100,
+      "2025-03-18 16:01:11",
+      "macOS-14.4.1-arm64-arm-64bit",
+      "Apple M2 Pro",
+      "3.12.2"
+    ]
+  ]
+}
