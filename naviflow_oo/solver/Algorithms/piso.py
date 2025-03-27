@@ -1,6 +1,7 @@
 """
 PISO (Pressure Implicit with Splitting of Operators) algorithm implementation.
 """ 
+
 import numpy as np
 import os
 from .base_algorithm import BaseAlgorithm
@@ -11,13 +12,13 @@ class PisoSolver(BaseAlgorithm):
     """
     PISO algorithm implementation.
     
-    The PISO (Semi-Implicit Method for Pressure-Linked Equations) algorithm
+    The PISO (Pressure Implicit with Splitting of Operators) algorithm
     is a widely used method for solving the Navier-Stokes equations for incompressible flows.
-    It uses a predictor-corrector approach to handle the pressure-velocity coupling.
+    It uses a predictor-corrector approach with multiple pressure corrections per iteration.
     """
     def __init__(self, mesh, fluid, pressure_solver=None, momentum_solver=None, 
                  velocity_updater=None, boundary_conditions=None, 
-                 alpha_p=0.3, alpha_u=0.7):
+                 alpha_p=0.3, alpha_u=0.7, n_corrections=2):
         """
         Initialize the PISO solver.
         
@@ -37,13 +38,15 @@ class PisoSolver(BaseAlgorithm):
             Boundary conditions
         alpha_p, alpha_u : float
             Relaxation factors for pressure and velocity
+        n_corrections : int
+            Number of pressure corrections per iteration
         """
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
         self.alpha_p = alpha_p
         self.alpha_u = alpha_u
+        self.n_corrections = n_corrections
         
-    
     def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
               track_infinity_norm=False, infinity_norm_interval=10):
         """
@@ -81,10 +84,10 @@ class PisoSolver(BaseAlgorithm):
         # Initialize variables
         p_star = self.p.copy()
         p_prime = np.zeros((nx, ny))
-        self.residual_history = []  # Reset residual history
-        self.momentum_residual_history = []  # Track momentum residuals
-        self.pressure_residual_history = []  # Track pressure residuals
-        self.infinity_norm_history = []  # Track infinity norm errors
+        self.residual_history = []
+        self.momentum_residual_history = []
+        self.pressure_residual_history = []
+        self.infinity_norm_history = []
         
         # Main iteration loop
         iteration = 1
@@ -92,15 +95,13 @@ class PisoSolver(BaseAlgorithm):
         momentum_res = 1000
         pressure_res = 1000
         
-        
         while (iteration <= max_iterations) and (max_res > tolerance):
             # Store old values for convergence check
             u_old = self.u.copy()
             v_old = self.v.copy()
             p_old = self.p.copy()
             
-            
-            # Solve momentum equations with relaxation factor
+            # Predictor step: Solve momentum equations
             u_star, d_u = self.momentum_solver.solve_u_momentum(
                 self.mesh, self.fluid, self.u, self.v, p_star, 
                 relaxation_factor=self.alpha_u,
@@ -118,26 +119,30 @@ class PisoSolver(BaseAlgorithm):
             v_momentum_res = np.abs(v_star - self.v)
             momentum_res = max(np.max(u_momentum_res), np.max(v_momentum_res))
             
-            
-            # Solve pressure correction equation
-            p_prime = self.pressure_solver.solve(
-                self.mesh, u_star, v_star, d_u, d_v, p_star
-            )
-            
-            # Update pressure with relaxation
-            self.p = p_star + self.alpha_p * p_prime
+            # Multiple pressure corrections (PISO steps)
+            for correction in range(self.n_corrections):
+                # Solve pressure correction equation
+                p_prime = self.pressure_solver.solve(
+                    self.mesh, u_star, v_star, d_u, d_v, p_star
+                )
+                
+                # Update pressure
+                self.p = p_star + self.alpha_p * p_prime
+                
+                # Update velocity
+                self.u, self.v = self.velocity_updater.update_velocity(
+                    self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
+                )
+                
+                # Update p_star for next correction
+                p_star = self.p.copy()
+                
+                # Update u_star and v_star for next correction
+                u_star = self.u.copy()
+                v_star = self.v.copy()
             
             # Calculate pressure residual
             pressure_res = np.max(np.abs(self.p - p_old))
-            
-            p_star = self.p.copy()  # Update p_star for next iteration
-            
-            
-            # Update velocity
-            self.u, self.v = self.velocity_updater.update_velocity(
-                self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
-            )
-            
             
             # Calculate total residual
             u_res = np.abs(self.u - u_old)
@@ -174,9 +179,7 @@ class PisoSolver(BaseAlgorithm):
                   f"Momentum Residual: {momentum_res:.6e}, "
                   f"Pressure Residual: {pressure_res:.6e}")
             
-                
             iteration += 1
-            
         
         # Update profiling data
         self.profiler.set_iterations(iteration - 1)
