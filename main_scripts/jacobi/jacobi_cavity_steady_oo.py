@@ -24,7 +24,9 @@ start_time = time.time()
 
 # 1. Set up simulation parameters
 nx, ny = 127, 127          # Grid size
+nx, ny = 127, 127          # Grid size
 reynolds = 100           # Reynolds number
+alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.7            # Velocity relaxation factor
 max_iterations = 10000     # Maximum number of iterations

@@ -1,5 +1,5 @@
 """
-Lid-driven cavity flow simulation using the object-oriented framework.
+Lid-driven cavity flow simulation using the object-oriented framework with SIMPLEC algorithm and Jacobi solver.
 """
 
 import numpy as np
@@ -10,21 +10,25 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
 from naviflow_oo.preprocessing.fields.vector_field import VectorField
-from naviflow_oo.solver.Algorithms.simple import SimpleSolver
-from naviflow_oo.solver.pressure_solver.direct import DirectPressureSolver
+from naviflow_oo.solver.Algorithms.simplec import SimplecSolver
+from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
+
+# Create results directory
+results_dir = os.path.join(os.path.dirname(__file__), 'results')
+os.makedirs(results_dir, exist_ok=True)
 
 # Start timing
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 127, 127          # Grid size
-reynolds = 100             # Reynolds number
-alpha_p = 0.1              # Pressure relaxation factor
-alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 100000     # Maximum number of iterations
-tolerance = 1e-5           # Convergence tolerance
+nx, ny = 129, 129        # Grid size
+reynolds = 100           # Reynolds number
+alpha_p = 0.15          # Start with very conservative pressure relaxation
+alpha_u = 0.5           # Conservative velocity relaxation
+max_iterations = 50000   # Maximum number of iterations
+tolerance = 1e-8        # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -41,12 +45,17 @@ print(f"Reynolds number: {fluid.get_reynolds_number()}")
 print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
-pressure_solver = DirectPressureSolver()
+# Use Jacobi solver for pressure correction
+pressure_solver = JacobiSolver(
+    tolerance=1e-6,
+    max_iterations=3000000,  # More inner iterations
+    omega=0.6           # Conservative Jacobi relaxation
+)
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
-algorithm = SimpleSolver(
+algorithm = SimplecSolver(
     mesh=mesh,
     fluid=fluid,
     pressure_solver=pressure_solver,
@@ -62,13 +71,13 @@ algorithm.set_boundary_condition('bottom', 'wall')
 algorithm.set_boundary_condition('left', 'wall')
 algorithm.set_boundary_condition('right', 'wall')
 
-# Create results directory
-results_dir = os.path.join(os.path.dirname(__file__), 'results')
-os.makedirs(results_dir, exist_ok=True)
-
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
+result = algorithm.solve(
+    max_iterations=50000,
+    tolerance=1e-8,
+    save_profile=False
+)
 
 # End timing
 end_time = time.time()
@@ -84,10 +93,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'Cavity Flow Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_matrix_results.pdf'),
+    title=f'SIMPLEC Cavity Flow Results (Re={reynolds})',
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_simplec_jacobi_results.pdf'),
     show=False
-)
-
-
-
+) 

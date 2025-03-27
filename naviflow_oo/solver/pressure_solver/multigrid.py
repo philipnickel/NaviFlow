@@ -12,6 +12,7 @@ from .helpers.multigrid_helpers import restrict, interpolate
 from .jacobi import JacobiSolver
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from scipy import sparse
+from .helpers.spectral_radius_damping import find_optimal_damping, estimate_optimal_damping
 
 class MultiGridSolver(PressureSolver):
     """
@@ -52,7 +53,7 @@ class MultiGridSolver(PressureSolver):
         self.residual_history = []
         self.vcycle_data = []  # Store V-cycle data
         
-        # Initialize smoother
+        # Initialize smoother (will be updated in solve if auto_omega is True)
         self.smoother = smoother if smoother is not None else JacobiSolver(
             tolerance=1e-12,
             omega=smoother_omega if smoother_omega is not None else 0.8

@@ -1,0 +1,34 @@
+{
+  "algorithm": {
+    "alpha_p": 0.1,
+    "alpha_u": 0.7,
+    "convergence_converged": true,
+    "convergence_final_residual": 9.994149580076772e-06,
+    "convergence_tolerance": 1e-05
+  },
+  "momentum_solver": {
+    "type": "StandardMomentumSolver"
+  },
+  "pressure_solver": {
+    "max_iterations": 100000,
+    "tolerance": 1e-05,
+    "type": "MatrixFreeCGSolver"
+  },
+  "mesh": {},
+  "simulation": {
+    "algorithm": "SimpleSolver",
+    "reynolds_number": 100,
+    "timestamp": "2025-03-18 15:45:08"
+  },
+  "system": {
+    "platform": "macOS-14.4.1-arm64-arm-64bit",
+    "processor": "Apple M2 Pro",
+    "python_version": "3.12.2"
+  },
+  "performance": {
+    "avg_time_per_iteration": 0.025012385397743295,
+    "cpu_time": 116.82826,
+    "iterations": 4769,
+    "total_time": 119.28406596183777
+  }
+}
