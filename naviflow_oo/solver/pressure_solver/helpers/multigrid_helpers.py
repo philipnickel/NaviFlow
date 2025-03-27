@@ -3,6 +3,7 @@ Helper functions for the multigrid solver.
 """
 
 import numpy as np
+
 def restrict(fine_grid: np.ndarray) -> np.ndarray:
     """
     Reduces a fine grid to a coarse grid by taking every other point.

@@ -112,19 +112,19 @@ class JacobiSolver(PressureSolver):
         # Pre-compute coefficient arrays
         # East coefficients
         aE = np.zeros((nx, ny))
-        aE[:-1, :] = rho * d_u[1:nx, :] * dy
+        aE[:-1, :] = rho * d_u[1:nx, :] * dy#/dx
         
         # West coefficients
         aW = np.zeros((nx, ny))
-        aW[1:, :] = rho * d_u[1:nx, :] * dy
+        aW[1:, :] = rho * d_u[1:nx, :] * dy#/dx
         
         # North coefficients
         aN = np.zeros((nx, ny))
-        aN[:, :-1] = rho * d_v[:, 1:ny] * dx
+        aN[:, :-1] = rho * d_v[:, 1:ny] * dx#/dy
         
         # South coefficients
         aS = np.zeros((nx, ny))
-        aS[:, 1:] = rho * d_v[:, 1:ny] * dx
+        aS[:, 1:] = rho * d_v[:, 1:ny] * dx#/dy
         
         # Diagonal coefficients
         aP = aE + aW + aN + aS
@@ -150,7 +150,7 @@ class JacobiSolver(PressureSolver):
         for k in range(num_iterations):
  
             # Ensure reference point
-            #p_2d[0, 0] = 0.0
+            p_2d[0, 0] = 0.0
             
             # Update neighbor values
             p_east[:-1, :] = p_2d[1:, :]

@@ -71,6 +71,8 @@ class MultiGridSolver(PressureSolver):
             'data': data.copy()  # Store the actual data for plotting
         })
 
+
+
     def plot_vcycle_results(self, output_path='debug_output/vcycle_analysis.pdf'):
         """Plot the V-cycle results from stored data."""
         # Convert data to DataFrame for easier manipulation
@@ -229,7 +231,8 @@ class MultiGridSolver(PressureSolver):
         from .helpers.coeff_matrix import get_coeff_mat
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
         
-        # Fix reference pressure at (0,0)
+        # Fix reference pressure at P(1,1) - which is (0,0) in 0-based indexing
+        # Set the first row of the matrix to enforce P'(1,1) = 0
         A_lil = A.tolil()
         A_lil[0, :] = 0
         A_lil[0, 0] = 1
@@ -243,9 +246,11 @@ class MultiGridSolver(PressureSolver):
             A[i, i] += eps
         A = A.tocsr()
         
+        # Set the RHS value at the reference point to enforce P'(1,1) = 0
+        residual[0] = 0.0
+        
         # Solve the system
         from scipy.sparse.linalg import spsolve
-        residual[0] = 0.0
         p_prime_flat = spsolve(A, residual)
         
         # Reshape to 2D with Fortran ordering
@@ -255,20 +260,25 @@ class MultiGridSolver(PressureSolver):
         p_prime[0, 0] = 0.0
         
         return p_prime
-    
+
+
+
+
+
     def _v_cycle(self, u, f, mesh, rho, d_u, d_v, omega, pre_smoothing, post_smoothing, 
                 grid_calculations, level=0):
         """
         Performs one V-cycle of the multigrid method.
         """
+        
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
-        print(f"V-cycle dimensions: {nx} x {ny}")
-        
+        #print(f"V-cycle dimensions: {nx} x {ny}")
+    
         # If we're at the coarsest grid, solve directly
         # Increased threshold to stop coarsening earlier (was 31)
-        if nx <= 15:
-            print(f"Coarsest grid size: {nx}x{ny}")
+        if nx <= 3:
+            #print(f"Coarsest grid size: {nx}x{ny}")
             # Reshape f to 2D for the direct solver
             f_2d = f.reshape((nx, ny), order='F')
             
@@ -286,9 +296,12 @@ class MultiGridSolver(PressureSolver):
         
         # Store initial solution
         self._store_vcycle_data(level, 'initial_solution', u.reshape((nx, ny), order='F'))
-        # clamp p to 0 at (0,0)
-        #u[0] = 0.0
-
+        
+        # Ensure reference pressure point is fixed to zero at P(1,1)
+        # In 0-based indexing, this is P(0,0)
+        #reference_index = 0  # Index of the P(1,1) node in flattened array
+        #u[reference_index] = 0.0
+        
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing)
@@ -297,22 +310,28 @@ class MultiGridSolver(PressureSolver):
         
         # Compute residual: r = f - Au
         Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
+
         r = f - Au
         self._store_vcycle_data(level, 'residual', r.reshape((nx, ny), order='F'))
         
         # Restrict residual to coarser grid
         r = r.reshape((nx, ny), order='F')
-        print(f"residual min: {np.min(r)}")
-        print(f"residual max: {np.max(r)}")
-        print(f"residual mean: {np.mean(r)}")
-
-        r_coarse = restrict(r) #* 10
-        print(f"Restricted residual min: {np.min(r_coarse)}")
-        print(f"Restricted residual max: {np.max(r_coarse)}")
-        print(f"Restricted residual mean: {np.mean(r_coarse)}")
+        #print(f"residual min: {np.min(r)}")
+        #print(f"residual max: {np.max(r)}")
+        #print(f"residual mean: {np.mean(r)}")
+        h = 1 / (nx + 1)
+        h_coarse = h*2 
+        # In your _v_cycle method:
+        #print(f"Level {level}: Residual norm before restriction: {np.linalg.norm(r):.3e}")
+        r_coarse = restrict(r) #* h_coarse**2 / h**2
+        #print(f"Level {level}: Residual norm after restriction: {np.linalg.norm(r_coarse):.3e}")
+        #r_coarse = r_coarse * h_coarse**2 / h**2
+        #print(f"Restricted residual min: {np.min(r_coarse)}")
+        #print(f"Restricted residual max: {np.max(r_coarse)}")
+        #print(f"Restricted residual mean: {np.mean(r_coarse)}")
         
         
-        print(f"Restricted residual mean: {np.mean(r_coarse)}")
+        #print(f"Restricted residual mean: {np.mean(r_coarse)}")
         
         self._store_vcycle_data(level, 'restricted_residual', r_coarse)
         
@@ -343,7 +362,9 @@ class MultiGridSolver(PressureSolver):
             for j in range(coarse_grid_size + 1):
                 # Compute coefficient using the same formula as fine grid
                 d_v_coarse[i, j] = 1.0 / (rho * (1.0/dy_coarse + 1.0/dy_coarse))
-        
+        #d_u_coarse[0,0] = 0.0
+        #d_v_coarse[0,0] = 0.0
+
         # Recursive V-cycle on coarse grid
         e_coarse = self._v_cycle(u=np.zeros_like(r_coarse.flatten('F')), f=r_coarse.flatten('F'), 
                                 mesh=mesh_coarse, rho=rho, d_u=d_u_coarse, d_v=d_v_coarse, 
@@ -355,8 +376,8 @@ class MultiGridSolver(PressureSolver):
         self._store_vcycle_data(level, 'coarse_correction', e_coarse_2d)
         
         # Interpolate error to fine grid
-        e_interpolated = interpolate(e_coarse_2d, nx)
-        
+        e_interpolated = interpolate(e_coarse_2d, nx) 
+        e_interpolated = e_interpolated# *  (h_coarse)/(h)
         
         self._store_vcycle_data(level, 'interpolated_correction', e_interpolated.reshape((nx, ny), order='F'))
         
@@ -364,7 +385,11 @@ class MultiGridSolver(PressureSolver):
         self._store_vcycle_data(level, 'before_correction', u.reshape((nx, ny), order='F'))
         
         # Apply correction
-        u += e_interpolated * 0.25       
+        # Scale interpolated error to match fine grid scale
+        h_coarse = dx_coarse  # Grid spacing on coarse grid
+        h = mesh.get_cell_sizes()[0]  # Grid spacing on fine grid
+        #e_interpolated *= (h_coarse**2 / h**2)**2  # Scale correction
+        u += e_interpolated
 
         self._store_vcycle_data(level, 'after_correction', u.reshape((nx, ny), order='F'))
         
@@ -373,6 +398,12 @@ class MultiGridSolver(PressureSolver):
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing)
                               
         self._store_vcycle_data(level, 'after_postsmooth', u.reshape((nx, ny), order='F'))
+        
+        # Ensure reference point is zero before returning solution
+        #if u.ndim == 1:
+        #    u[reference_index] = 0.0
+        #else:
+        #    u[0, 0] = 0.0
         
         return u
     
