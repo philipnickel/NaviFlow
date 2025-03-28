@@ -248,7 +248,7 @@ class MultiGridSolver(PressureSolver):
         A = A.tocsr()
         
         # Set the RHS value at the reference point to enforce P'(1,1) = 0
-        residual[0] = 0.0
+        #residual[0] = 0.0
         
         # Solve the system
         from scipy.sparse.linalg import spsolve
@@ -258,7 +258,7 @@ class MultiGridSolver(PressureSolver):
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
         # Ensure reference pressure is exactly zero
-        p_prime[0, 0] = 0.0
+        #p_prime[0, 0] = 0.0
         
         return p_prime
 
@@ -278,22 +278,28 @@ class MultiGridSolver(PressureSolver):
     
         # If we're at the coarsest grid, solve directly
         # Increased threshold to stop coarsening earlier (was 31)
-        if nx <= 3:
+        if nx <= 63:
             #print(f"Coarsest grid size: {nx}x{ny}")
+            u = self.smoother.solve(mesh=mesh, p=u, b=f,
+                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=10000, track_residuals=False)
+            # Ensure boundaries are 0
+            u[0, :] = 0.0
+            u[:, 0] = 0.0
+            u[-1, :] = 0.0
+            u[:, -1] = 0.0
             # Reshape f to 2D for the direct solver
-            f_2d = f.reshape((nx, ny), order='F')
+            #f_2d = f.reshape((nx, ny), order='F')
             
             # Use direct solver for coarsest grid
-            p_prime = self._solve_residual_direct(
-                mesh=mesh,
-                residual=f,
-                d_u=d_u,
-                d_v=d_v,
-                rho=rho
-            )
-            
-            self._store_vcycle_data(level, 'coarse_solution', p_prime)
-            return p_prime.flatten('F')  # Ensure Fortran ordering when flattening
+            #p_prime = self._solve_residual_direct(
+            #    mesh=mesh,
+            #    residual=f,
+            #    d_u=d_u,
+            #    d_v=d_v,
+            #    rho=rho
+            #)
+            self._store_vcycle_data(level, 'coarse_solution', u)
+            return u#.flatten('F')  # Ensure Fortran ordering when flattening
         
         # Store initial solution
         self._store_vcycle_data(level, 'initial_solution', u.reshape((nx, ny), order='F'))
@@ -305,7 +311,7 @@ class MultiGridSolver(PressureSolver):
         
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
-                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing)
+                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
 
         self._store_vcycle_data(level, 'after_presmooth', u.reshape((nx, ny), order='F'))
         
@@ -322,11 +328,12 @@ class MultiGridSolver(PressureSolver):
         #print(f"residual mean: {np.mean(r)}")
         h = 1 / (nx + 1)
         h_coarse = h*2 
+        scale_factor = h_coarse**2 / h**2
         # In your _v_cycle method:
         #print(f"Level {level}: Residual norm before restriction: {np.linalg.norm(r):.3e}")
         r_coarse = restrict(r) #* h_coarse**2 / h**2
         #print(f"Level {level}: Residual norm after restriction: {np.linalg.norm(r_coarse):.3e}")
-        #r_coarse = r_coarse * h_coarse**2 / h**2
+        r_coarse = r_coarse / scale_factor
         #print(f"Restricted residual min: {np.min(r_coarse)}")
         #print(f"Restricted residual max: {np.max(r_coarse)}")
         #print(f"Restricted residual mean: {np.mean(r_coarse)}")
@@ -378,7 +385,6 @@ class MultiGridSolver(PressureSolver):
         
         # Interpolate error to fine grid
         e_interpolated = interpolate(e_coarse_2d, nx) 
-        e_interpolated = e_interpolated# *  (h_coarse)/(h)
         
         self._store_vcycle_data(level, 'interpolated_correction', e_interpolated.reshape((nx, ny), order='F'))
         
@@ -386,17 +392,13 @@ class MultiGridSolver(PressureSolver):
         self._store_vcycle_data(level, 'before_correction', u.reshape((nx, ny), order='F'))
         
         # Apply correction
-        # Scale interpolated error to match fine grid scale
-        h_coarse = dx_coarse  # Grid spacing on coarse grid
-        h = mesh.get_cell_sizes()[0]  # Grid spacing on fine grid
-        #e_interpolated *= (h_coarse**2 / h**2)**2  # Scale correction
         u += e_interpolated
 
         self._store_vcycle_data(level, 'after_correction', u.reshape((nx, ny), order='F'))
         
         # Post-smoothing on fine grid
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
-                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing)
+                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
                               
         self._store_vcycle_data(level, 'after_postsmooth', u.reshape((nx, ny), order='F'))
         

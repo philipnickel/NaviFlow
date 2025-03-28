@@ -55,16 +55,16 @@ print(f"Calculated viscosity: {viscosity}")
 
 # 4. Create solvers
 # Create a Jacobi smoother for the multigrid solver
-smoother = JacobiSolver(omega=0.9)  # Lower omega for stability
+smoother = JacobiSolver(omega=0.8)  # Lower omega for stability
 
 # Create multigrid solver with conservative parameters
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=1000,        # Fewer iterations
+    max_iterations=1,        # Fewer iterations
     tolerance=1e-5,          # Tighter tolerance
-    pre_smoothing=10,         # Fewer pre-smoothing steps
-    post_smoothing=10,        # Fewer post-smoothing steps 
-    smoother_omega=0.9       # Conservative relaxation
+    pre_smoothing=5,         # Fewer pre-smoothing steps
+    post_smoothing=5,        # Fewer post-smoothing steps 
+    smoother_omega=0.8       # Conservative relaxation
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -228,4 +228,3 @@ print(f"Mean absolute value in solution: {np.mean(np.abs(result.p)):.6e}")
 print(f"Grid size used: {nx}x{ny}")
 print(f"Final residual: {algorithm.pressure_solver.final_residual if hasattr(algorithm.pressure_solver, 'final_residual') else 'N/A'}")
 print(f"Iterations completed: {algorithm.pressure_solver.iterations if hasattr(algorithm.pressure_solver, 'iterations') else 'N/A'}")
-

@@ -5,12 +5,42 @@ Standard implementation of momentum solver.
 import numpy as np
 from ..momentum_solver.base_momentum_solver import MomentumSolver
 from ...constructor.boundary_conditions import BoundaryConditionManager
+from .discretization.convection_schemes import PowerLawDiscretization
 
 class StandardMomentumSolver(MomentumSolver):
     """
     Standard implementation of momentum equations solver.
-    Uses power-law scheme for convection-diffusion terms.
+    Uses a specified discretization scheme for convection-diffusion terms,
+    defaulting to the Power Law scheme if none is provided.
     """
+    
+    def __init__(self, discretization_scheme=None):
+        """
+        Initialize the standard momentum solver with a discretization scheme.
+        
+        Parameters:
+        -----------
+        discretization_scheme : ConvectionDiscretization, optional
+            Discretization scheme to use for convection-diffusion terms.
+            If None, PowerLawDiscretization will be used.
+        """
+        super().__init__()
+        # Use PowerLawDiscretization as default if none specified
+        self.discretization_scheme = discretization_scheme if discretization_scheme else PowerLawDiscretization()
+    
+    def get_solver_info(self):
+        """
+        Get information about the solver.
+        
+        Returns:
+        --------
+        dict
+            Dictionary containing solver information.
+        """
+        return {
+            "solver_type": "Standard Momentum Solver",
+            "discretization_scheme": self.discretization_scheme.get_name()
+        }
     
     def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None):
         """
@@ -50,14 +80,10 @@ class StandardMomentumSolver(MomentumSolver):
         u_star = np.zeros((imax+1, jmax))
         d_u = np.zeros((imax+1, jmax))
         
-        De = mu * dy / dx   # convective coefficients
+        De = mu * dy / dx   # diffusion coefficients
         Dw = mu * dy / dx
         Dn = mu * dx / dy
         Ds = mu * dx / dy
-        
-        # Define the power-law function A (vectorized version)
-        def A(F, D):
-            return np.maximum(0, (1 - 0.1 * np.abs(F/D))**5)
         
         # Interior points - vectorized computation
         i_range = np.arange(1, imax)
@@ -70,11 +96,19 @@ class StandardMomentumSolver(MomentumSolver):
         Fn = 0.5 * rho * dx * (v[i_grid, j_grid+1] + v[i_grid-1, j_grid+1])
         Fs = 0.5 * rho * dx * (v[i_grid, j_grid] + v[i_grid-1, j_grid])
         
-        # Calculate coefficients
-        aE = De * A(Fe, De) + np.maximum(-Fe, 0)
-        aW = Dw * A(Fw, Dw) + np.maximum(Fw, 0)
-        aN = Dn * A(Fn, Dn) + np.maximum(-Fn, 0)
-        aS = Ds * A(Fs, Ds) + np.maximum(Fs, 0)
+        # Calculate Peclet numbers
+        Pe_e = Fe / De
+        Pe_w = Fw / Dw
+        Pe_n = Fn / Dn
+        Pe_s = Fs / Ds
+        
+        # Calculate coefficients using the discretization scheme
+        aE = self.discretization_scheme.calculate_flux_coefficients(Fe, De, Pe_e)
+        aW = self.discretization_scheme.calculate_flux_coefficients(Fw, Dw, Pe_w)
+        aN = self.discretization_scheme.calculate_flux_coefficients(Fn, Dn, Pe_n)
+        aS = self.discretization_scheme.calculate_flux_coefficients(Fs, Ds, Pe_s)
+        
+        # Complete the coefficients
         aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
         
         pressure_term = (p[i_grid-1, j_grid] - p[i_grid, j_grid]) * dy
@@ -88,7 +122,7 @@ class StandardMomentumSolver(MomentumSolver):
         
         d_u[i_grid, j_grid] = alpha * dy / aP
         
-        # Bottom boundary (j=0) - can also be vectorized
+        # Bottom boundary (j=0) - vectorized
         j = 0
         i_bottom = np.arange(1, imax)
         Fe_bottom = 0.5 * rho * dy * (u[i_bottom+1, j] + u[i_bottom, j])
@@ -96,10 +130,17 @@ class StandardMomentumSolver(MomentumSolver):
         Fn_bottom = 0.5 * rho * dx * (v[i_bottom, j+1] + v[i_bottom-1, j+1])
         Fs_bottom = 0
         
-        aE_bottom = De * A(Fe_bottom, De) + np.maximum(-Fe_bottom, 0)
-        aW_bottom = Dw * A(Fw_bottom, Dw) + np.maximum(Fw_bottom, 0)
-        aN_bottom = Dn * A(Fn_bottom, Dn) + np.maximum(-Fn_bottom, 0)
+        # Calculate Peclet numbers for bottom boundary
+        Pe_e_bottom = Fe_bottom / De
+        Pe_w_bottom = Fw_bottom / Dw
+        Pe_n_bottom = Fn_bottom / Dn
+        
+        # Calculate coefficients for bottom boundary
+        aE_bottom = self.discretization_scheme.calculate_flux_coefficients(Fe_bottom, De, Pe_e_bottom)
+        aW_bottom = self.discretization_scheme.calculate_flux_coefficients(Fw_bottom, Dw, Pe_w_bottom)
+        aN_bottom = self.discretization_scheme.calculate_flux_coefficients(Fn_bottom, Dn, Pe_n_bottom)
         aS_bottom = 0
+        
         aP_bottom = aE_bottom + aW_bottom + aN_bottom + aS_bottom + (Fe_bottom-Fw_bottom) + (Fn_bottom-Fs_bottom)
         d_u[i_bottom, j] = alpha * dy / aP_bottom
         
@@ -111,10 +152,17 @@ class StandardMomentumSolver(MomentumSolver):
         Fn_top = 0
         Fs_top = 0.5 * rho * dx * (v[i_top, j] + v[i_top-1, j])
         
-        aE_top = De * A(Fe_top, De) + np.maximum(-Fe_top, 0)
-        aW_top = Dw * A(Fw_top, Dw) + np.maximum(Fw_top, 0)
+        # Calculate Peclet numbers for top boundary
+        Pe_e_top = Fe_top / De
+        Pe_w_top = Fw_top / Dw
+        Pe_s_top = Fs_top / Ds
+        
+        # Calculate coefficients for top boundary
+        aE_top = self.discretization_scheme.calculate_flux_coefficients(Fe_top, De, Pe_e_top)
+        aW_top = self.discretization_scheme.calculate_flux_coefficients(Fw_top, Dw, Pe_w_top)
         aN_top = 0
-        aS_top = Ds * A(Fs_top, Ds) + np.maximum(Fs_top, 0)
+        aS_top = self.discretization_scheme.calculate_flux_coefficients(Fs_top, Ds, Pe_s_top)
+        
         aP_top = aE_top + aW_top + aN_top + aS_top + (Fe_top-Fw_top) + (Fn_top-Fs_top)
         d_u[i_top, j] = alpha * dy / aP_top
         
@@ -177,14 +225,10 @@ class StandardMomentumSolver(MomentumSolver):
         v_star = np.zeros((imax, jmax+1))
         d_v = np.zeros((imax, jmax+1))
         
-        De = mu * dy / dx   # convective coefficients
+        De = mu * dy / dx   # diffusion coefficients
         Dw = mu * dy / dx
         Dn = mu * dx / dy
         Ds = mu * dx / dy
-        
-        # Define the power-law function A (vectorized version)
-        def A(F, D):
-            return np.maximum(0, (1 - 0.1 * np.abs(F/D))**5)
         
         # Interior points - vectorized computation
         i_range = np.arange(1, imax-1)
@@ -197,11 +241,19 @@ class StandardMomentumSolver(MomentumSolver):
         Fn = 0.5 * rho * dx * (v[i_grid, j_grid] + v[i_grid, j_grid+1])
         Fs = 0.5 * rho * dx * (v[i_grid, j_grid-1] + v[i_grid, j_grid])
         
-        # Calculate coefficients
-        aE = De * A(Fe, De) + np.maximum(-Fe, 0)
-        aW = Dw * A(Fw, Dw) + np.maximum(Fw, 0)
-        aN = Dn * A(Fn, Dn) + np.maximum(-Fn, 0)
-        aS = Ds * A(Fs, Ds) + np.maximum(Fs, 0)
+        # Calculate Peclet numbers
+        Pe_e = Fe / De
+        Pe_w = Fw / Dw
+        Pe_n = Fn / Dn
+        Pe_s = Fs / Ds
+        
+        # Calculate coefficients using the discretization scheme
+        aE = self.discretization_scheme.calculate_flux_coefficients(Fe, De, Pe_e)
+        aW = self.discretization_scheme.calculate_flux_coefficients(Fw, Dw, Pe_w)
+        aN = self.discretization_scheme.calculate_flux_coefficients(Fn, Dn, Pe_n)
+        aS = self.discretization_scheme.calculate_flux_coefficients(Fs, Ds, Pe_s)
+        
+        # Complete the coefficients
         aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
         
         pressure_term = (p[i_grid, j_grid-1] - p[i_grid, j_grid]) * dx
@@ -223,10 +275,17 @@ class StandardMomentumSolver(MomentumSolver):
         Fn_left = 0.5 * rho * dx * (v[i, j_left+1] + v[i, j_left])
         Fs_left = 0.5 * rho * dx * (v[i, j_left-1] + v[i, j_left])
         
-        aE_left = De * A(Fe_left, De) + np.maximum(-Fe_left, 0)
+        # Calculate Peclet numbers for left boundary
+        Pe_e_left = Fe_left / De
+        Pe_n_left = Fn_left / Dn
+        Pe_s_left = Fs_left / Ds
+        
+        # Calculate coefficients for left boundary
+        aE_left = self.discretization_scheme.calculate_flux_coefficients(Fe_left, De, Pe_e_left)
         aW_left = 0
-        aN_left = Dn * A(Fn_left, Dn) + np.maximum(-Fn_left, 0)
-        aS_left = Ds * A(Fs_left, Ds) + np.maximum(Fs_left, 0)
+        aN_left = self.discretization_scheme.calculate_flux_coefficients(Fn_left, Dn, Pe_n_left)
+        aS_left = self.discretization_scheme.calculate_flux_coefficients(Fs_left, Ds, Pe_s_left)
+        
         aP_left = aE_left + aW_left + aN_left + aS_left + (Fe_left-Fw_left) + (Fn_left-Fs_left)
         d_v[i, j_left] = alpha * dx / aP_left
         
@@ -238,10 +297,17 @@ class StandardMomentumSolver(MomentumSolver):
         Fn_right = 0.5 * rho * dx * (v[i, j_right+1] + v[i, j_right])
         Fs_right = 0.5 * rho * dx * (v[i, j_right-1] + v[i, j_right])
         
+        # Calculate Peclet numbers for right boundary
+        Pe_w_right = Fw_right / Dw
+        Pe_n_right = Fn_right / Dn
+        Pe_s_right = Fs_right / Ds
+        
+        # Calculate coefficients for right boundary
         aE_right = 0
-        aW_right = Dw * A(Fw_right, Dw) + np.maximum(Fw_right, 0)
-        aN_right = Dn * A(Fn_right, Dn) + np.maximum(-Fn_right, 0)
-        aS_right = Ds * A(Fs_right, Ds) + np.maximum(Fs_right, 0)
+        aW_right = self.discretization_scheme.calculate_flux_coefficients(Fw_right, Dw, Pe_w_right)
+        aN_right = self.discretization_scheme.calculate_flux_coefficients(Fn_right, Dn, Pe_n_right)
+        aS_right = self.discretization_scheme.calculate_flux_coefficients(Fs_right, Ds, Pe_s_right)
+        
         aP_right = aE_right + aW_right + aN_right + aS_right + (Fe_right-Fw_right) + (Fn_right-Fs_right)
         d_v[i, j_right] = alpha * dx / aP_right
         

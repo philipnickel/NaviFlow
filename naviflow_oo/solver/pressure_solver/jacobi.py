@@ -152,6 +152,7 @@ class JacobiSolver(PressureSolver):
             # Ensure reference point
             p_2d[0, 0] = 0.0
             
+            
             # Update neighbor values
             p_east[:-1, :] = p_2d[1:, :]
             p_west[1:, :] = p_2d[:-1, :]

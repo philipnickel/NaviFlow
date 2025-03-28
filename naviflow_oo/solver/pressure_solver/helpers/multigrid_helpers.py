@@ -16,20 +16,36 @@ def restrict(fine_grid: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: The coarsened grid
     """
-    if fine_grid.ndim == 1:
-        # For 1D arrays, reshape to 2D with Fortran ordering
-        size = int(np.sqrt(fine_grid.size))
-        grid_2d = fine_grid.reshape((size, size), order='F')
-        
-        # Apply restriction in 2D
-        coarse_grid = grid_2d[1::2, 1::2]
-        
-        # Return as 1D array with Fortran ordering
-        return coarse_grid.flatten(order='F')
-    else:
-        # For 2D arrays, apply direct injection
-        return fine_grid[1::2, 1::2]
+    coarse_grid = fine_grid[1::2, 1::2]
+    # Ensure zeros in boundary cells
+    coarse_grid[0, :] = 0
+    coarse_grid[-1, :] = 0
+    coarse_grid[:, 0] = 0
+    coarse_grid[:, -1] = 0
+    return coarse_grid
 
+
+def interpolate2(coarse_grid: np.ndarray, m: int) -> np.ndarray:
+    """
+    Interpolates a coarse grid to a fine grid using linear interpolation.
+    
+    Parameters:
+        coarse_grid (np.ndarray): The input coarse grid to be interpolated
+        m (int): Size of the target fine grid
+        
+    Returns:
+        np.ndarray: The interpolated fine grid
+    """
+    fine_grid = np.zeros((m, m))
+
+    fine_grid[1::2, 1::2] = coarse_grid.copy() 
+    fine_grid[1::2, 2::2] += fine_grid[1::2, 1::2] / 2 
+    fine_grid[1::2, :-1:2] += fine_grid[1::2, 1::2] / 2 
+
+    fine_grid[2::2, :] += fine_grid[1::2, :] / 2 
+    fine_grid[:-1:2, :] += fine_grid[1::2, :] / 2 
+        
+    return fine_grid
 
 def interpolate(coarse_grid, m):
     """

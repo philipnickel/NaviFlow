@@ -30,8 +30,8 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 257, 257           # Grid size (smaller for quick testing)
-reynolds = 7500             # Reynolds number
+nx, ny = 127, 127           # Grid size (smaller for quick testing)
+reynolds = 100             # Reynolds number
 alpha_p = 0.1             # Pressure relaxation factor
 alpha_u = 0.7             # Velocity relaxation factor
 max_iterations = 100000     
@@ -61,7 +61,9 @@ pressure_solver = PreconditionedCGSolver(
     postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),
     cycle_type='F'
 )
-momentum_solver = StandardMomentumSolver()
+momentum_solver = StandardMomentumSolver(discretization_scheme=PowerLawDiscretization())
+
+#momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm

@@ -28,25 +28,6 @@ class ConvectionDiscretization:
         """
         raise NotImplementedError("Subclasses must implement this method")
     
-    def calculate_flux_coefficients_vectorized(self, u_face, d_face, cell_peclet):
-        """
-        Vectorized version to calculate flux coefficients for multiple faces at once.
-        
-        Parameters:
-        -----------
-        u_face : ndarray
-            Array of velocities at the faces
-        d_face : float or ndarray
-            Diffusion coefficient at the faces
-        cell_peclet : ndarray
-            Array of cell Peclet numbers
-            
-        Returns:
-        --------
-        ndarray
-            Array of flux coefficients
-        """
-        raise NotImplementedError("Subclasses must implement this method")
     
     def get_name(self):
         """Return the name of the discretization scheme."""
@@ -56,21 +37,8 @@ class ConvectionDiscretization:
 class PowerLawDiscretization(ConvectionDiscretization):
     """Power Law discretization scheme for convection terms."""
     
+
     def calculate_flux_coefficients(self, u_face, d_face, cell_peclet):
-        """
-        Calculate flux coefficients using the Power Law scheme.
-        
-        The Power Law scheme is an approximation of the exact solution to
-        the one-dimensional convection-diffusion equation.
-        """
-        # Power law scheme: A(|P|) = max(0, (1-0.1|P|)^5)
-        # where P is the cell Peclet number
-        power_law_term = max(0, (1 - 0.1 * abs(cell_peclet))**5)
-        
-        # Combine diffusion (power law term * d_face) and upwind (max(0, -u_face))
-        return power_law_term * d_face + max(0, -u_face)
-    
-    def calculate_flux_coefficients_vectorized(self, u_face, d_face, cell_peclet):
         """
         Vectorized version to calculate flux coefficients using the Power Law scheme.
         
@@ -92,8 +60,13 @@ class PowerLawDiscretization(ConvectionDiscretization):
         abs_peclet = np.abs(cell_peclet)
         power_law_term = np.maximum(0, (1 - 0.1 * abs_peclet)**5)
         
-        # Combine diffusion and upwind
-        return power_law_term * d_face + np.maximum(0, -u_face)
+        # Match the original sign convention for upwind terms
+        if isinstance(u_face, np.ndarray):
+            upwind_term = np.where(u_face >= 0, np.maximum(0, -u_face), np.maximum(0, u_face))
+        else:
+            upwind_term = np.maximum(0, -u_face if u_face >= 0 else u_face)
+        
+        return power_law_term * d_face + upwind_term
     
     def get_name(self):
         return "Power Law"
@@ -111,28 +84,7 @@ class UpwindDiscretization(ConvectionDiscretization):
         """
         # Pure upwind scheme: only consider diffusion and upwind
         return d_face + max(0, -u_face)
-    
-    def calculate_flux_coefficients_vectorized(self, u_face, d_face, cell_peclet):
-        """
-        Vectorized version to calculate flux coefficients using the first-order upwind scheme.
-        
-        Parameters:
-        -----------
-        u_face : ndarray
-            Array of velocities at the faces
-        d_face : float or ndarray
-            Diffusion coefficient at the faces
-        cell_peclet : ndarray
-            Array of cell Peclet numbers (not used in upwind scheme)
-            
-        Returns:
-        --------
-        ndarray
-            Array of flux coefficients
-        """
-        # Pure upwind scheme: only consider diffusion and upwind
-        return d_face + np.maximum(0, -u_face)
-    
+
     def get_name(self):
         return "First-order Upwind"
 
@@ -140,35 +92,8 @@ class UpwindDiscretization(ConvectionDiscretization):
 class QuickDiscretization(ConvectionDiscretization):
     """QUICK (Quadratic Upstream Interpolation for Convective Kinematics) discretization scheme."""
     
+
     def calculate_flux_coefficients(self, u_face, d_face, cell_peclet):
-        """
-        Calculate flux coefficients using the QUICK scheme.
-        
-        Note: This is a simplified implementation that adapts the QUICK scheme
-        to the flux coefficient framework. A full QUICK implementation would 
-        require additional information about neighboring cells.
-        
-        For this simplified implementation, we use a blend of central and upwind
-        differencing with a weight that depends on the Peclet number.
-        """
-        # Upwind component
-        upwind_component = max(0, -u_face)
-        
-        # Central differencing component approximation
-        # For small Peclet numbers, we want more central differencing
-        central_weight = max(0, 1.0 - 0.5 * abs(cell_peclet))
-        central_component = 0.5 * d_face * central_weight
-        
-        # QUICK is typically more accurate than upwind at moderate Peclet numbers
-        # Blend upwind and central differencing based on Peclet number
-        if abs(cell_peclet) < 10:
-            # For moderate Peclet numbers, use a blend
-            return d_face + upwind_component + central_component
-        else:
-            # For high Peclet numbers, revert to upwind
-            return d_face + upwind_component
-    
-    def calculate_flux_coefficients_vectorized(self, u_face, d_face, cell_peclet):
         """
         Vectorized version of the QUICK scheme calculation.
         
