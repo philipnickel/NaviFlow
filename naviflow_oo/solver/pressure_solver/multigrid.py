@@ -52,6 +52,8 @@ class MultiGridSolver(PressureSolver):
         self.smoother_omega = smoother_omega
         self.residual_history = []
         self.vcycle_data = []  # Store V-cycle data
+        self.presmooth_diagnostics = {}  # Dictionary to store presmooth diagnostics across different grid levels
+        self.current_iteration = 0  # Track current iteration
         
         # Initialize smoother (will be updated in solve if auto_omega is True)
         self.smoother = smoother if smoother is not None else JacobiSolver(
@@ -72,7 +74,25 @@ class MultiGridSolver(PressureSolver):
             'data': data.copy()  # Store the actual data for plotting
         })
 
-
+        # Collect extra diagnostics for the presmooth step
+        if step == 'after_presmooth':
+            norm_val = float(np.linalg.norm(data))
+            
+            # Store diagnostics in dictionary by grid size
+            key = f"grid_{shape[0]}x{shape[1]}"
+            if key not in self.presmooth_diagnostics:
+                self.presmooth_diagnostics[key] = []
+                
+            self.presmooth_diagnostics[key].append({
+                'level': level,
+                'iteration': self.current_iteration,
+                'min': float(np.min(data)),
+                'max': float(np.max(data)), 
+                'mean': float(np.mean(data)),
+                'norm': norm_val
+            })
+            
+            # Print diagnostics immediately
 
     def plot_vcycle_results(self, output_path='debug_output/vcycle_analysis.pdf'):
         """Plot the V-cycle results from stored data."""
@@ -166,8 +186,10 @@ class MultiGridSolver(PressureSolver):
 
         rho = 1.0  # This should come from fluid properties
         
-        # Reset residual history
+        # Reset residual history and diagnostics
         self.residual_history = []
+        self.presmooth_diagnostics = {}
+        self.current_iteration = 0
         
         # Get right-hand side of pressure correction equation
         b = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
@@ -177,6 +199,9 @@ class MultiGridSolver(PressureSolver):
         
         # Perform multiple V-cycles until convergence or max iterations
         for k in range(self.max_iterations):
+            # Update current iteration
+            self.current_iteration = k + 1
+            
             # Apply V-cycle
             grid_calculations = []  # Track grid sizes used
             x = self._v_cycle(x, b, mesh, rho, d_u, d_v, self.smoother_omega, 
@@ -199,10 +224,27 @@ class MultiGridSolver(PressureSolver):
                 print(f"Converged in {k+1} iterations, multigrid residual: {res_norm:.6e}")
                 break
             
-            print(f"Iteration {k+1}, multigrid residual: {res_norm:.6e}")
+            #print(f"Iteration {k+1}, multigrid residual: {res_norm:.6e}")
+            
+            # Calculate and print convergence rate if we have at least two iterations
+            if k > 0:
+                conv_rate = self.residual_history[k] / self.residual_history[k-1] if self.residual_history[k-1] != 0 else 1.0
+                #print(f"Convergence rate: {conv_rate:.4f}")
     
+        # Calculate overall convergence rate
+        if len(self.residual_history) > 1:
+            # Use geometric mean of convergence rates for overall rate
+            conv_rates = [self.residual_history[i] / self.residual_history[i-1] 
+                          for i in range(1, len(self.residual_history)) 
+                          if self.residual_history[i-1] != 0]
+            
+            if conv_rates:
+                overall_conv_rate = np.power(np.prod(conv_rates), 1.0 / len(conv_rates))
+                print(f"Overall convergence rate: {overall_conv_rate:.4f}")
+        
         # Reshape to 2D with Fortran ordering
         p_prime = x.reshape((nx, ny), order='F')
+        
         return p_prime
     
     def _solve_residual_direct(self, mesh, residual, d_u, d_v, rho=1.0):
@@ -262,10 +304,6 @@ class MultiGridSolver(PressureSolver):
         
         return p_prime
 
-
-
-
-
     def _v_cycle(self, u, f, mesh, rho, d_u, d_v, omega, pre_smoothing, post_smoothing, 
                 grid_calculations, level=0):
         """
@@ -274,40 +312,14 @@ class MultiGridSolver(PressureSolver):
         
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
-        #print(f"V-cycle dimensions: {nx} x {ny}")
     
         # If we're at the coarsest grid, solve directly
-        # Increased threshold to stop coarsening earlier (was 31)
-        if nx <= 3:
-            #print(f"Coarsest grid size: {nx}x{ny}")
-            u = self.smoother.solve(mesh=mesh, p=u, b=f,
-                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=10000, track_residuals=False)
-            # Ensure boundaries are 0
-            u[0, :] = 0.0
-            u[:, 0] = 0.0
-            u[-1, :] = 0.0
-            u[:, -1] = 0.0
-            # Reshape f to 2D for the direct solver
-            #f_2d = f.reshape((nx, ny), order='F')
-            
-            # Use direct solver for coarsest grid
-            #p_prime = self._solve_residual_direct(
-            #    mesh=mesh,
-            #    residual=f,
-            #    d_u=d_u,
-            #    d_v=d_v,
-            #    rho=rho
-            #)
+        if nx <= 15:
+            u = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
             self._store_vcycle_data(level, 'coarse_solution', u)
-            return u#.flatten('F')  # Ensure Fortran ordering when flattening
-        
+            return u  # Return solution on coarsest grid
         # Store initial solution
         self._store_vcycle_data(level, 'initial_solution', u.reshape((nx, ny), order='F'))
-        
-        # Ensure reference pressure point is fixed to zero at P(1,1)
-        # In 0-based indexing, this is P(0,0)
-        #reference_index = 0  # Index of the P(1,1) node in flattened array
-        #u[reference_index] = 0.0
         
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
@@ -317,29 +329,25 @@ class MultiGridSolver(PressureSolver):
         
         # Compute residual: r = f - Au
         Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
-
         r = f - Au
         self._store_vcycle_data(level, 'residual', r.reshape((nx, ny), order='F'))
         
         # Restrict residual to coarser grid
         r = r.reshape((nx, ny), order='F')
-        #print(f"residual min: {np.min(r)}")
-        #print(f"residual max: {np.max(r)}")
-        #print(f"residual mean: {np.mean(r)}")
-        h = 1 / (nx + 1)
-        h_coarse = h*2 
-        scale_factor = h_coarse**2 / h**2
-        # In your _v_cycle method:
-        #print(f"Level {level}: Residual norm before restriction: {np.linalg.norm(r):.3e}")
-        r_coarse = restrict(r) #* h_coarse**2 / h**2
-        #print(f"Level {level}: Residual norm after restriction: {np.linalg.norm(r_coarse):.3e}")
-        r_coarse = r_coarse / scale_factor
-        #print(f"Restricted residual min: {np.min(r_coarse)}")
-        #print(f"Restricted residual max: {np.max(r_coarse)}")
-        #print(f"Restricted residual mean: {np.mean(r_coarse)}")
         
+        # Calculate grid properties
+        dx_h = dx
+        dy_h = dy
+        dx_2h = dx_h * 2  # Coarse grid spacing (double the fine grid)
+        h_ratio = dx_2h / dx_h  # Ratio of coarse to fine grid spacing
         
-        #print(f"Restricted residual mean: {np.mean(r_coarse)}")
+        # Calculate scaling factor for proper grid-dependent coefficient scaling
+        # For a Poisson equation, we need to scale by h^2 ratio
+        # This ensures the discrete equation has consistent physical meaning at all grid levels
+        coeff_scale_factor = h_ratio * h_ratio  # (dx_2h/dx_h)^2
+        
+        # Restrict the residual without scaling - scaling will be handled in the coefficients
+        r_coarse = restrict(r)  * 2
         
         self._store_vcycle_data(level, 'restricted_residual', r_coarse)
         
@@ -350,28 +358,47 @@ class MultiGridSolver(PressureSolver):
         mesh_coarse = StructuredMesh(nx=coarse_grid_size, ny=coarse_grid_size, 
                                    length=mesh.length, height=mesh.height)
         
-        # Recompute coefficients on coarse grid
-        # These coefficients represent the momentum equation terms
-        dx_coarse = mesh_coarse.get_cell_sizes()[0]
-        dy_coarse = mesh_coarse.get_cell_sizes()[1]
-
-        # Compute d_u and d_v on coarse grid
-        # These are the inverse of the momentum equation coefficients
-        d_u_coarse = np.zeros((coarse_grid_size + 1, coarse_grid_size))
-        d_v_coarse = np.zeros((coarse_grid_size, coarse_grid_size + 1))
+        # Get cell sizes for coarse grid
+        dx_coarse, dy_coarse = mesh_coarse.get_cell_sizes()
         
-        # Fill d_u_coarse (staggered in x-direction)
-        for i in range(coarse_grid_size + 1):
-            for j in range(coarse_grid_size):
-                # Compute coefficient using the same formula as fine grid
-                d_u_coarse[i, j] = 1.0 / (rho * (1.0/dx_coarse + 1.0/dx_coarse))
-        # Fill d_v_coarse (staggered in y-direction)
-        for i in range(coarse_grid_size):
-            for j in range(coarse_grid_size + 1):
-                # Compute coefficient using the same formula as fine grid
-                d_v_coarse[i, j] = 1.0 / (rho * (1.0/dy_coarse + 1.0/dy_coarse))
-        #d_u_coarse[0,0] = 0.0
-        #d_v_coarse[0,0] = 0.0
+        # Create d_u and d_v coefficients for coarse grid with appropriate scaling
+        # The d_u and d_v coefficients should scale properly with grid spacing
+        
+        # d_u is staggered in x-direction: (coarse_grid_size+1, coarse_grid_size)
+        d_u_coarse = np.zeros((coarse_grid_size+1, coarse_grid_size))
+        # d_v is staggered in y-direction: (coarse_grid_size, coarse_grid_size+1)
+        d_v_coarse = np.zeros((coarse_grid_size, coarse_grid_size+1))
+        
+        # Fill d_u_coarse with proper grid-dependent scaling
+        # Create masks for valid regions
+        i_indices = np.arange(coarse_grid_size + 1)[:, np.newaxis]
+        j_indices = np.arange(coarse_grid_size)[np.newaxis, :]
+        d_u_valid = (i_indices > 0) & (i_indices <= nx) & (j_indices < ny)
+
+        # Fill d_u_coarse using vectorized operations
+        d_u_coarse = np.where(d_u_valid,
+                             d_u[:coarse_grid_size+1, :coarse_grid_size],
+                             1.0 / (rho * (1.0/dx_h)))
+        d_u_coarse /= coeff_scale_factor
+
+        # Create masks for d_v
+        i_indices = np.arange(coarse_grid_size)[:, np.newaxis]
+        j_indices = np.arange(coarse_grid_size + 1)[np.newaxis, :]
+        d_v_valid = (i_indices < nx) & (j_indices > 0) & (j_indices <= ny)
+
+        # Fill d_v_coarse using vectorized operations
+        d_v_coarse = np.where(d_v_valid,
+                             d_v[:coarse_grid_size, :coarse_grid_size+1],
+                             1.0 / (rho * (1.0/dy_h)))
+        d_v_coarse /= coeff_scale_factor
+        # Print diagnostics about original vs coarse coefficients
+        if level == 0:  # Only print for the first level transition
+            d_u_fine_mean = np.mean(d_u[d_u > 0])
+            d_v_fine_mean = np.mean(d_v[d_v > 0])
+            d_u_coarse_mean = np.mean(d_u_coarse[d_u_coarse > 0])
+            d_v_coarse_mean = np.mean(d_v_coarse[d_v_coarse > 0])
+            ratio_u = d_u_coarse_mean / d_u_fine_mean
+            ratio_v = d_v_coarse_mean / d_v_fine_mean
 
         # Recursive V-cycle on coarse grid
         e_coarse = self._v_cycle(u=np.zeros_like(r_coarse.flatten('F')), f=r_coarse.flatten('F'), 
@@ -384,7 +411,10 @@ class MultiGridSolver(PressureSolver):
         self._store_vcycle_data(level, 'coarse_correction', e_coarse_2d)
         
         # Interpolate error to fine grid
-        e_interpolated = interpolate(e_coarse_2d, nx) 
+        # We need to keep the solution at the correct scale, so no need to scale the interpolation
+        # Since we already scaled the residual and coefficients, the solution on the coarse grid
+        # should already be at the right scale
+        e_interpolated = interpolate(e_coarse_2d, nx)
         
         self._store_vcycle_data(level, 'interpolated_correction', e_interpolated.reshape((nx, ny), order='F'))
         
@@ -401,12 +431,6 @@ class MultiGridSolver(PressureSolver):
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
                               
         self._store_vcycle_data(level, 'after_postsmooth', u.reshape((nx, ny), order='F'))
-        
-        # Ensure reference point is zero before returning solution
-        #if u.ndim == 1:
-        #    u[reference_index] = 0.0
-        #else:
-        #    u[0, 0] = 0.0
         
         return u
     

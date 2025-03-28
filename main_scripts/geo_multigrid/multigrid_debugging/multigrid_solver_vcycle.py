@@ -9,6 +9,8 @@ import pandas as pd
 
 # Global variable to store V-cycle data for visualization
 vcycle_data = []
+# Dictionary to store presmooth diagnostics across different grid levels
+presmooth_diagnostics = {}
 
 def coarsen(fine_grid: np.ndarray) -> np.ndarray:
     """
@@ -71,7 +73,8 @@ def Vcycle(U: np.ndarray,
            nsmooth: int, 
            m: int, 
            F: np.ndarray,
-           grid_calculations: list) -> np.ndarray:
+           grid_calculations: list,
+           iteration: int = 0) -> np.ndarray:
     """Performs one V-cycle of the multigrid method to solve the Poisson equation."""
     # approximate solve A*U = F
     h = 1.0 / (m + 1)
@@ -193,14 +196,39 @@ def Vcycle(U: np.ndarray,
         # 1. pre-smooth the error
         U = smooth(U.flatten(), omega, F, nsmooth)
         U_reshaped = U.reshape((m, m))
+        
+        # Collect diagnostics for the presmooth step
+        min_val = float(np.min(U_reshaped))
+        max_val = float(np.max(U_reshaped))
+        mean_val = float(np.mean(U_reshaped))
+        norm_val = float(np.linalg.norm(U_reshaped))
+        
+        # Store diagnostics in dictionary by grid size
+        key = f"grid_{m}x{m}"
+        if key not in presmooth_diagnostics:
+            presmooth_diagnostics[key] = []
+            
+        presmooth_diagnostics[key].append({
+            'level': current_level,
+            'iteration': iteration,
+            'min': min_val,
+            'max': max_val, 
+            'mean': mean_val,
+            'norm': norm_val
+        })
+        
+        # Print diagnostics immediately
+        print(f"After presmooth (grid {m}x{m}, level {current_level}, iteration {iteration}):")
+        print(f"  Min: {min_val:.6e}, Max: {max_val:.6e}, Mean: {mean_val:.6e}, Norm: {norm_val:.6e}")
+        
         vcycle_data.append({
             'level': current_level,
             'step': 'after_presmooth',
             'data': U_reshaped.copy(),
             'shape': (m, m),
-            'min': float(np.min(U_reshaped)),
-            'max': float(np.max(U_reshaped)),
-            'mean': float(np.mean(U_reshaped))
+            'min': min_val,
+            'max': max_val,
+            'mean': mean_val
         })
         
         # 2. calculate the residual
@@ -231,7 +259,7 @@ def Vcycle(U: np.ndarray,
 
         # 4. recurse to Vcycle on a coarser grid
         mc = (m - 1) // 2
-        Ecoarse = Vcycle(np.zeros((mc, mc)), omega, nsmooth, mc, Rcoarse.flatten(), grid_calculations)
+        Ecoarse = Vcycle(np.zeros((mc, mc)), omega, nsmooth, mc, Rcoarse.flatten(), grid_calculations, iteration)
         Ecoarse_reshaped = Ecoarse.reshape((mc, mc))
         
         # Add coarse_solution step
@@ -376,10 +404,13 @@ def plot_vcycle_results(output_path='vcycle_analysis.pdf'):
 
 def main() -> None:
     global vcycle_data  # Make vcycle_data accessible to Vcycle function
+    global presmooth_diagnostics  # Make presmooth_diagnostics accessible
+    
     vcycle_data = []  # Initialize vcycle_data list
+    presmooth_diagnostics = {}  # Initialize presmooth_diagnostics dictionary
     
     epsilon = 1e-12
-    max_iterations = 1  # Only run one iteration to analyze V-cycle
+    max_iterations = 3  # Run three iterations to analyze V-cycle
     omega = 0.5
     nsmooth = 3
 
@@ -397,7 +428,7 @@ def main() -> None:
     t1 = time()
     
     for i in range(1, max_iterations + 1):
-        U_vcycle = Vcycle(U_vcycle, omega, nsmooth, m, F, grid_calculations)
+        U_vcycle = Vcycle(U_vcycle, omega, nsmooth, m, F, grid_calculations, i)
         R = F + Amult(U_vcycle.flatten())
         relative_residual = norm(R, 2) / norm(F, 2)
         relative_residuals.append(relative_residual)
@@ -423,6 +454,13 @@ def main() -> None:
     output_path = os.path.join(debug_dir, 'vcycle_analysis.pdf')
     plot_vcycle_results(output_path)
     print(f"V-cycle analysis saved to '{output_path}'")
+    
+    # Print summary of presmooth diagnostics across all grid levels
+    print("\n===== Presmooth Diagnostics Summary =====")
+    for grid_size, diagnostics in sorted(presmooth_diagnostics.items()):
+        print(f"\nGrid size: {grid_size}")
+        for entry in diagnostics:
+            print(f"  Iteration {entry['iteration']}, Level {entry['level']}: Min={entry['min']:.6e}, Max={entry['max']:.6e}, Mean={entry['mean']:.6e}, Norm={entry['norm']:.6e}")
 
 if __name__ == "__main__":
     main()

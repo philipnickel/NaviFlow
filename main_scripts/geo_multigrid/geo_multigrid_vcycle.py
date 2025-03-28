@@ -32,12 +32,12 @@ start_time = time.time()
 
 # Update parameters
 # Grid size
-nx, ny = 127, 127  # Smaller grid for testing
+nx, ny = 2**8-1, 2**8-1  # Smaller grid for testing
 
 
 # Reduced relaxation factors and iterations
-max_iterations = 1
-convergence_tolerance = 1e-5
+max_iterations = 10000
+convergence_tolerance = 1e-4
 alpha_p = 0.1  # Pressure relaxation (reduced from 0.1)
 alpha_u = 0.7   # Velocity relaxation (reduced from 0.7)
 
@@ -55,16 +55,16 @@ print(f"Calculated viscosity: {viscosity}")
 
 # 4. Create solvers
 # Create a Jacobi smoother for the multigrid solver
-smoother = JacobiSolver(omega=0.8)  # Lower omega for stability
+smoother = JacobiSolver(omega=2/3)  # Lower omega for stability
 
 # Create multigrid solver with conservative parameters
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=10,        # Fewer iterations
-    tolerance=1e-5,          # Tighter tolerance
-    pre_smoothing=5,         # Fewer pre-smoothing steps
-    post_smoothing=5,        # Fewer post-smoothing steps 
-    smoother_omega=0.8       # Conservative relaxation
+    max_iterations=1000,        # Fewer iterations
+    tolerance=1e-6,          # Tighter tolerance
+    pre_smoothing=20,         # Fewer pre-smoothing steps
+    post_smoothing=20,        # Fewer post-smoothing steps 
+    smoother_omega=2/3       # Conservative relaxation
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -113,7 +113,7 @@ result.plot_combined_results(
     filename=os.path.join(results_dir, f'cavity_Re{Re}_multigrid_jacobi_results.pdf'),
     show=False
 )
-
+"""
 # After the simulation completes, plot the V-cycle results
 algorithm.pressure_solver.plot_vcycle_results(os.path.join(debug_dir, 'vcycle_analysis.pdf'))
 
@@ -228,3 +228,4 @@ print(f"Mean absolute value in solution: {np.mean(np.abs(result.p)):.6e}")
 print(f"Grid size used: {nx}x{ny}")
 print(f"Final residual: {algorithm.pressure_solver.final_residual if hasattr(algorithm.pressure_solver, 'final_residual') else 'N/A'}")
 print(f"Iterations completed: {algorithm.pressure_solver.iterations if hasattr(algorithm.pressure_solver, 'iterations') else 'N/A'}")
+"""
