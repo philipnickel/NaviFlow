@@ -60,7 +60,7 @@ smoother = JacobiSolver(omega=0.8)  # Lower omega for stability
 # Create multigrid solver with conservative parameters
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=1,        # Fewer iterations
+    max_iterations=10,        # Fewer iterations
     tolerance=1e-5,          # Tighter tolerance
     pre_smoothing=5,         # Fewer pre-smoothing steps
     post_smoothing=5,        # Fewer post-smoothing steps 

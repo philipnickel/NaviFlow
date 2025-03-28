@@ -18,10 +18,10 @@ def restrict(fine_grid: np.ndarray) -> np.ndarray:
     """
     coarse_grid = fine_grid[1::2, 1::2]
     # Ensure zeros in boundary cells
-    coarse_grid[0, :] = 0
-    coarse_grid[-1, :] = 0
-    coarse_grid[:, 0] = 0
-    coarse_grid[:, -1] = 0
+    #coarse_grid[0, :] = 0
+    #coarse_grid[-1, :] = 0
+    #coarse_grid[:, 0] = 0
+    #coarse_grid[:, -1] = 0
     return coarse_grid
 
 

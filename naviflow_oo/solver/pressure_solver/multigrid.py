@@ -278,7 +278,7 @@ class MultiGridSolver(PressureSolver):
     
         # If we're at the coarsest grid, solve directly
         # Increased threshold to stop coarsening earlier (was 31)
-        if nx <= 63:
+        if nx <= 3:
             #print(f"Coarsest grid size: {nx}x{ny}")
             u = self.smoother.solve(mesh=mesh, p=u, b=f,
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=10000, track_residuals=False)
