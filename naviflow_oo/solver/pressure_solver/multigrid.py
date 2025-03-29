@@ -315,6 +315,7 @@ class MultiGridSolver(PressureSolver):
     
         # If we're at the coarsest grid, solve directly
         if nx <= 15:
+
             u = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
             self._store_vcycle_data(level, 'coarse_solution', u)
             return u  # Return solution on coarsest grid
@@ -347,7 +348,7 @@ class MultiGridSolver(PressureSolver):
         coeff_scale_factor = h_ratio * h_ratio  # (dx_2h/dx_h)^2
         
         # Restrict the residual without scaling - scaling will be handled in the coefficients
-        r_coarse = restrict(r)  * 2
+        r_coarse = restrict(r) #/4  #/4#* 2
         
         self._store_vcycle_data(level, 'restricted_residual', r_coarse)
         
@@ -422,7 +423,7 @@ class MultiGridSolver(PressureSolver):
         self._store_vcycle_data(level, 'before_correction', u.reshape((nx, ny), order='F'))
         
         # Apply correction
-        u += e_interpolated
+        u += e_interpolated 
 
         self._store_vcycle_data(level, 'after_correction', u.reshape((nx, ny), order='F'))
         

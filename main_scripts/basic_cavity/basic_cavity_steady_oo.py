@@ -19,12 +19,12 @@ from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 127, 127          # Grid size
-reynolds = 100             # Reynolds number
+nx, ny = 63, 63         # Grid size
+reynolds = 3200             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 100000     # Maximum number of iterations
-tolerance = 1e-5           # Convergence tolerance
+max_iterations = 10000     # Maximum number of iterations
+tolerance = 1e-4           # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -53,7 +53,7 @@ algorithm = SimpleSolver(
     momentum_solver=momentum_solver,
     velocity_updater=velocity_updater,
     alpha_p=alpha_p,
-    alpha_u=alpha_u
+    alpha_u=alpha_u,
 )
 
 # 6. Set boundary conditions
@@ -68,7 +68,7 @@ os.makedirs(results_dir, exist_ok=True)
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10, plot_final_residuals=False)
 
 # End timing
 end_time = time.time()
@@ -85,7 +85,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 # 10. Visualize results
 result.plot_combined_results(
     title=f'Cavity Flow Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_matrix_results.pdf'),
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_results.pdf'),
     show=False
 )
 

@@ -1,6 +1,6 @@
 """
 Lid-driven cavity flow simulation using the object-oriented framework with multigrid solver
-that uses JacobiSolver as the smoother.
+that uses GaussSeidelSolver as the smoother.
 """
 
 import numpy as np
@@ -13,33 +13,29 @@ from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
 from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
-from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
+from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-
-# Debug mode for testing
 
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
 
 # Create debug output directory
-debug_dir = 'debug_output'
+debug_dir = os.path.join(os.path.dirname(__file__), 'debug_output')
 os.makedirs(debug_dir, exist_ok=True)
 
 # Start timing
 start_time = time.time()
 
-# Update parameters
-# Grid size
-nx, ny = 2**7-1, 2**7-1  # Smaller grid for testing
+# Grid size - must be 2^k-1 for multigrid (e.g., 31, 63, 127, 255)
+nx, ny = 2**8-1, 2**8-1  # 127x127 grid
 
-
-# Reduced relaxation factors and iterations
+# Relaxation factors and iterations
 max_iterations = 10000
-convergence_tolerance = 1e-4
-alpha_p = 0.1  # Pressure relaxation (reduced from 0.1)
-alpha_u = 0.7   # Velocity relaxation (reduced from 0.7)
+convergence_tolerance = 1e-5
+alpha_p = 1  # Pressure relaxation
+alpha_u = 1 # Velocity relaxation
 
 # Create mesh
 print(f"Creating mesh with {nx}x{ny} cells...")
@@ -48,28 +44,28 @@ dx, dy = mesh.get_cell_sizes()
 print(f"Cell sizes: dx={dx}, dy={dy}")
 
 # Create initial conditions
-Re = 100
+Re = 1000
 print(f"Reynolds number: {Re}")
 viscosity = 0.01
 print(f"Calculated viscosity: {viscosity}")
 
-# 4. Create solvers
-# Create a Jacobi smoother for the multigrid solver
-smoother = JacobiSolver(omega=2/3)  # Lower omega for stability
+# Create solvers
+# Create a Gauss-Seidel smoother for the multigrid solver with SOR
+smoother = GaussSeidelSolver()
 
-# Create multigrid solver with conservative parameters
+# Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=1000,        # Fewer iterations
-    tolerance=1e-5,          # Tighter tolerance
-    pre_smoothing=20,         # Fewer pre-smoothing steps
-    post_smoothing=20,        # Fewer post-smoothing steps 
-    smoother_omega=2/3       # Conservative relaxation
+    max_iterations=100,    # Maximum V-cycles
+    tolerance=1e-5,         # Overall tolerance
+    pre_smoothing=10,        # Pre-smoothing steps
+    post_smoothing=10,       # Post-smoothing steps
+    smoother_omega=1.5      # SOR parameter
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
-# 5. Create algorithm
+# Create algorithm
 algorithm = SimpleSolver(
     mesh=mesh,
     fluid=FluidProperties(
@@ -84,36 +80,62 @@ algorithm = SimpleSolver(
     alpha_u=alpha_u
 )
 
-# 6. Set boundary conditions
+# Set boundary conditions
 algorithm.set_boundary_condition('top', 'velocity', {'u': 1.0, 'v': 0.0})
 algorithm.set_boundary_condition('bottom', 'wall')
 algorithm.set_boundary_condition('left', 'wall')
 algorithm.set_boundary_condition('right', 'wall')
 
-# 7. Solve the problem
+# Solve the problem
 print("Starting simulation...")
 result = algorithm.solve(max_iterations=max_iterations, tolerance=convergence_tolerance, 
-                         track_infinity_norm=True, infinity_norm_interval=5)
+                        track_infinity_norm=True, infinity_norm_interval=5, plot_final_residuals=False)
 
 # End timing
 end_time = time.time()
 elapsed_time = end_time - start_time
 
-# 8. Print results
+# Print results
 print(f"Simulation completed in {elapsed_time:.2f} seconds")
 print(f"Total Iterations = {result.iterations}")
 
-# 9. Check mass conservation
+# Check mass conservation
 max_div = result.get_max_divergence()
 print(f"Maximum absolute divergence: {max_div:.6e}")
 
-# 10. Visualize results
+# Visualize results
 result.plot_combined_results(
-    title=f'Multigrid with Jacobi Smoother Cavity Flow Results (Re={Re})',
-    filename=os.path.join(results_dir, f'cavity_Re{Re}_multigrid_jacobi_results.pdf'),
+    title=f'Multigrid with Gauss-Seidel Smoother Cavity Flow Results (Re={Re})',
+    filename=os.path.join(results_dir, f'cavity_Re{Re}_multigrid_gauss_seidel_results.pdf'),
     show=False
 )
 """
+# Plot the V-cycle results if available
+if hasattr(algorithm.pressure_solver, 'plot_vcycle_results'):
+    algorithm.pressure_solver.plot_vcycle_results(os.path.join(debug_dir, 'vcycle_analysis.pdf'))
+
+# Print detailed convergence information
+print("\nFinal MultiGrid Solver Statistics:")
+print(f"Grid size used: {nx}x{ny}")
+
+# Print information about the smoother
+smoother_info = smoother.get_solver_info()
+print("\nSmoother Information:")
+print(f"Smoother type: {smoother_info['name']}")
+print(f"Relaxation factor (omega): {smoother_info['omega']}")
+print(f"Convergence rate: {smoother_info['convergence_rate']:.6f}" if smoother_info['convergence_rate'] is not None else "Convergence rate: N/A")
+
+# Compare with Jacobi-based multigrid (estimation)
+print("\nTheoretical Comparison with Jacobi Smoother:")
+if smoother_info['convergence_rate'] is not None:
+    gs_rate = smoother_info['convergence_rate']
+    jacobi_rate = gs_rate**0.5  # Theoretical relationship
+    smoothing_speedup = np.log(1e-4) / np.log(gs_rate) * np.log(jacobi_rate) / np.log(1e-4)
+    print(f"Estimated speedup in smoothing operations: {smoothing_speedup:.2f}x")
+else:
+    print("Convergence rate data not available for comparison") 
+
+
 # After the simulation completes, plot the V-cycle results
 algorithm.pressure_solver.plot_vcycle_results(os.path.join(debug_dir, 'vcycle_analysis.pdf'))
 
@@ -208,18 +230,6 @@ except Exception as e:
     print(f"Error loading benchmark data: {e}")
     print("Skipping benchmark comparison")
 
-# Add safety check after multigrid solver call
-if np.any(np.isnan(result.p)) or np.any(np.isinf(result.p)):
-    print("ERROR: NaN or Inf values in pressure result!")
-    # Apply fallback to get a stable but less accurate solution
-    print("Applying fallback direct solver...")
-    algorithm.pressure_solver = JacobiSolver(omega=0.5)
-    algorithm.solve()
-    # Check if fallback solution is valid
-    if np.any(np.isnan(result.p)) or np.any(np.isinf(result.p)):
-        print("FATAL: Even fallback solver produced invalid results")
-        # Replace with zeros as last resort
-        result.p = np.zeros_like(result.p)
 
 # After processing results, add detailed output
 print("\nFinal Multigrid Solver Statistics:")

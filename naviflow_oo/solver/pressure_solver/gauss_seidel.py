@@ -1,45 +1,55 @@
 """
-Gauss-Seidel solver for pressure correction equation.
+Matrix-free Gauss-Seidel solver for pressure correction equation.
 """
 
 import numpy as np
-from naviflow_oo.solver.pressure_solver.base_pressure_solver import PressureSolver
-from naviflow_oo.solver.pressure_solver.helpers.rhs_construction import get_rhs
+from .base_pressure_solver import PressureSolver
+from .helpers.rhs_construction import get_rhs
+from .helpers.matrix_free import compute_Ap_product
 
 class GaussSeidelSolver(PressureSolver):
     """
-    Gauss-Seidel solver for pressure correction equation in structured grids.
+    Matrix-free Gauss-Seidel solver for pressure correction equation.
     
-    This implements both standard Gauss-Seidel and Red-Black Gauss-Seidel (RBGS)
-    with optional SOR (Successive Over-Relaxation) to accelerate convergence.
+    This solver uses the Gauss-Seidel iterative method without explicitly forming
+    the coefficient matrix, which can be more memory-efficient for large problems.
+    Gauss-Seidel differs from Jacobi by immediately using updated values during each iteration,
+    which generally leads to faster convergence than Jacobi.
+    
+    This implementation supports both standard (lexicographic) Gauss-Seidel iteration
+    and Red-Black Gauss-Seidel (RBGS) which allows for better vectorization.
     """
     
-    def __init__(self, omega=1.0, tolerance=1e-6, max_iterations=1000, use_red_black=False):
+    def __init__(self, tolerance=1e-6, max_iterations=1000, omega=1.0, use_red_black=True):
         """
         Initialize the Gauss-Seidel solver.
         
         Parameters:
         -----------
-        omega : float, optional
-            Relaxation parameter (omega=1.0 is standard Gauss-Seidel,
-            omega>1.0 is over-relaxation, omega<1.0 is under-relaxation)
         tolerance : float, optional
-            Convergence tolerance
+            Convergence tolerance for the Gauss-Seidel method
         max_iterations : int, optional
-            Maximum number of iterations
+            Maximum number of iterations for the Gauss-Seidel method
+        omega : float, optional
+            Relaxation factor for SOR (Successive Over-Relaxation)
+            omega=1.0 for standard Gauss-Seidel, 1.0 < omega < 2.0 for SOR
         use_red_black : bool, optional
-            Whether to use Red-Black Gauss-Seidel (True) or standard Gauss-Seidel (False)
+            Whether to use Red-Black Gauss-Seidel for better vectorization (True)
+            or standard lexicographic Gauss-Seidel (False)
         """
         super().__init__(tolerance=tolerance, max_iterations=max_iterations)
         self.omega = omega
         self.use_red_black = use_red_black
         self.residual_history = []
+        self.inner_iterations_history = []
+        self.total_inner_iterations = 0
+        self.convergence_rates = []
     
     def solve(self, mesh=None, u_star=None, v_star=None, d_u=None, d_v=None, p_star=None, 
               p=None, b=None, nx=None, ny=None, dx=None, dy=None, rho=1.0, num_iterations=None, 
               track_residuals=True):
         """
-        Solve the pressure correction equation using Gauss-Seidel method.
+        Solve the pressure correction equation using the Gauss-Seidel method.
         
         Parameters:
         -----------
@@ -71,7 +81,7 @@ class GaussSeidelSolver(PressureSolver):
         p_prime : ndarray
             Pressure correction field
         """
-        # Get grid dimensions and spacing
+        # Get grid dimensions and spacing if mesh is provided
         if mesh is not None:
             nx, ny = mesh.get_dimensions()
             dx, dy = mesh.get_cell_sizes()
@@ -88,183 +98,230 @@ class GaussSeidelSolver(PressureSolver):
         if p is None:
             p = np.zeros_like(b)
             
-        # Reset residual history if tracking
+        # Track inner iterations and reset residuals if needed
+        inner_iterations = 0
         if track_residuals:
             self.residual_history = []
         
-        # Check if p_star is 2D to determine the expected output shape
+        # Check input formats and reshape as needed
         p_star_is_2d = p_star is not None and p_star.ndim == 2
-            
-        # Reshape to 2D if needed
         p_is_1d = p.ndim == 1
+        b_is_1d = b.ndim == 1
+        
+        # Convert to 2D arrays for computation
         if p_is_1d:
             p_2d = p.reshape((nx, ny), order='F')
         else:
-            p_2d = p.copy()  # We need a copy since Gauss-Seidel updates in-place
+            p_2d = p.copy()
             
-        if b.ndim == 1:
+        if b_is_1d:
             b_2d = b.reshape((nx, ny), order='F')
         else:
             b_2d = b.copy()
         
         # Pre-compute coefficient arrays
-        # East coefficients (aE)
+        # East coefficients
         aE = np.zeros((nx, ny))
         aE[:-1, :] = rho * d_u[1:nx, :] * dy
         
-        # West coefficients (aW)
+        # West coefficients
         aW = np.zeros((nx, ny))
         aW[1:, :] = rho * d_u[1:nx, :] * dy
         
-        # North coefficients (aN)
+        # North coefficients
         aN = np.zeros((nx, ny))
         aN[:, :-1] = rho * d_v[:, 1:ny] * dx
         
-        # South coefficients (aS)
+        # South coefficients
         aS = np.zeros((nx, ny))
         aS[:, 1:] = rho * d_v[:, 1:ny] * dx
         
-        # Diagonal coefficients (aP)
+        # Diagonal coefficients
         aP = aE + aW + aN + aS
         
-        # Ensure reference point has proper coefficient
+        # Reference point
         aP[0, 0] = 1.0
-        aE[0, 0] = 0.0
-        aN[0, 0] = 0.0
-        aW[0, 0] = 0.0
-        aS[0, 0] = 0.0
+        aE[0, 0] = aW[0, 0] = aN[0, 0] = aS[0, 0] = 0.0
         b_2d[0, 0] = 0.0
         
         # Avoid division by zero
         aP[aP == 0] = 1.0
         
-        # Perform iterations
+        # Inverse of aP for efficiency
+        inv_aP = 1.0 / aP
+        
+        # Main iteration loop
         for k in range(num_iterations):
-            # Keep a copy for convergence check
+            # Ensure reference point
+            p_2d[0, 0] = 0.0
+            
+            # Create a copy of the current solution for convergence check
             p_old = p_2d.copy()
             
             if self.use_red_black:
-                # Red-Black Gauss-Seidel
-                self._rbgs_iteration(p_2d, b_2d, aE, aW, aN, aS, aP, nx, ny)
+                # Red-Black Gauss-Seidel (more vectorizable)
+                self._rb_gauss_seidel_step(p_2d, b_2d, aE, aW, aN, aS, inv_aP, nx, ny)
             else:
-                # Standard Gauss-Seidel
-                self._gs_iteration(p_2d, b_2d, aE, aW, aN, aS, aP, nx, ny)
+                # Standard Gauss-Seidel (lexicographic ordering)
+                self._standard_gauss_seidel_step(p_2d, b_2d, aE, aW, aN, aS, inv_aP, nx, ny)
             
-            # Ensure reference pressure point remains zero
-            p_2d[0, 0] = 0.0
+            # Track iterations
+            inner_iterations += 1
             
-            # Check convergence if tracking residuals
+            # Check convergence if needed
             if track_residuals:
-                res = np.linalg.norm(p_2d - p_old)
-                self.residual_history.append(res)
+                # Calculate residual using Ax - b
+                p_flat = p_2d.flatten('F')
+                r = b.ravel() - compute_Ap_product(p_flat, nx, ny, dx, dy, rho, d_u, d_v)
+                res_norm = np.linalg.norm(r)
+                self.residual_history.append(res_norm)
                 
-                # Check convergence
-                if res < self.tolerance:
+                # Calculate convergence rate if we have enough iterations
+                if k >= 2 and self.residual_history[-2] > 1e-15:
+                    conv_rate = self.residual_history[-1] / self.residual_history[-2]
+                    self.convergence_rates.append(conv_rate)
+                
+                # Check solution change
+                change = np.linalg.norm(p_2d - p_old) / (np.linalg.norm(p_2d) + 1e-15)
+                if change < self.tolerance * 0.1:
+                    print(f"Gauss-Seidel converged in {k+1} iterations, solution change: {change:.6e}")
                     break
-            print(f"Iteration {k+1}, Residual: {res:.6e}")
                 
-        # Return in the expected format
-        if p_is_1d or (p_star is not None and p_star.ndim == 1):
-            return p_2d.flatten(order='F')
-        else:
-            return p_2d
+                # Check residual-based convergence
+                if res_norm < self.tolerance:
+                    print(f"Gauss-Seidel converged in {k+1} iterations, residual: {res_norm:.6e}")
+                    break
+        
+        # Store inner iterations
+        self.inner_iterations_history.append(inner_iterations)
+        self.total_inner_iterations += inner_iterations
+        
+        # Return the solution
+        return p_2d
     
-    def _gs_iteration(self, p, b, aE, aW, aN, aS, aP, nx, ny):
+    def _standard_gauss_seidel_step(self, p, b, aE, aW, aN, aS, inv_aP, nx, ny):
         """
-        Perform one standard Gauss-Seidel iteration.
+        Perform one standard (lexicographic) Gauss-Seidel iteration with SOR.
+        
+        This is the standard implementation that updates points in lexicographic order (i,j).
+        It's not very vectorizable but preserves the exact Gauss-Seidel update pattern.
         """
-        # Loop over all interior points in a specific order
-        for j in range(1, ny-1):
-            for i in range(1, nx-1):
-                # Skip the reference pressure point
+        # Vectorize preparation of shifted arrays for neighbors
+        # These will be updated during the loop
+        p_east = np.zeros_like(p)
+        p_east[:-1, :] = p[1:, :]
+        
+        p_west = np.zeros_like(p)
+        p_west[1:, :] = p[:-1, :]
+        
+        p_north = np.zeros_like(p)
+        p_north[:, :-1] = p[:, 1:]
+        
+        p_south = np.zeros_like(p)
+        p_south[:, 1:] = p[:, :-1]
+        
+        # Loop over all points in lexicographic order
+        for i in range(nx):
+            for j in range(ny):
+                # Skip reference point
                 if i == 0 and j == 0:
                     continue
-                    
-                # Sum of neighbor contributions
-                neighbor_sum = 0.0
                 
-                # East neighbor
+                # Get contributions from neighbors (always using latest values)
+                east = aE[i, j] * (p[i+1, j] if i < nx-1 else 0)
+                west = aW[i, j] * (p[i-1, j] if i > 0 else 0)
+                north = aN[i, j] * (p[i, j+1] if j < ny-1 else 0)
+                south = aS[i, j] * (p[i, j-1] if j > 0 else 0)
+                
+                # Compute new value
+                p_new = (b[i, j] + east + west + north + south) * inv_aP[i, j]
+                
+                # SOR update
+                p[i, j] = p[i, j] + self.omega * (p_new - p[i, j])
+                
+                # Update neighbor arrays for next iterations
                 if i < nx-1:
-                    neighbor_sum += aE[i, j] * p[i+1, j]
-                    
-                # West neighbor
+                    p_west[i+1, j] = p[i, j]
                 if i > 0:
-                    neighbor_sum += aW[i, j] * p[i-1, j]
-                    
-                # North neighbor
+                    p_east[i-1, j] = p[i, j]
                 if j < ny-1:
-                    neighbor_sum += aN[i, j] * p[i, j+1]
-                    
-                # South neighbor
+                    p_south[i, j+1] = p[i, j]
                 if j > 0:
-                    neighbor_sum += aS[i, j] * p[i, j-1]
-                
-                # Update with relaxation
-                p_new = (b[i, j] + neighbor_sum) / aP[i, j]
-                p[i, j] = (1.0 - self.omega) * p[i, j] + self.omega * p_new
+                    p_north[i, j-1] = p[i, j]
     
-    def _rbgs_iteration(self, p, b, aE, aW, aN, aS, aP, nx, ny):
+    def _rb_gauss_seidel_step(self, p, b, aE, aW, aN, aS, inv_aP, nx, ny):
         """
-        Perform one Red-Black Gauss-Seidel iteration.
+        Perform one Red-Black Gauss-Seidel iteration with SOR.
+        
+        This implementation updates all "red" points first, then all "black" points.
+        Red points are those where i+j is even, black points where i+j is odd.
+        This approach allows for better vectorization while preserving the Gauss-Seidel property
+        that updates depend on the latest values of neighbors.
         """
-        # Process red points (i+j even)
-        for j in range(1, ny-1):
-            for i in range(1, nx-1):
-                if (i + j) % 2 == 0:
-                    # Skip the reference pressure point
-                    if i == 0 and j == 0:
-                        continue
-                        
-                    # Sum of neighbor contributions
-                    neighbor_sum = 0.0
-                    
-                    # East neighbor
-                    if i < nx-1:
-                        neighbor_sum += aE[i, j] * p[i+1, j]
-                        
-                    # West neighbor
-                    if i > 0:
-                        neighbor_sum += aW[i, j] * p[i-1, j]
-                        
-                    # North neighbor
-                    if j < ny-1:
-                        neighbor_sum += aN[i, j] * p[i, j+1]
-                        
-                    # South neighbor
-                    if j > 0:
-                        neighbor_sum += aS[i, j] * p[i, j-1]
-                    
-                    # Update with relaxation
-                    p_new = (b[i, j] + neighbor_sum) / aP[i, j]
-                    p[i, j] = (1.0 - self.omega) * p[i, j] + self.omega * p_new
-                    
-        # Process black points (i+j odd)
-        for j in range(1, ny-1):
-            for i in range(1, nx-1):
-                if (i + j) % 2 == 1:
-                    # Skip the reference pressure point
-                    if i == 0 and j == 0:
-                        continue
-                        
-                    # Sum of neighbor contributions
-                    neighbor_sum = 0.0
-                    
-                    # East neighbor
-                    if i < nx-1:
-                        neighbor_sum += aE[i, j] * p[i+1, j]
-                        
-                    # West neighbor
-                    if i > 0:
-                        neighbor_sum += aW[i, j] * p[i-1, j]
-                        
-                    # North neighbor
-                    if j < ny-1:
-                        neighbor_sum += aN[i, j] * p[i, j+1]
-                        
-                    # South neighbor
-                    if j > 0:
-                        neighbor_sum += aS[i, j] * p[i, j-1]
-                    
-                    # Update with relaxation
-                    p_new = (b[i, j] + neighbor_sum) / aP[i, j]
-                    p[i, j] = (1.0 - self.omega) * p[i, j] + self.omega * p_new 
+        # Create red and black masks (vectorized)
+        i_indices, j_indices = np.meshgrid(np.arange(nx), np.arange(ny), indexing='ij')
+        red_mask = ((i_indices + j_indices) % 2 == 0)
+        
+        # Ensure reference point is properly handled
+        red_mask[0, 0] = False  # Exclude reference point from updates
+        black_mask = ~red_mask
+        
+        # Update RED points first (vectorized)
+        # Get east, west, north, south neighbors
+        east = np.zeros_like(p)
+        west = np.zeros_like(p)
+        north = np.zeros_like(p)
+        south = np.zeros_like(p)
+        
+        # Safe array indexing with proper bounds checking
+        east[:-1, :] = aE[:-1, :] * p[1:, :]
+        west[1:, :] = aW[1:, :] * p[:-1, :]
+        north[:, :-1] = aN[:, :-1] * p[:, 1:]
+        south[:, 1:] = aS[:, 1:] * p[:, :-1]
+        
+        # Calculate new values for red points
+        p_new_red = (b + east + west + north + south) * inv_aP
+        p_new_red = p + self.omega * (p_new_red - p)
+        
+        # Apply only to red points
+        p[red_mask] = p_new_red[red_mask]
+        
+        # Update BLACK points next (vectorized)
+        # Recalculate neighbors with updated red values
+        east[:-1, :] = aE[:-1, :] * p[1:, :]
+        west[1:, :] = aW[1:, :] * p[:-1, :]
+        north[:, :-1] = aN[:, :-1] * p[:, 1:]
+        south[:, 1:] = aS[:, 1:] * p[:, :-1]
+        
+        # Calculate new values for black points
+        p_new_black = (b + east + west + north + south) * inv_aP
+        p_new_black = p + self.omega * (p_new_black - p)
+        
+        # Apply only to black points
+        p[black_mask] = p_new_black[black_mask]
+    
+    def get_solver_info(self):
+        """
+        Get information about the solver's performance.
+        
+        Returns:
+        --------
+        dict
+            Dictionary containing solver performance metrics
+        """
+        # Calculate convergence rate if available
+        if len(self.convergence_rates) > 0:
+            # Use the average of the last few iterations for stability
+            last_rates = self.convergence_rates[-min(10, len(self.convergence_rates)):]
+            avg_rate = sum(last_rates) / len(last_rates)
+        else:
+            avg_rate = None
+            
+        return {
+            'name': 'GaussSeidelSolver',
+            'inner_iterations_history': self.inner_iterations_history,
+            'total_inner_iterations': self.total_inner_iterations,
+            'convergence_rate': avg_rate,
+            'omega': self.omega,
+            'method': 'Red-Black' if self.use_red_black else 'Standard'
+        } 
