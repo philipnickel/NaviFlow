@@ -1,6 +1,6 @@
 """
 Lid-driven cavity flow simulation using the object-oriented framework with multigrid solver
-that uses GaussSeidelSolver as the smoother.
+that uses JacobiSolver as the smoother.
 """
 
 import numpy as np
@@ -9,14 +9,14 @@ import time
 import os
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
-from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
-from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
+from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
+# Debug mode for testing
+
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
@@ -28,14 +28,16 @@ os.makedirs(debug_dir, exist_ok=True)
 # Start timing
 start_time = time.time()
 
-# Grid size - must be 2^k-1 for multigrid (e.g., 31, 63, 127, 255)
-nx, ny = 2**6-1, 2**6-1  # 127x127 grid
+# Update parameters
+# Grid size
+nx, ny = 2**6-1, 2**6-1  # Smaller grid for testing
 
-# Relaxation factors and iterations
-max_iterations = 500
+
+# Reduced relaxation factors and iterations
+max_iterations = 1  # Increased to allow for convergence over multiple iterations
 convergence_tolerance = 1e-4
-alpha_p = 0.1  # Pressure relaxation
-alpha_u = 0.7 # Velocity relaxation
+alpha_p = 0.1  # Pressure relaxation 
+alpha_u = 0.7   # Velocity relaxation
 
 # Create mesh
 print(f"Creating mesh with {nx}x{ny} cells...")
@@ -46,26 +48,26 @@ print(f"Cell sizes: dx={dx}, dy={dy}")
 # Create initial conditions
 Re = 100
 print(f"Reynolds number: {Re}")
+viscosity = 0.01
+print(f"Calculated viscosity: {viscosity}")
 
-# Create solvers
-# Create a Gauss-Seidel smoother for the multigrid solver with SOR
-smoother = GaussSeidelSolver(use_red_black=True)
+# 4. Create solvers
+# Create a Jacobi smoother for the multigrid solver
+smoother = JacobiSolver(omega=0.5)  # Lower omega for stability
 
-# Create multigrid solver with the Gauss-Seidel smoother
+# Create multigrid solver with conservative parameters
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=1,    # Maximum V-cycles
-    tolerance=1e-4,         # Overall tolerance
-    pre_smoothing=20,        # Pre-smoothing steps
-    post_smoothing=20,       # Post-smoothing steps
-    smoother_omega=1.5,      # SOR parameter
-    store_vcycle_data=True,  # Enable V-cycle data storage
-    max_diagnostic_history=100  # Store more diagnostic history
+    max_iterations=10,        # Fewer iterations
+    tolerance=1e-5,          # Tighter tolerance
+    pre_smoothing=20,         # Minimal pre-smoothing steps
+    post_smoothing=20,        # Minimal post-smoothing steps 
+    smoother_omega=0.5,       # Conservative relaxation
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
-# Create algorithm
+# 5. Create algorithm
 algorithm = SimpleSolver(
     mesh=mesh,
     fluid=FluidProperties(
@@ -80,46 +82,49 @@ algorithm = SimpleSolver(
     alpha_u=alpha_u
 )
 
-# Set boundary conditions
+# 6. Set boundary conditions
 algorithm.set_boundary_condition('top', 'velocity', {'u': 1.0, 'v': 0.0})
 algorithm.set_boundary_condition('bottom', 'wall')
 algorithm.set_boundary_condition('left', 'wall')
 algorithm.set_boundary_condition('right', 'wall')
 
-# Solve the problem
+# 7. Solve the problem
 print("Starting simulation...")
 result = algorithm.solve(max_iterations=max_iterations, tolerance=convergence_tolerance, 
-                        track_infinity_norm=True, infinity_norm_interval=5)
+                         track_infinity_norm=True, infinity_norm_interval=5)
 
 # End timing
 end_time = time.time()
 elapsed_time = end_time - start_time
 
-# Print results
+# 8. Print results
 print(f"Simulation completed in {elapsed_time:.2f} seconds")
 print(f"Total Iterations = {result.iterations}")
 
-# Check mass conservation
+# 9. Check mass conservation
 max_div = result.get_max_divergence()
 print(f"Maximum absolute divergence: {max_div:.6e}")
 
-# Visualize results
+"""
+# 10. Visualize results
 result.plot_combined_results(
-    title=f'Multigrid with Gauss-Seidel Smoother Cavity Flow Results (Re={Re})',
-    filename=os.path.join(results_dir, f'cavity_Re{Re}_multigrid_gauss_seidel_results.pdf'),
-    show=True
+    title=f'Multigrid with Jacobi Smoother Cavity Flow Results (Re={Re})',
+    filename=os.path.join(results_dir, f'cavity_Re{Re}_multigrid_jacobi_results.pdf'),
+    show=False
 )
-
-
-# After the simulation completes, plot the V-cycle results
-algorithm.pressure_solver.plot_vcycle_results(os.path.join(debug_dir, 'vcycle_analysis.pdf'))
-
+"""
 # 11. Visualize final residuals
 plot_final_residuals(
     result.u, result.v, result.p,
     algorithm.u_old, algorithm.v_old, algorithm.p_old,
     mesh,
     title=f'Final Residuals (Re={Re})',
-    filename=os.path.join(results_dir, f'final_residuals_Re{Re}.pdf'),
+    filename=os.path.join(results_dir, f'final_residuals_jacobi_Re{Re}.pdf'),
     show=False
 )
+
+# vcycle analysis
+print("Generating V-cycle analysis plot...")
+
+multigrid_solver.plot_vcycle_results(output_path=os.path.join(debug_dir, f'vcycle_analysis_Re{Re}.pdf'))
+print(f"V-cycle analysis plot saved to {os.path.join(debug_dir, f'vcycle_analysis_Re{Re}.pdf')}")

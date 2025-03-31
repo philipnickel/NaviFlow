@@ -145,6 +145,9 @@ class JacobiSolver(PressureSolver):
         p_west = np.zeros_like(p_2d)
         p_north = np.zeros_like(p_2d)
         p_south = np.zeros_like(p_2d)
+
+        # apply boundary conditions
+        p_2d = self.apply_pressure_boundary_conditions(p_2d)
         
         # Main iteration loop
         for k in range(num_iterations):

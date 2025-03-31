@@ -105,7 +105,8 @@ def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
     # Compute result: diagonal term - neighbor terms
     result_2d[mask] = (aP * p - aE * p_east - aW * p_west - aN * p_north - aS * p_south)[mask]
     
-    # No need to flatten result if we're using pre-allocated out array
+    # Ensure result is flattened before returning
+    result = result_2d.flatten('F')
     return result
 
 
