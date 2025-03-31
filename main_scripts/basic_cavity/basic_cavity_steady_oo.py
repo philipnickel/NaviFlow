@@ -14,6 +14,7 @@ from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.direct import DirectPressureSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
+from naviflow_oo.postprocessing.visualization import plot_final_residuals
 
 # Start timing
 start_time = time.time()
@@ -24,7 +25,7 @@ reynolds = 100             # Reynolds number
 alpha_p = 1              # Pressure relaxation factor
 alpha_u = 1              # Velocity relaxation factor
 max_iterations = 10000     # Maximum number of iterations
-tolerance = 1e-6           # Convergence tolerance
+tolerance = 1e-5           # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -68,7 +69,14 @@ os.makedirs(results_dir, exist_ok=True)
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10, plot_final_residuals=True)
+result = algorithm.solve(
+    max_iterations=max_iterations,
+    tolerance=tolerance,
+    save_profile=True,
+    profile_dir=results_dir,
+    track_infinity_norm=True,
+    infinity_norm_interval=10,
+)
 
 # End timing
 end_time = time.time()
@@ -86,7 +94,17 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_results.pdf'),
-    show=True
+    show=False
+)
+
+# 11. Visualize final residuals
+plot_final_residuals(
+    result.u, result.v, result.p,
+    algorithm.u_old, algorithm.v_old, algorithm.p_old,
+    mesh,
+    title=f'Final Residuals (Re={reynolds})',
+    filename=os.path.join(results_dir, f'final_residuals_Re{reynolds}.pdf'),
+    show=False
 )
 
 

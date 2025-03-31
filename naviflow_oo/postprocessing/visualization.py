@@ -502,3 +502,125 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
         
     return fig
 
+def plot_final_residuals(u, v, p, u_old, v_old, p_old, mesh, title=None, filename=None, show=True, output_dir=None):
+    """
+    Plot final residuals for pressure, momentum, and total fields.
+    
+    Parameters:
+    -----------
+    u, v : ndarray
+        Current velocity fields
+    p : ndarray
+        Current pressure field
+    u_old, v_old : ndarray
+        Previous velocity fields
+    p_old : ndarray
+        Previous pressure field
+    mesh : StructuredMesh
+        The computational mesh
+    title : str, optional
+        Plot title
+    filename : str, optional
+        If provided, saves the figure to this filename
+    show : bool, optional
+        Whether to display the plot
+    output_dir : str, optional
+        Directory where to save the output. If None, uses 'results' in the calling script's directory.
+    """
+    # Calculate the final residual fields
+    final_p_residual = np.abs(p - p_old)  # Final pressure residual
+    final_u_residual = np.abs(u - u_old)  # Final u-velocity residual
+    final_v_residual = np.abs(v - v_old)  # Final v-velocity residual
+    
+    # Get mesh dimensions
+    nx, ny = mesh.get_dimensions()
+    
+    # Create cell-centered final u-velocity residual
+    u_res_centered = np.zeros_like(p)
+    for i in range(nx):
+        for j in range(ny):
+            if i < nx-1:
+                u_res_centered[i,j] = 0.5 * (final_u_residual[i,j] + final_u_residual[i+1,j])
+            else:
+                u_res_centered[i,j] = final_u_residual[i,j]
+    
+    # Create cell-centered final v-velocity residual
+    v_res_centered = np.zeros_like(p)
+    for i in range(nx):
+        for j in range(ny):
+            if j < ny-1:
+                v_res_centered[i,j] = 0.5 * (final_v_residual[i,j] + final_v_residual[i,j+1])
+            else:
+                v_res_centered[i,j] = final_v_residual[i,j]
+    
+    # Combined final momentum residual
+    final_momentum_res_field = np.sqrt(u_res_centered**2 + v_res_centered**2)
+    final_total_res_field = final_momentum_res_field + final_p_residual
+    
+    # Calculate relative errors
+    rel_p_residual = final_p_residual / (np.abs(p) + 1e-10)
+    
+    # Create cell-centered velocity magnitude for relative momentum residual
+    u_mag = np.zeros_like(p)
+    v_mag = np.zeros_like(p)
+    for i in range(nx):
+        for j in range(ny):
+            if i < nx-1:
+                u_mag[i,j] = 0.5 * (u[i,j] + u[i+1,j])
+            else:
+                u_mag[i,j] = u[i,j]
+            if j < ny-1:
+                v_mag[i,j] = 0.5 * (v[i,j] + v[i,j+1])
+            else:
+                v_mag[i,j] = v[i,j]
+    
+    rel_momentum_residual = final_momentum_res_field / (np.sqrt(u_mag**2 + v_mag**2) + 1e-10)
+    rel_total_residual = final_total_res_field / (np.sqrt(u_mag**2 + v_mag**2 + p**2) + 1e-10)
+    
+    # Create a figure with 3x4 subplots (3 fields, 4 error types each)
+    fig = plt.figure(figsize=(20, 15))
+    
+    # Function to create subplot with error field
+    def plot_error_field(ax, data, title, is_log=False, is_relative=False):
+        if is_log:
+            data = np.log10(data + 1e-10)
+        img = ax.matshow(data, cmap='coolwarm')
+        plt.colorbar(img, ax=ax, label=f"{'Log10 ' if is_log else ''}{'Relative' if is_relative else 'Absolute'} Error")
+        ax.set_title(f"{title}\n{'Log10 ' if is_log else ''}{'Relative' if is_relative else 'Absolute'} Error")
+    
+    # Pressure error plots
+    plot_error_field(plt.subplot(3, 4, 1), final_p_residual, "Pressure", is_log=False, is_relative=False)
+    plot_error_field(plt.subplot(3, 4, 2), final_p_residual, "Pressure", is_log=True, is_relative=False)
+    plot_error_field(plt.subplot(3, 4, 3), rel_p_residual, "Pressure", is_log=False, is_relative=True)
+    plot_error_field(plt.subplot(3, 4, 4), rel_p_residual, "Pressure", is_log=True, is_relative=True)
+    
+    # Momentum error plots
+    plot_error_field(plt.subplot(3, 4, 5), final_momentum_res_field, "Momentum", is_log=False, is_relative=False)
+    plot_error_field(plt.subplot(3, 4, 6), final_momentum_res_field, "Momentum", is_log=True, is_relative=False)
+    plot_error_field(plt.subplot(3, 4, 7), rel_momentum_residual, "Momentum", is_log=False, is_relative=True)
+    plot_error_field(plt.subplot(3, 4, 8), rel_momentum_residual, "Momentum", is_log=True, is_relative=True)
+    
+    # Total error plots
+    plot_error_field(plt.subplot(3, 4, 9), final_total_res_field, "Total", is_log=False, is_relative=False)
+    plot_error_field(plt.subplot(3, 4, 10), final_total_res_field, "Total", is_log=True, is_relative=False)
+    plot_error_field(plt.subplot(3, 4, 11), rel_total_residual, "Total", is_log=False, is_relative=True)
+    plot_error_field(plt.subplot(3, 4, 12), rel_total_residual, "Total", is_log=True, is_relative=True)
+    
+    if title:
+        fig.suptitle(title, fontsize=16)
+    
+    plt.tight_layout()
+    
+    if filename:
+        # Ensure output directory exists and get full path
+        full_path = _ensure_output_directory(filename, output_dir)
+        plt.savefig(full_path, dpi=300, bbox_inches='tight')
+        print(f"Final residuals plot saved to {full_path}")
+    
+    if show:
+        plt.show()
+    else:
+        plt.close()
+    
+    return fig
+

@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
 from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error
+from ...postprocessing.visualization import plot_final_residuals
 
 class SimpleSolver(BaseAlgorithm):
     """
@@ -46,6 +47,9 @@ class SimpleSolver(BaseAlgorithm):
         self.alpha_u = alpha_u
         self.fix_lid_corners = fix_lid_corners
         self.mass_residual_history = []  # Initialize mass residual history
+        self.u_old = None  # Store old u values
+        self.v_old = None  # Store old v values
+        self.p_old = None  # Store old p values
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
     
@@ -73,32 +77,18 @@ class SimpleSolver(BaseAlgorithm):
                 # Comment out the next line if you just want to fix the corners
                 self.u[1:nx, ny-1] = top_condition.get('u', 1.0)  # Apply velocity only to interior points
     
-    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
-              track_infinity_norm=False, infinity_norm_interval=10, plot_final_residuals=False):
+    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=False, profile_dir=None, track_infinity_norm=False, infinity_norm_interval=10, should_plot_final_residuals=False):
         """
-        Solve using the SIMPLE algorithm.
+        Solve the Navier-Stokes equations using the SIMPLE algorithm.
         
-        Parameters:
-        -----------
-        max_iterations : int
-            Maximum number of iterations
-        tolerance : float
-            Convergence tolerance
-        save_profile : bool, optional
-            Whether to save profiling data to a file
-        profile_dir : str, optional
-            Directory to save profiling data
-        track_infinity_norm : bool, optional
-            Whether to track infinity norm error against Ghia data
-        infinity_norm_interval : int, optional
-            Interval (in iterations) at which to calculate infinity norm error
-        plot_final_residuals : bool, optional
-            Whether to visualize the final pressure residuals (2D plots)
-            
-        Returns:
-        --------
-        SimulationResult
-            Object containing the solution fields and convergence history
+        Args:
+            max_iterations (int): Maximum number of iterations
+            tolerance (float): Convergence tolerance
+            save_profile (bool): Whether to save profiling data
+            profile_dir (str): Directory to save profiling data
+            track_infinity_norm (bool): Whether to track infinity norm
+            infinity_norm_interval (int): Interval for tracking infinity norm
+            should_plot_final_residuals (bool): Whether to plot final residuals
         """
         # Start profiling
         self.profiler.start()
@@ -130,10 +120,9 @@ class SimpleSolver(BaseAlgorithm):
         print(f"Using relaxation factors: alpha_p = {self.alpha_p}, alpha_u = {self.alpha_u}") 
         while (iteration <= max_iterations) and (total_res > tolerance):
             # Store old values for convergence check
-            u_old = self.u.copy()
-            v_old = self.v.copy()
-            p_old = self.p.copy()
-            
+            self.u_old = self.u.copy()
+            self.v_old = self.v.copy()
+            self.p_old = self.p.copy()
             
             # Solve momentum equations with relaxation factor
             u_star, d_u = self.momentum_solver.solve_u_momentum(
@@ -153,33 +142,31 @@ class SimpleSolver(BaseAlgorithm):
             v_momentum_res = np.linalg.norm(v_star - self.v, ord=2)
 
             momentum_res =(u_momentum_res + v_momentum_res)
-              # Solve pressure correction equation
+            # Solve pressure correction equation
             p_prime = self.pressure_solver.solve(
                 self.mesh, u_star, v_star, d_u, d_v, p_star
             )
-               # Update pressure with relaxation
+            # Update pressure with relaxation
             self.p = p_star + self.alpha_p * p_prime
             
             # Calculate pressure residual using 2-norm
-            pressure_res = np.linalg.norm(self.p - p_old, ord=2)
-            p_star = self.p  # Update p_star for next iteration
-            
+            pressure_res = np.linalg.norm(self.p - self.p_old, ord=2)
+            p_star = self.p
             
             # Update velocity
             self.u, self.v = self.velocity_updater.update_velocity(
                 self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
             )
             
-            
             # Calculate scaled residuals
             n_cells = nx * ny
 
             # Velocity residuals (normalized by number of cells)
-            u_res = np.linalg.norm(self.u - u_old, ord=2) / np.sqrt(n_cells)
-            v_res = np.linalg.norm(self.v - v_old, ord=2) / np.sqrt(n_cells)
+            u_res = np.linalg.norm(self.u - self.u_old, ord=2) / np.sqrt(n_cells)
+            v_res = np.linalg.norm(self.v - self.v_old, ord=2) / np.sqrt(n_cells)
 
             # Pressure residual (normalized)
-            p_res = np.linalg.norm(self.p - p_old, ord=2) / np.sqrt(n_cells)
+            p_res = np.linalg.norm(self.p - self.p_old, ord=2) / np.sqrt(n_cells)
             # Combined residual as sum of velocity components and pressure only
             total_res = u_res + v_res + p_res
 
@@ -214,7 +201,6 @@ class SimpleSolver(BaseAlgorithm):
                   f"Pressure Residual: {p_res:.6e}")
             
             iteration += 1
-            
         
         # Update profiling data
         self.profiler.set_iterations(iteration - 1)
@@ -277,58 +263,14 @@ class SimpleSolver(BaseAlgorithm):
             print(f"Profiling data saved to: {profile_path}")
         
         # Plot final residuals if requested
-        if plot_final_residuals:
-            # Calculate the final residual fields (difference between final solution and previous iteration)
-            final_p_residual = np.abs(self.p - p_old)  # Final pressure residual
-            final_u_residual = np.abs(self.u - u_old)  # Final u-velocity residual
-            final_v_residual = np.abs(self.v - v_old)  # Final v-velocity residual
-            
-            # Create a figure with three subplots
-            plt.figure(figsize=(15, 5))
-            
-            # 1. Plot final pressure residual distribution
-            plt.subplot(1, 3, 1)
-            img1 = plt.matshow(final_p_residual, cmap='coolwarm', fignum=False)
-            plt.colorbar(img1, label='Final Pressure Residual')
-            plt.title(f'Final Pressure Residual\nMax: {np.max(final_p_residual):.2e}')
-            
-            # 2. Plot final momentum residual (combined u and v)
-            plt.subplot(1, 3, 2)
-            
-            # Create cell-centered final u-velocity residual
-            u_res_centered = np.zeros_like(self.p)
-            nx, ny = self.mesh.get_dimensions()
-            for i in range(nx):
-                for j in range(ny):
-                    if i < nx-1:
-                        u_res_centered[i,j] = 0.5 * (final_u_residual[i,j] + final_u_residual[i+1,j])
-                    else:
-                        u_res_centered[i,j] = final_u_residual[i,j]
-            
-            # Create cell-centered final v-velocity residual
-            v_res_centered = np.zeros_like(self.p)
-            for i in range(nx):
-                for j in range(ny):
-                    if j < ny-1:
-                        v_res_centered[i,j] = 0.5 * (final_v_residual[i,j] + final_v_residual[i,j+1])
-                    else:
-                        v_res_centered[i,j] = final_v_residual[i,j]
-            
-            # Combined final momentum residual
-            final_momentum_res_field = np.sqrt(u_res_centered**2 + v_res_centered**2)
-            img2 = plt.matshow(final_momentum_res_field, cmap='coolwarm', fignum=False)
-            plt.colorbar(img2, label='Final Momentum Residual')
-            plt.title(f'Final Momentum Residual\nMax: {np.max(final_momentum_res_field):.2e}')
-            
-            # 3. Plot final total residual (max of all residuals)
-            plt.subplot(1, 3, 3)
-            final_total_res_field = final_momentum_res_field + final_p_residual
-            img3 = plt.matshow(final_total_res_field, cmap='coolwarm', fignum=False)
-            plt.colorbar(img3, label='Final Total Residual')
-            plt.title(f'Final Total Residual\nMax: {np.max(final_total_res_field):.2e}')
-            
-            plt.tight_layout()
-            plt.savefig('final_residuals.png')
-            plt.show()
+        if should_plot_final_residuals:
+            plot_final_residuals(
+                self.u, self.v, self.p,
+                self.u_old, self.v_old, self.p_old,
+                self.mesh,
+                title=f'Final Residuals (Re={reynolds_value})',
+                filename='final_residuals.pdf',
+                show=True
+            )
         
         return result
