@@ -23,11 +23,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 127, 127          # Grid size
+nx, ny = 63, 63          # Grid size
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 10000     # Maximum number of iterations
+max_iterations = 1     # Maximum number of iterations
 tolerance = 1e-4         # Convergence tolerance
 
 # 2. Create mesh
@@ -48,8 +48,9 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # Use Gauss-Seidel solver for pressure correction
 pressure_solver = GaussSeidelSolver(
     tolerance=1e-5,  # Relaxed tolerance for inner iterations
-    max_iterations=1000,  # Fewer iterations per SIMPLE iteration
-    omega=1.5  # SOR for better convergence (over-relaxation)
+    max_iterations=50000,  # Fewer iterations per SIMPLE iteration
+    omega=1.5,  # SOR for better convergence (over-relaxation)
+    #use_red_black=True
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -73,7 +74,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=5)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=5, plot_final_residuals=True)
 
 # End timing
 end_time = time.time()

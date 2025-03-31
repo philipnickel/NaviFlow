@@ -100,20 +100,22 @@ class PreconditionedCGSolver(PressureSolver):
         A = A_lil.tocsr()
         
         # Setup PyAMG solver as preconditioner
-        #ml = pyamg.smoothed_aggregation_solver(
-        #    A, 
-        #    presmoother=self.presmoother,
-        #    postsmoother=self.postsmoother
-        #)
         ml = pyamg.smoothed_aggregation_solver(
-            A, 
-            presmoother=self.presmoother,
-            postsmoother=self.postsmoother,
+            A,
+            B=None,
+            strength='evolution',  # More robust strength measure
+            aggregate='standard',
+            smooth=('jacobi', {'omega': 4.0/3.0}),
+            presmoother=('gauss_seidel', {'sweep': 'forward'}),
+            postsmoother=('gauss_seidel', {'sweep': 'backward'}),
+            max_levels=10,
+            max_coarse=10,
+            keep=False
         )
         
         # Create a preconditioner function using PyAMG's multigrid cycle
-        M_x = lambda x: ml.solve(x, x0=np.zeros_like(x), tol=1e-12, 
-                                 maxiter=1, cycle=self.cycle_type)
+        M_x = lambda x: ml.solve(x, x0=np.zeros_like(x), tol=self.tolerance*0.1, 
+                                 maxiter=3, cycle='V')
         
         # Create a LinearOperator to represent our preconditioner
         M = LinearOperator((len(b), len(b)), matvec=M_x)
@@ -126,25 +128,17 @@ class PreconditionedCGSolver(PressureSolver):
             self.residual_history.append(res_norm)
             return False  # Continue iteration
         
-        # Use preconditioned conjugate gradient to solve system
-        #p_prime_flat, info = cg(
-        #    A, 
-        #    b, 
-        #    x0=x0, 
-        #    M=M,
-        #    atol=self.tolerance, 
-        #    maxiter=self.max_iterations,
-        #    callback=callback
-        #)
-        p_prime_flat, info = bicgstab(
-            A, 
-            b, 
-            x0=x0, 
-            M=M,
-            atol=self.tolerance, 
+        # Use conjugate gradient with preconditioner
+        p_prime_flat, info = cg(
+            A,
+            b,
+            x0=x0,
+            M=M, 
+            atol=self.tolerance,
             maxiter=self.max_iterations,
             callback=callback
         )
+        
         self.inner_iterations.append(len(self.residual_history))
         
         if info != 0:
@@ -153,13 +147,8 @@ class PreconditionedCGSolver(PressureSolver):
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
-        # Ensure reference pressure is exactly zero
-        p_prime[0, 0] = 0.0
-        # Ensure boundaries are 0
-        #p_prime[0, :] = 0.0
-        #p_prime[:, 0] = 0.0
-        #p_prime[-1, :] = 0.0
-        #p_prime[:, -1] = 0.0
+        # Apply pressure boundary conditions
+        p_prime = self.apply_pressure_boundary_conditions(p_prime)
         
         return p_prime
     

@@ -3,13 +3,45 @@ Matrix-free implementation methods.
 """
 import numpy as np
 
-def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v):
-    """Compute matrix-vector product Ap without forming the matrix explicitly."""
+def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
+    """
+    Compute matrix-vector product Ap without forming the matrix explicitly.
+    
+    Parameters:
+    -----------
+    p_flat : ndarray
+        Flattened pressure array
+    imax, jmax : int
+        Grid dimensions
+    dx, dy : float
+        Cell sizes
+    rho : float
+        Fluid density
+    d_u, d_v : ndarray
+        Momentum equation coefficients
+    out : ndarray, optional
+        Output array for result (must be same shape as p_flat)
+        
+    Returns:
+    --------
+    result : ndarray
+        The result of the matrix-vector product Ap
+    """
     # Reshape p_flat to 2D for easier manipulation
     p = p_flat.reshape((imax, jmax), order='F')
     
     # Initialize result array
-    result_2d = np.zeros_like(p)
+    if out is None:
+        result = np.zeros_like(p_flat)
+    else:
+        # Use the provided output array
+        result = out
+        
+    result_2d = result.reshape((imax, jmax), order='F')
+    
+    # Clear the result array if reusing
+    if out is not None:
+        result_2d.fill(0.0)
     
     # Handle reference pressure point (0,0) separately
     result_2d[0, 0] = p[0, 0]
@@ -73,8 +105,7 @@ def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v):
     # Compute result: diagonal term - neighbor terms
     result_2d[mask] = (aP * p - aE * p_east - aW * p_west - aN * p_north - aS * p_south)[mask]
     
-    # Flatten result back to 1D
-    result = result_2d.flatten('F')
+    # No need to flatten result if we're using pre-allocated out array
     return result
 
 

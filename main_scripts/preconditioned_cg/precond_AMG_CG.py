@@ -30,12 +30,12 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63           # Grid size (smaller for quick testing)
+nx, ny = 127, 127           # Grid size (smaller for quick testing)
 reynolds = 100             # Reynolds number
-alpha_p = 0.1             # Pressure relaxation factor
-alpha_u = 0.7             # Velocity relaxation factor
+alpha_p = 0.1            # Even more conservative pressure relaxation
+alpha_u = 0.7             # Even more conservative velocity relaxation
 max_iterations = 100000     
-tolerance = 1e-4          # Convergence tolerance
+tolerance = 1e-5          # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -54,12 +54,12 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Preconditioned CG solver for pressure correction
 pressure_solver = PreconditionedCGSolver(
-    tolerance=1e-6,
-    max_iterations=100000,
+    tolerance=1e-4,        # Even tighter tolerance for pressure solver
+    max_iterations=3000,   # More iterations allowed
     smoother='gauss_seidel',
-    presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),
-    postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),
-    cycle_type='F'
+    presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
+    postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
+    cycle_type='V'         # Use V-cycle for better stability
 )
 momentum_solver = StandardMomentumSolver()
 
@@ -85,7 +85,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation with SIMPLE algorithm and Preconditioned CG solver...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10, plot_final_residuals=True)
 
 # End timing
 end_time = time.time()
@@ -103,5 +103,5 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Preconditioned CG Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_preconditioned_cg_results.pdf'),
-    show=False
+    show=True
 )

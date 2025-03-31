@@ -29,13 +29,13 @@ os.makedirs(debug_dir, exist_ok=True)
 start_time = time.time()
 
 # Grid size - must be 2^k-1 for multigrid (e.g., 31, 63, 127, 255)
-nx, ny = 2**8-1, 2**8-1  # 127x127 grid
+nx, ny = 2**6-1, 2**6-1  # 127x127 grid
 
 # Relaxation factors and iterations
-max_iterations = 10000
-convergence_tolerance = 1e-5
-alpha_p = 1  # Pressure relaxation
-alpha_u = 1 # Velocity relaxation
+max_iterations = 1
+convergence_tolerance = 1e-4
+alpha_p = 0.1  # Pressure relaxation
+alpha_u = 0.7 # Velocity relaxation
 
 # Create mesh
 print(f"Creating mesh with {nx}x{ny} cells...")
@@ -44,10 +44,8 @@ dx, dy = mesh.get_cell_sizes()
 print(f"Cell sizes: dx={dx}, dy={dy}")
 
 # Create initial conditions
-Re = 1000
+Re = 100
 print(f"Reynolds number: {Re}")
-viscosity = 0.01
-print(f"Calculated viscosity: {viscosity}")
 
 # Create solvers
 # Create a Gauss-Seidel smoother for the multigrid solver with SOR
@@ -56,11 +54,13 @@ smoother = GaussSeidelSolver()
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=100,    # Maximum V-cycles
-    tolerance=1e-5,         # Overall tolerance
-    pre_smoothing=10,        # Pre-smoothing steps
-    post_smoothing=10,       # Post-smoothing steps
-    smoother_omega=1.5      # SOR parameter
+    max_iterations=4,    # Maximum V-cycles
+    tolerance=1e-4,         # Overall tolerance
+    pre_smoothing=20,        # Pre-smoothing steps
+    post_smoothing=20,       # Post-smoothing steps
+    smoother_omega=1.5,      # SOR parameter
+    store_vcycle_data=True,  # Enable V-cycle data storage
+    max_diagnostic_history=100  # Store more diagnostic history
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -89,7 +89,7 @@ algorithm.set_boundary_condition('right', 'wall')
 # Solve the problem
 print("Starting simulation...")
 result = algorithm.solve(max_iterations=max_iterations, tolerance=convergence_tolerance, 
-                        track_infinity_norm=True, infinity_norm_interval=5, plot_final_residuals=False)
+                        track_infinity_norm=True, infinity_norm_interval=5, plot_final_residuals=True)
 
 # End timing
 end_time = time.time()
@@ -107,9 +107,12 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Multigrid with Gauss-Seidel Smoother Cavity Flow Results (Re={Re})',
     filename=os.path.join(results_dir, f'cavity_Re{Re}_multigrid_gauss_seidel_results.pdf'),
-    show=False
+    show=True
 )
-"""
+
+
+
+
 # Plot the V-cycle results if available
 if hasattr(algorithm.pressure_solver, 'plot_vcycle_results'):
     algorithm.pressure_solver.plot_vcycle_results(os.path.join(debug_dir, 'vcycle_analysis.pdf'))
@@ -238,4 +241,3 @@ print(f"Mean absolute value in solution: {np.mean(np.abs(result.p)):.6e}")
 print(f"Grid size used: {nx}x{ny}")
 print(f"Final residual: {algorithm.pressure_solver.final_residual if hasattr(algorithm.pressure_solver, 'final_residual') else 'N/A'}")
 print(f"Iterations completed: {algorithm.pressure_solver.iterations if hasattr(algorithm.pressure_solver, 'iterations') else 'N/A'}")
-"""

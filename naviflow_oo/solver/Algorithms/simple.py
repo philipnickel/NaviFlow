@@ -45,6 +45,7 @@ class SimpleSolver(BaseAlgorithm):
         self.alpha_p = alpha_p
         self.alpha_u = alpha_u
         self.fix_lid_corners = fix_lid_corners
+        self.mass_residual_history = []  # Initialize mass residual history
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
     
@@ -118,7 +119,7 @@ class SimpleSolver(BaseAlgorithm):
         
         # Main iteration loop
         iteration = 1
-        max_res = 1000
+        total_res = 1000
         momentum_res = 1000
         pressure_res = 1000
         
@@ -127,7 +128,7 @@ class SimpleSolver(BaseAlgorithm):
                                 'main_scripts', 'geo_multigrid', 'multigrid_debugging', 'arrays_5x5')
         os.makedirs(debug_dir, exist_ok=True)
         print(f"Using relaxation factors: alpha_p = {self.alpha_p}, alpha_u = {self.alpha_u}") 
-        while (iteration <= max_iterations) and (max_res > tolerance):
+        while (iteration <= max_iterations) and (total_res > tolerance):
             # Store old values for convergence check
             u_old = self.u.copy()
             v_old = self.v.copy()
@@ -147,11 +148,11 @@ class SimpleSolver(BaseAlgorithm):
                 boundary_conditions=self.bc_manager
             )
             
-            # Calculate momentum residual
-            u_momentum_res = np.abs(u_star - self.u)
-            v_momentum_res = np.abs(v_star - self.v)
-            momentum_res = max(np.max(u_momentum_res), np.max(v_momentum_res))
-    
+            # Calculate momentum residual using 2-norm
+            u_momentum_res = np.linalg.norm(u_star - self.u, ord=2)
+            v_momentum_res = np.linalg.norm(v_star - self.v, ord=2)
+
+            momentum_res =(u_momentum_res + v_momentum_res)
               # Solve pressure correction equation
             p_prime = self.pressure_solver.solve(
                 self.mesh, u_star, v_star, d_u, d_v, p_star
@@ -159,10 +160,9 @@ class SimpleSolver(BaseAlgorithm):
                # Update pressure with relaxation
             self.p = p_star + self.alpha_p * p_prime
             
-            # Calculate pressure residual
-            pressure_res = np.max(np.abs(self.p - p_old))
-            
-            p_star = self.p.copy()  # Update p_star for next iteration
+            # Calculate pressure residual using 2-norm
+            pressure_res = np.linalg.norm(self.p - p_old, ord=2)
+            p_star = self.p  # Update p_star for next iteration
             
             
             # Update velocity
@@ -170,22 +170,27 @@ class SimpleSolver(BaseAlgorithm):
                 self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
             )
             
-            # Apply our specialized boundary conditions again to ensure corner fixes are applied
-            self.apply_boundary_conditions()
             
-            # Calculate total residual
-            u_res = np.abs(self.u - u_old)
-            v_res = np.abs(self.v - v_old)
-            max_res = max(np.max(u_res), np.max(v_res))
-            
-            # Store residual history
-            self.residual_history.append(max_res)
-            self.momentum_residual_history.append(momentum_res)
-            self.pressure_residual_history.append(pressure_res)
+            # Calculate scaled residuals
+            n_cells = nx * ny
+
+            # Velocity residuals (normalized by number of cells)
+            u_res = np.linalg.norm(self.u - u_old, ord=2) / np.sqrt(n_cells)
+            v_res = np.linalg.norm(self.v - v_old, ord=2) / np.sqrt(n_cells)
+
+            # Pressure residual (normalized)
+            p_res = np.linalg.norm(self.p - p_old, ord=2) / np.sqrt(n_cells)
+            # Combined residual as sum of velocity components and pressure only
+            total_res = u_res + v_res + p_res
+
+            # Store all residuals separately for monitoring
+            self.residual_history.append(total_res)
+            self.momentum_residual_history.append(u_res + v_res)
+            self.pressure_residual_history.append(p_res)
             
             # Calculate infinity norm error if requested
             infinity_norm_error = None
-            if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or max_res <= tolerance):
+            if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or total_res <= tolerance):
                 try:
                     infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
                     self.infinity_norm_history.append(infinity_norm_error)
@@ -196,19 +201,18 @@ class SimpleSolver(BaseAlgorithm):
             # Add detailed residual data to profiler
             self.profiler.add_residual_data(
                 iteration=iteration,
-                total_residual=max_res,
-                momentum_residual=momentum_res,
-                pressure_residual=pressure_res,
+                total_residual=total_res,
+                momentum_residual=u_res + v_res,
+                pressure_residual=p_res,
                 infinity_norm_error=infinity_norm_error
             )
             
             # Print progress with all residuals
             print(f"Iteration {iteration}, "
-                  f"Total Residual: {max_res:.6e}, "
-                  f"Momentum Residual: {momentum_res:.6e}, "
-                  f"Pressure Residual: {pressure_res:.6e}")
+                  f"Total Residual: {total_res:.6e}, "
+                  f"Momentum Residual: {u_res + v_res:.6e}, "
+                  f"Pressure Residual: {p_res:.6e}")
             
-                
             iteration += 1
             
         
@@ -216,8 +220,8 @@ class SimpleSolver(BaseAlgorithm):
         self.profiler.set_iterations(iteration - 1)
         
         # Set convergence information
-        final_residual = max_res
-        converged = max_res <= tolerance
+        final_residual = total_res
+        converged = total_res <= tolerance
         self.profiler.set_convergence_info(
             tolerance=tolerance,
             final_residual=final_residual,
@@ -274,26 +278,24 @@ class SimpleSolver(BaseAlgorithm):
         
         # Plot final residuals if requested
         if plot_final_residuals:
-            # Calculate the final residual fields
-            final_p_residual = np.abs(self.p - p_old)
-            final_u_residual = np.abs(self.u - u_old)
-            final_v_residual = np.abs(self.v - v_old)
+            # Calculate the final residual fields (difference between final solution and previous iteration)
+            final_p_residual = np.abs(self.p - p_old)  # Final pressure residual
+            final_u_residual = np.abs(self.u - u_old)  # Final u-velocity residual
+            final_v_residual = np.abs(self.v - v_old)  # Final v-velocity residual
             
             # Create a figure with three subplots
             plt.figure(figsize=(15, 5))
             
-            # 1. Plot pressure residual distribution
+            # 1. Plot final pressure residual distribution
             plt.subplot(1, 3, 1)
-            img1 = plt.imshow(final_p_residual, cmap='hot')
-            plt.colorbar(img1, label='Pressure Residual')
-            plt.title(f'Pressure Residual\nMax: {np.max(final_p_residual):.2e}')
-            plt.xlabel('X Grid Index')
-            plt.ylabel('Y Grid Index')
+            img1 = plt.matshow(final_p_residual, cmap='coolwarm', fignum=False)
+            plt.colorbar(img1, label='Final Pressure Residual')
+            plt.title(f'Final Pressure Residual\nMax: {np.max(final_p_residual):.2e}')
             
-            # 2. Plot momentum residual (combined u and v)
+            # 2. Plot final momentum residual (combined u and v)
             plt.subplot(1, 3, 2)
             
-            # Create cell-centered u-velocity residual
+            # Create cell-centered final u-velocity residual
             u_res_centered = np.zeros_like(self.p)
             nx, ny = self.mesh.get_dimensions()
             for i in range(nx):
@@ -303,7 +305,7 @@ class SimpleSolver(BaseAlgorithm):
                     else:
                         u_res_centered[i,j] = final_u_residual[i,j]
             
-            # Create cell-centered v-velocity residual
+            # Create cell-centered final v-velocity residual
             v_res_centered = np.zeros_like(self.p)
             for i in range(nx):
                 for j in range(ny):
@@ -312,22 +314,18 @@ class SimpleSolver(BaseAlgorithm):
                     else:
                         v_res_centered[i,j] = final_v_residual[i,j]
             
-            # Combined momentum residual
-            momentum_res_field = np.sqrt(u_res_centered**2 + v_res_centered**2)
-            img2 = plt.imshow(momentum_res_field, cmap='plasma')
-            plt.colorbar(img2, label='Momentum Residual')
-            plt.title(f'Momentum Residual\nMax: {np.max(momentum_res_field):.2e}')
-            plt.xlabel('X Grid Index')
-            plt.ylabel('Y Grid Index')
+            # Combined final momentum residual
+            final_momentum_res_field = np.sqrt(u_res_centered**2 + v_res_centered**2)
+            img2 = plt.matshow(final_momentum_res_field, cmap='coolwarm', fignum=False)
+            plt.colorbar(img2, label='Final Momentum Residual')
+            plt.title(f'Final Momentum Residual\nMax: {np.max(final_momentum_res_field):.2e}')
             
-            # 3. Plot total residual (max of all residuals)
+            # 3. Plot final total residual (max of all residuals)
             plt.subplot(1, 3, 3)
-            total_res_field = np.maximum(momentum_res_field, final_p_residual)
-            img3 = plt.imshow(total_res_field, cmap='viridis')
-            plt.colorbar(img3, label='Total Residual')
-            plt.title(f'Total Residual\nMax: {np.max(total_res_field):.2e}')
-            plt.xlabel('X Grid Index')
-            plt.ylabel('Y Grid Index')
+            final_total_res_field = final_momentum_res_field + final_p_residual
+            img3 = plt.matshow(final_total_res_field, cmap='coolwarm', fignum=False)
+            plt.colorbar(img3, label='Final Total Residual')
+            plt.title(f'Final Total Residual\nMax: {np.max(final_total_res_field):.2e}')
             
             plt.tight_layout()
             plt.savefig('final_residuals.png')

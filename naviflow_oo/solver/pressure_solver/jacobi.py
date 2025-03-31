@@ -204,6 +204,7 @@ class JacobiSolver(PressureSolver):
         
         # Always return a 2D array with shape (nx, ny) for compatibility with SIMPLE algorithm
         # This is needed because SIMPLE expects p_prime to be 2D for operations like p_star + alpha_p * p_prime
+        p_2d = self.apply_pressure_boundary_conditions(p_2d)
         return p_2d
     
     def get_solver_info(self):

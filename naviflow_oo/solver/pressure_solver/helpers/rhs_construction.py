@@ -17,7 +17,7 @@ def get_rhs(imax, jmax, dx, dy, rho, u_star, v_star):
     bp = bp_2d.flatten('F')  # Fortran-style order (column-major)
     
     # Modify for p_prime(0,0) - pressure at first node is fixed
-    bp[0] = 0
+    #bp[0] = 0
     
     return bp
 

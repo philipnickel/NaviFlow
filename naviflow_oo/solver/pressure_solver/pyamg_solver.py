@@ -73,6 +73,8 @@ class PyAMGSolver(PressureSolver):
         p_prime : ndarray
             Pressure correction field
         """
+        # Apply boundary conditions
+        #p_star = self.apply_pressure_boundary_conditions(p_star)
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
         rho = 1.0  # This should come from fluid properties
@@ -109,14 +111,16 @@ class PyAMGSolver(PressureSolver):
         # Solve using PyAMG
         x = ml.solve(b, x0=x0, tol=self.tolerance, maxiter=self.max_iterations, 
                         residuals=self.residual_history, accel='cg')
-        print(f"Residual history: {self.residual_history}")
+        #print(f"Residual history: {self.residual_history}")
         self.inner_iterations.append(len(self.residual_history))
     
         # Reshape to 2D
         p_prime = x.reshape((nx, ny), order='F')
         
         # Ensure reference pressure is exactly zero
-        p_prime[0, 0] = 0.0
+        #p_prime[0, 0] = 0.0
+        # Apply pressure boundary conditions
+        p_prime = self.apply_pressure_boundary_conditions(p_prime)
         
         return p_prime
     

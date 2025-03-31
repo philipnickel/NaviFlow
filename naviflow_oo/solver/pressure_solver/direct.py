@@ -47,6 +47,9 @@ class DirectPressureSolver(PressureSolver):
         p_prime : ndarray
             Pressure correction field
         """
+        # Apply boundary conditions
+        p_star = self.apply_pressure_boundary_conditions(p_star)
+        
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
         rho = 1.0  # This should come from fluid properties
@@ -56,17 +59,7 @@ class DirectPressureSolver(PressureSolver):
         
         # Get coefficient matrix
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
-        
-        # Explicitly fix reference pressure at bottom-left corner (0,0)
-        # This makes the system non-singular
-        """
-        row_idx = 0  # Index for the (0,0) cell
-        A[row_idx, :] = 0  # Zero out the row
-        A[row_idx, row_idx] = 1  # Set diagonal to 1
-        rhs[row_idx] = 0  # Set RHS to 0
-        """
-        # Add small regularization to improve conditioning
-        # This helps with near-singular matrices
+        # # Add small regularization to improve conditioning
         eps = 1e-10
         diag_indices = sparse.find(A.diagonal())[0]
         A = A.tolil()
@@ -84,9 +77,8 @@ class DirectPressureSolver(PressureSolver):
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
-        # Ensure reference pressure is exactly zero
-        #p_prime[0, 0] = 0.0
-        
+        # Apply pressure boundary conditions
+        p_prime = self.apply_pressure_boundary_conditions(p_prime)
         return p_prime
         
     def get_solver_info(self):
@@ -123,9 +115,9 @@ def penta_diag_solve(solver_params):
     #x = spsolve_triangular(A, b, lower=False)
     
     # Add a small value to the diagonal to improve conditioning
-    diag = A.diagonal()
-    diag_plus_eps = diag + 1e-10
-    A.setdiag(diag_plus_eps)
+    #diag = A.diagonal()
+    #diag_plus_eps = diag + 1e-10
+    #A.setdiag(diag_plus_eps)
     
     x = spsolve(A, b)
     return x

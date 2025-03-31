@@ -103,18 +103,18 @@ class GaussSeidelSolver(PressureSolver):
         if track_residuals:
             self.residual_history = []
         
-        # Check input formats and reshape as needed
-        p_star_is_2d = p_star is not None and p_star.ndim == 2
-        p_is_1d = p.ndim == 1
-        b_is_1d = b.ndim == 1
+        # Determine output shape based on p_star
+        output_shape = None
+        if p_star is not None:
+            output_shape = p_star.shape
         
         # Convert to 2D arrays for computation
-        if p_is_1d:
+        if p.ndim == 1:
             p_2d = p.reshape((nx, ny), order='F')
         else:
             p_2d = p.copy()
             
-        if b_is_1d:
+        if b.ndim == 1:
             b_2d = b.reshape((nx, ny), order='F')
         else:
             b_2d = b.copy()
@@ -139,7 +139,7 @@ class GaussSeidelSolver(PressureSolver):
         # Diagonal coefficients
         aP = aE + aW + aN + aS
         
-        # Reference point
+        # Fix reference pressure at (0,0)
         aP[0, 0] = 1.0
         aE[0, 0] = aW[0, 0] = aN[0, 0] = aS[0, 0] = 0.0
         b_2d[0, 0] = 0.0
@@ -150,25 +150,34 @@ class GaussSeidelSolver(PressureSolver):
         # Inverse of aP for efficiency
         inv_aP = 1.0 / aP
         
+        # Fix reference pressure at (0,0)
+        p_2d[0, 0] = 0.0
+        
         # Main iteration loop
         for k in range(num_iterations):
-            # Ensure reference point
+            # Ensure reference point stays fixed
             p_2d[0, 0] = 0.0
             
-            # Create a copy of the current solution for convergence check
-            p_old = p_2d.copy()
+            # Loop over all points in lexicographic order
+            for i in range(nx):
+                for j in range(ny):
+                    # Skip reference point
+                    if i == 0 and j == 0:
+                        continue
+                    
+                    # Get contributions from neighbors (always using latest values)
+                    east = aE[i, j] * (p_2d[i+1, j] if i < nx-1 else 0)
+                    west = aW[i, j] * (p_2d[i-1, j] if i > 0 else 0)
+                    north = aN[i, j] * (p_2d[i, j+1] if j < ny-1 else 0)
+                    south = aS[i, j] * (p_2d[i, j-1] if j > 0 else 0)
+                    
+                    # Compute new value
+                    p_new = (b_2d[i, j] + east + west + north + south) * inv_aP[i, j]
+                    
+                    # SOR update
+                    p_2d[i, j] = p_2d[i, j] + self.omega * (p_new - p_2d[i, j])
             
-            if self.use_red_black:
-                # Red-Black Gauss-Seidel (more vectorizable)
-                self._rb_gauss_seidel_step(p_2d, b_2d, aE, aW, aN, aS, inv_aP, nx, ny)
-            else:
-                # Standard Gauss-Seidel (lexicographic ordering)
-                self._standard_gauss_seidel_step(p_2d, b_2d, aE, aW, aN, aS, inv_aP, nx, ny)
-            
-            # Track iterations
-            inner_iterations += 1
-            
-            # Check convergence if needed
+            # Track convergence if needed
             if track_residuals:
                 # Calculate residual using Ax - b
                 p_flat = p_2d.flatten('F')
@@ -176,27 +185,30 @@ class GaussSeidelSolver(PressureSolver):
                 res_norm = np.linalg.norm(r)
                 self.residual_history.append(res_norm)
                 
-                # Calculate convergence rate if we have enough iterations
-                if k >= 2 and self.residual_history[-2] > 1e-15:
-                    conv_rate = self.residual_history[-1] / self.residual_history[-2]
-                    self.convergence_rates.append(conv_rate)
-                
                 # Check solution change
-                change = np.linalg.norm(p_2d - p_old) / (np.linalg.norm(p_2d) + 1e-15)
-                if change < self.tolerance * 0.1:
-                    print(f"Gauss-Seidel converged in {k+1} iterations, solution change: {change:.6e}")
-                    break
+                if k > 0:
+                    change = np.linalg.norm(p_2d - p_old) / np.linalg.norm(p_2d)
+                    if change < self.tolerance * 0.1:
+                        print(f"Gauss-Seidel converged in {k+1} iterations, solution change: {change:.6e}")
+                        break
+                
+                # Store current solution for next iteration
+                p_old = p_2d.copy()
                 
                 # Check residual-based convergence
                 if res_norm < self.tolerance:
                     print(f"Gauss-Seidel converged in {k+1} iterations, residual: {res_norm:.6e}")
                     break
+                #print(f" GSResidual: {res_norm:.6e}")
+
+        # Apply boundary conditions at the end
+        p_2d = self.apply_pressure_boundary_conditions(p_2d)
         
-        # Store inner iterations
-        self.inner_iterations_history.append(inner_iterations)
-        self.total_inner_iterations += inner_iterations
-        
-        # Return the solution
+        # Return in the same shape as p_star if provided, otherwise same as input
+        if output_shape is not None:
+            return p_2d
+        elif p.ndim == 1:
+            return p_2d.flatten('F')
         return p_2d
     
     def _standard_gauss_seidel_step(self, p, b, aE, aW, aN, aS, inv_aP, nx, ny):

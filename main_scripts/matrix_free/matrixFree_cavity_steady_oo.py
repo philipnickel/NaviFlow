@@ -42,7 +42,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=1e-12, max_iterations=1000000)
+pressure_solver = MatrixFreeCGSolver(tolerance=1e-5, max_iterations=10000)
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
@@ -69,7 +69,7 @@ os.makedirs(results_dir, exist_ok=True)
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10, plot_final_residuals=True)
 
 # End timing
 end_time = time.time()
@@ -87,6 +87,6 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Matrix-Free Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_matrix_free_results.pdf'),
-    show=False
+    show=True
 )
 

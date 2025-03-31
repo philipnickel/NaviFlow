@@ -23,10 +23,8 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 127, 127          # Grid size
-nx, ny = 127, 127          # Grid size
+nx, ny = 35, 35          # Grid size
 reynolds = 100           # Reynolds number
-alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.7            # Velocity relaxation factor
 max_iterations = 10000     # Maximum number of iterations
@@ -50,7 +48,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # Use Jacobi solver for pressure correction
 pressure_solver = JacobiSolver(
     tolerance=1e-5,  # Relaxed tolerance for inner iterations
-    max_iterations=10000,  # Fewer iterations per SIMPLE iteration
+    max_iterations=50000,  # Fewer iterations per SIMPLE iteration
     omega=0.8  # Weighted Jacobi for better convergence
 )
 momentum_solver = StandardMomentumSolver()
@@ -75,7 +73,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=5)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=5, plot_final_residuals=True)
 
 # End timing
 end_time = time.time()
@@ -93,7 +91,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Jacobi Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_jacobi_results.pdf'),
-    show=False
+    show=True
 )
 
 
