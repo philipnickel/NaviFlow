@@ -8,14 +8,13 @@ import time
 import os
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
-from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.matrix_free_cg import MatrixFreeCGSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.solver.momentum_solver.discretization.convection_schemes import QuickDiscretization
+from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
+
 start_time = time.time()
 
 # 1. Set up simulation parameters
@@ -69,7 +68,7 @@ os.makedirs(results_dir, exist_ok=True)
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10, plot_final_residuals=True)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
 
 # End timing
 end_time = time.time()
@@ -85,8 +84,18 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'Matrix-Free Cavity Flow Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_matrix_free_results.pdf'),
+    title=f'CG Cavity Flow Results (Re={reynolds})',
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_CG_results.pdf'),
     show=True
+)
+
+# 11. Visualize final residuals
+plot_final_residuals(
+    result.u, result.v, result.p,
+    algorithm.u_old, algorithm.v_old, algorithm.p_old,
+    mesh,
+    title=f'Final Residuals (Re={reynolds})',
+    filename=os.path.join(results_dir, f'final_residuals_Re{reynolds}.pdf'),
+    show=False
 )
 
