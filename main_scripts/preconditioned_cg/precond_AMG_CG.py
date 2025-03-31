@@ -29,7 +29,7 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63           # Grid size (smaller for quick testing)
+nx, ny = 35, 35           # Grid size (smaller for quick testing)
 reynolds = 100             # Reynolds number
 alpha_p = 0.1            # Even more conservative pressure relaxation
 alpha_u = 0.7             # Even more conservative velocity relaxation

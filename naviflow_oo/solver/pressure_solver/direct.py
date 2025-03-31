@@ -47,8 +47,6 @@ class DirectPressureSolver(PressureSolver):
         p_prime : ndarray
             Pressure correction field
         """
-        # Apply boundary conditions
-        p_star = self.apply_pressure_boundary_conditions(p_star)
         
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
@@ -77,8 +75,6 @@ class DirectPressureSolver(PressureSolver):
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
-        # Apply pressure boundary conditions
-        p_prime = self.apply_pressure_boundary_conditions(p_prime)
         return p_prime
         
     def get_solver_info(self):

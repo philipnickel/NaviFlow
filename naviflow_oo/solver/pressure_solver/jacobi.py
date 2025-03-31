@@ -145,9 +145,6 @@ class JacobiSolver(PressureSolver):
         p_west = np.zeros_like(p_2d)
         p_north = np.zeros_like(p_2d)
         p_south = np.zeros_like(p_2d)
-
-        # apply boundary conditions
-        p_2d = self.apply_pressure_boundary_conditions(p_2d)
         
         # Main iteration loop
         for k in range(num_iterations):
@@ -167,7 +164,7 @@ class JacobiSolver(PressureSolver):
 
             # Then apply relaxation as a separate step (numerically more stable)
             p_new = p_2d + self.omega * (p_standard - p_2d)
-
+            
             # Track iterations
             inner_iterations += 1
             
@@ -205,9 +202,7 @@ class JacobiSolver(PressureSolver):
         self.inner_iterations_history.append(inner_iterations)
         self.total_inner_iterations += inner_iterations
         
-        # Always return a 2D array with shape (nx, ny) for compatibility with SIMPLE algorithm
-        # This is needed because SIMPLE expects p_prime to be 2D for operations like p_star + alpha_p * p_prime
-        p_2d = self.apply_pressure_boundary_conditions(p_2d)
+        
         return p_2d
     
     def get_solver_info(self):

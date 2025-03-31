@@ -52,30 +52,25 @@ class SimpleSolver(BaseAlgorithm):
         self.p_old = None  # Store old p values
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
-    
-    def apply_boundary_conditions(self):
+ 
+    def _enforce_pressure_boundary_conditions(self):
         """
-        Override the default boundary condition application to handle lid corners.
+        Enforce zero-gradient boundary conditions on pressure field.
+        This is essential for proper behavior of the pressure solver.
         """
-        # First apply standard boundary conditions
-        super().apply_boundary_conditions()
+        nx, ny = self.mesh.get_dimensions()
         
-        # Special handling for lid-driven cavity corners
-        if self.fix_lid_corners:
-            nx, ny = self.mesh.get_dimensions()
-            
-            # Check if we have a top velocity boundary condition
-            top_condition = self.bc_manager.get_condition('top', 'velocity')
-            if top_condition and 'u' in top_condition:
-                # Make the corners stationary (u=0) to improve stability
-                self.u[0, ny-1] = 0.0   # Top-left corner
-                self.u[nx, ny-1] = 0.0  # Top-right corner
-                #print("Using fixed corners for lid-driven cavity")
-                
-                # Optionally, you could also only have the lid moving from x=1 to nx-2
-                # This completely eliminates the discontinuity at the corners
-                # Comment out the next line if you just want to fix the corners
-                self.u[1:nx, ny-1] = top_condition.get('u', 1.0)  # Apply velocity only to interior points
+        # Left boundary (i=0)
+        self.p[0, :] = self.p[1, :]
+        
+        # Right boundary (i=nx-1)
+        self.p[nx-1, :] = self.p[nx-2, :]
+        
+        # Bottom boundary (j=0)
+        self.p[:, 0] = self.p[:, 1]
+        
+        # Top boundary (j=ny-1)
+        self.p[:, ny-1] = self.p[:, ny-2]
     
     def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=False, profile_dir=None, track_infinity_norm=False, infinity_norm_interval=10, should_plot_final_residuals=False):
         """
@@ -148,6 +143,9 @@ class SimpleSolver(BaseAlgorithm):
             )
             # Update pressure with relaxation
             self.p = p_star + self.alpha_p * p_prime
+            
+            # Apply zero-gradient boundary conditions to pressure
+            self._enforce_pressure_boundary_conditions()
             
             # Calculate pressure residual using 2-norm
             pressure_res = np.linalg.norm(self.p - self.p_old, ord=2)

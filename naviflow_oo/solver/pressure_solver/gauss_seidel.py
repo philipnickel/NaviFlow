@@ -201,8 +201,6 @@ class GaussSeidelSolver(PressureSolver):
                     break
                 #print(f" GSResidual: {res_norm:.6e}")
 
-        # Apply boundary conditions at the end
-        p_2d = self.apply_pressure_boundary_conditions(p_2d)
         
         # Return in the same shape as p_star if provided, otherwise same as input
         if output_shape is not None:

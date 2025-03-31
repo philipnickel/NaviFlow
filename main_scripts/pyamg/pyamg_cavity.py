@@ -29,7 +29,7 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63          # Grid size (63x63 to match MATLAB example)
+nx, ny = 35, 35          # Grid size (63x63 to match MATLAB example)
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor

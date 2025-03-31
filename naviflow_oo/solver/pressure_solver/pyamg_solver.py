@@ -117,10 +117,6 @@ class PyAMGSolver(PressureSolver):
         # Reshape to 2D
         p_prime = x.reshape((nx, ny), order='F')
         
-        # Ensure reference pressure is exactly zero
-        #p_prime[0, 0] = 0.0
-        # Apply pressure boundary conditions
-        p_prime = self.apply_pressure_boundary_conditions(p_prime)
         
         return p_prime
     

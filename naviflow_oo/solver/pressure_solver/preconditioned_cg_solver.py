@@ -147,8 +147,6 @@ class PreconditionedCGSolver(PressureSolver):
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
-        # Apply pressure boundary conditions
-        p_prime = self.apply_pressure_boundary_conditions(p_prime)
         
         return p_prime
     

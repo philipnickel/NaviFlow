@@ -9,20 +9,21 @@ import time
 import os
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
+from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
+from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
 from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
 from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
-# Debug mode for testing
 
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
 
 # Create debug output directory
-debug_dir = os.path.join(os.path.dirname(__file__), 'debug_output')
+debug_dir = 'debug_output'
 os.makedirs(debug_dir, exist_ok=True)
 
 # Start timing
@@ -30,14 +31,14 @@ start_time = time.time()
 
 # Update parameters
 # Grid size
-nx, ny = 2**6-1, 2**6-1  # Smaller grid for testing
+nx, ny = 2**5-1, 2**5-1  # Smaller grid for testing
 
 
 # Reduced relaxation factors and iterations
-max_iterations = 1  # Increased to allow for convergence over multiple iterations
-convergence_tolerance = 1e-4
-alpha_p = 0.1  # Pressure relaxation 
-alpha_u = 0.7   # Velocity relaxation
+max_iterations = 2000  # Increased from 1000
+convergence_tolerance = 1e-4  # Tighter convergence (was 1e-4)
+alpha_p = 0.1  # Increased pressure relaxation (was 0.1)
+alpha_u = 0.9   # Increased velocity relaxation (was 0.7)
 
 # Create mesh
 print(f"Creating mesh with {nx}x{ny} cells...")
@@ -53,16 +54,16 @@ print(f"Calculated viscosity: {viscosity}")
 
 # 4. Create solvers
 # Create a Jacobi smoother for the multigrid solver
-smoother = JacobiSolver(omega=0.5)  # Lower omega for stability
+smoother = JacobiSolver(omega=0.9)  # Increased from 0.5 for better convergence
 
-# Create multigrid solver with conservative parameters
+# Create multigrid solver with improved parameters
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=10,        # Fewer iterations
-    tolerance=1e-5,          # Tighter tolerance
-    pre_smoothing=20,         # Minimal pre-smoothing steps
-    post_smoothing=20,        # Minimal post-smoothing steps 
-    smoother_omega=0.5,       # Conservative relaxation
+    max_iterations=2000,        # Increased from 1000
+    tolerance=1e-5,             # Tighter tolerance (was 1e-4)
+    pre_smoothing=50,            # Using default values (was 10)
+    post_smoothing=50,           # Using default values (was 10)
+    smoother_omega=0.9          # Increased from 0.5 for better convergence
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -105,26 +106,20 @@ print(f"Total Iterations = {result.iterations}")
 max_div = result.get_max_divergence()
 print(f"Maximum absolute divergence: {max_div:.6e}")
 
-"""
 # 10. Visualize results
 result.plot_combined_results(
     title=f'Multigrid with Jacobi Smoother Cavity Flow Results (Re={Re})',
     filename=os.path.join(results_dir, f'cavity_Re{Re}_multigrid_jacobi_results.pdf'),
     show=False
 )
-"""
+# 11. Visualize the final residuals
 # 11. Visualize final residuals
 plot_final_residuals(
     result.u, result.v, result.p,
     algorithm.u_old, algorithm.v_old, algorithm.p_old,
     mesh,
     title=f'Final Residuals (Re={Re})',
-    filename=os.path.join(results_dir, f'final_residuals_jacobi_Re{Re}.pdf'),
+    filename=os.path.join(results_dir, f'final_residuals_Re{Re}_multigrid_jacobi.pdf'),
     show=False
 )
 
-# vcycle analysis
-print("Generating V-cycle analysis plot...")
-
-multigrid_solver.plot_vcycle_results(output_path=os.path.join(debug_dir, f'vcycle_analysis_Re{Re}.pdf'))
-print(f"V-cycle analysis plot saved to {os.path.join(debug_dir, f'vcycle_analysis_Re{Re}.pdf')}")
