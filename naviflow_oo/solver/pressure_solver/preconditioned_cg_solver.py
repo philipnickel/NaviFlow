@@ -155,6 +155,11 @@ class PreconditionedCGSolver(PressureSolver):
         
         # Ensure reference pressure is exactly zero
         p_prime[0, 0] = 0.0
+        # Ensure boundaries are 0
+        #p_prime[0, :] = 0.0
+        #p_prime[:, 0] = 0.0
+        #p_prime[-1, :] = 0.0
+        #p_prime[:, -1] = 0.0
         
         return p_prime
     

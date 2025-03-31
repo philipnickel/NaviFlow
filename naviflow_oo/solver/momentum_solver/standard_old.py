@@ -103,10 +103,10 @@ class StandardMomentumSolver(MomentumSolver):
         Pe_s = Fs / Ds
         
         # Calculate coefficients using the discretization scheme
-        aE = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fe, De, Pe_e)
-        aW = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fw, Dw, Pe_w)
-        aN = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fn, Dn, Pe_n)
-        aS = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fs, Ds, Pe_s)
+        aE = self.discretization_scheme.calculate_flux_coefficients(Fe, De, Pe_e)
+        aW = self.discretization_scheme.calculate_flux_coefficients(Fw, Dw, Pe_w)
+        aN = self.discretization_scheme.calculate_flux_coefficients(Fn, Dn, Pe_n)
+        aS = self.discretization_scheme.calculate_flux_coefficients(Fs, Ds, Pe_s)
         
         # Complete the coefficients
         aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
@@ -136,9 +136,9 @@ class StandardMomentumSolver(MomentumSolver):
         Pe_n_bottom = Fn_bottom / Dn
         
         # Calculate coefficients for bottom boundary
-        aE_bottom = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fe_bottom, De, Pe_e_bottom)
-        aW_bottom = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fw_bottom, Dw, Pe_w_bottom)
-        aN_bottom = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fn_bottom, Dn, Pe_n_bottom)
+        aE_bottom = self.discretization_scheme.calculate_flux_coefficients(Fe_bottom, De, Pe_e_bottom)
+        aW_bottom = self.discretization_scheme.calculate_flux_coefficients(Fw_bottom, Dw, Pe_w_bottom)
+        aN_bottom = self.discretization_scheme.calculate_flux_coefficients(Fn_bottom, Dn, Pe_n_bottom)
         aS_bottom = 0
         
         aP_bottom = aE_bottom + aW_bottom + aN_bottom + aS_bottom + (Fe_bottom-Fw_bottom) + (Fn_bottom-Fs_bottom)
@@ -158,10 +158,10 @@ class StandardMomentumSolver(MomentumSolver):
         Pe_s_top = Fs_top / Ds
         
         # Calculate coefficients for top boundary
-        aE_top = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fe_top, De, Pe_e_top)
-        aW_top = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fw_top, Dw, Pe_w_top)
+        aE_top = self.discretization_scheme.calculate_flux_coefficients(Fe_top, De, Pe_e_top)
+        aW_top = self.discretization_scheme.calculate_flux_coefficients(Fw_top, Dw, Pe_w_top)
         aN_top = 0
-        aS_top = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fs_top, Ds, Pe_s_top)
+        aS_top = self.discretization_scheme.calculate_flux_coefficients(Fs_top, Ds, Pe_s_top)
         
         aP_top = aE_top + aW_top + aN_top + aS_top + (Fe_top-Fw_top) + (Fn_top-Fs_top)
         d_u[i_top, j] = alpha * dy / aP_top
@@ -248,10 +248,10 @@ class StandardMomentumSolver(MomentumSolver):
         Pe_s = Fs / Ds
         
         # Calculate coefficients using the discretization scheme
-        aE = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fe, De, Pe_e)
-        aW = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fw, Dw, Pe_w)
-        aN = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fn, Dn, Pe_n)
-        aS = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fs, Ds, Pe_s)
+        aE = self.discretization_scheme.calculate_flux_coefficients(Fe, De, Pe_e)
+        aW = self.discretization_scheme.calculate_flux_coefficients(Fw, Dw, Pe_w)
+        aN = self.discretization_scheme.calculate_flux_coefficients(Fn, Dn, Pe_n)
+        aS = self.discretization_scheme.calculate_flux_coefficients(Fs, Ds, Pe_s)
         
         # Complete the coefficients
         aP = aE + aW + aN + aS + (Fe-Fw) + (Fn-Fs)
@@ -281,10 +281,10 @@ class StandardMomentumSolver(MomentumSolver):
         Pe_s_left = Fs_left / Ds
         
         # Calculate coefficients for left boundary
-        aE_left = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fe_left, De, Pe_e_left)
+        aE_left = self.discretization_scheme.calculate_flux_coefficients(Fe_left, De, Pe_e_left)
         aW_left = 0
-        aN_left = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fn_left, Dn, Pe_n_left)
-        aS_left = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fs_left, Ds, Pe_s_left)
+        aN_left = self.discretization_scheme.calculate_flux_coefficients(Fn_left, Dn, Pe_n_left)
+        aS_left = self.discretization_scheme.calculate_flux_coefficients(Fs_left, Ds, Pe_s_left)
         
         aP_left = aE_left + aW_left + aN_left + aS_left + (Fe_left-Fw_left) + (Fn_left-Fs_left)
         d_v[i, j_left] = alpha * dx / aP_left
@@ -304,9 +304,9 @@ class StandardMomentumSolver(MomentumSolver):
         
         # Calculate coefficients for right boundary
         aE_right = 0
-        aW_right = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fw_right, Dw, Pe_w_right)
-        aN_right = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fn_right, Dn, Pe_n_right)
-        aS_right = self.discretization_scheme.calculate_flux_coefficients_vectorized(Fs_right, Ds, Pe_s_right)
+        aW_right = self.discretization_scheme.calculate_flux_coefficients(Fw_right, Dw, Pe_w_right)
+        aN_right = self.discretization_scheme.calculate_flux_coefficients(Fn_right, Dn, Pe_n_right)
+        aS_right = self.discretization_scheme.calculate_flux_coefficients(Fs_right, Ds, Pe_s_right)
         
         aP_right = aE_right + aW_right + aN_right + aS_right + (Fe_right-Fw_right) + (Fn_right-Fs_right)
         d_v[i, j_right] = alpha * dx / aP_right

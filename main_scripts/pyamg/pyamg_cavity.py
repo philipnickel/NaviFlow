@@ -30,10 +30,10 @@ start_time = time.time()
 
 # 1. Set up simulation parameters
 nx, ny = 127, 127          # Grid size (63x63 to match MATLAB example)
-reynolds = 100           # Reynolds number
+reynolds = 10000           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 100000    # Maximum number of iterations
+max_iterations = 1# Maximum number of iterations
 tolerance = 1e-5         # Convergence tolerance
 
 # 2. Create mesh
@@ -87,11 +87,11 @@ result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, sav
 # End timing
 end_time = time.time()
 elapsed_time = end_time - start_time
-
 # 8. Print results
 print(f"Simulation completed in {elapsed_time:.2f} seconds")
 print(f"Total Iterations = {result.iterations}")
 
+"""
 # 9. Check mass conservation
 max_div = result.get_max_divergence()
 print(f"Maximum absolute divergence: {max_div:.6e}")
@@ -102,3 +102,4 @@ result.plot_combined_results(
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_pyamg_results.pdf'),
     show=False
 )
+"""

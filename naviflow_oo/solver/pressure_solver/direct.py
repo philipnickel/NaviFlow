@@ -59,11 +59,12 @@ class DirectPressureSolver(PressureSolver):
         
         # Explicitly fix reference pressure at bottom-left corner (0,0)
         # This makes the system non-singular
+        """
         row_idx = 0  # Index for the (0,0) cell
         A[row_idx, :] = 0  # Zero out the row
         A[row_idx, row_idx] = 1  # Set diagonal to 1
         rhs[row_idx] = 0  # Set RHS to 0
-        
+        """
         # Add small regularization to improve conditioning
         # This helps with near-singular matrices
         eps = 1e-10
@@ -84,7 +85,7 @@ class DirectPressureSolver(PressureSolver):
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
         # Ensure reference pressure is exactly zero
-        p_prime[0, 0] = 0.0
+        #p_prime[0, 0] = 0.0
         
         return p_prime
         

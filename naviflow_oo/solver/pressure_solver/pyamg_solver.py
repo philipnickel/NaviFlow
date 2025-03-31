@@ -109,7 +109,7 @@ class PyAMGSolver(PressureSolver):
         # Solve using PyAMG
         x = ml.solve(b, x0=x0, tol=self.tolerance, maxiter=self.max_iterations, 
                         residuals=self.residual_history, accel='cg')
-        
+        print(f"Residual history: {self.residual_history}")
         self.inner_iterations.append(len(self.residual_history))
     
         # Reshape to 2D

@@ -24,10 +24,12 @@ start_time = time.time()
 
 # 1. Set up simulation parameters
 nx, ny = 127, 127          # Grid size
+nx, ny = 127, 127          # Grid size
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
+alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 100000     # Maximum number of iterations
+max_iterations = 10000     # Maximum number of iterations
 tolerance = 1e-5         # Convergence tolerance
 
 # 2. Create mesh
@@ -48,8 +50,8 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # Use Jacobi solver for pressure correction
 pressure_solver = JacobiSolver(
     tolerance=1e-5,  # Relaxed tolerance for inner iterations
-    max_iterations=100000,  # Fewer iterations per SIMPLE iteration
-    omega=0.5  # Weighted Jacobi for better convergence
+    max_iterations=10000,  # Fewer iterations per SIMPLE iteration
+    omega=0.8  # Weighted Jacobi for better convergence
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -73,7 +75,7 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=5)
 
 # End timing
 end_time = time.time()

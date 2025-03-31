@@ -59,7 +59,6 @@ class MatrixFreeCGSolver(PressureSolver):
         
         # Get right-hand side of pressure correction equation
         rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
-        
         # Initial guess
         x0 = np.zeros_like(rhs)
         

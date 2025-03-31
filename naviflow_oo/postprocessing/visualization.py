@@ -74,7 +74,7 @@ def _ensure_output_directory(filename, output_dir=None):
     return full_path
 
 
-def plot_velocity_field(u, v, x, y, title=None, filename=None, cmap='coolwarm', 
+def plot_velocity_field(u, v, x, y, title=None, filename=None, cmap='spring', 
                         show=True, figsize=(8, 6), colorbar=True, levels=50,
                         output_dir=None):
     """

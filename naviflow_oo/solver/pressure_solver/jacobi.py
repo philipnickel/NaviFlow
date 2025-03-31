@@ -39,7 +39,7 @@ class JacobiSolver(PressureSolver):
               p=None, b=None, nx=None, ny=None, dx=None, dy=None, rho=1.0, num_iterations=None, 
               track_residuals=True):
         """
-        Solve the pressure correction equation using the matrix-free Jacobi method.
+        Solve the pressure correction equation using the Jacobi method.
         
         Parameters:
         -----------
@@ -71,7 +71,7 @@ class JacobiSolver(PressureSolver):
         p_prime : ndarray
             Pressure correction field
         """
-        # Get grid dimensions and spacing
+        # Get grid dimensions and spacing if mesh is provided
         if mesh is not None:
             nx, ny = mesh.get_dimensions()
             dx, dy = mesh.get_cell_sizes()
@@ -88,104 +88,92 @@ class JacobiSolver(PressureSolver):
         if p is None:
             p = np.zeros_like(b)
             
-        # Reset residual history if tracking
+        # Track inner iterations and reset residuals if needed
+        inner_iterations = 0
         if track_residuals:
             self.residual_history = []
         
-        # Track inner iterations for this solve
-        inner_iterations = 0
-        
-        # Check if p_star is 2D to determine the expected output shape
+        # Check input formats and reshape as needed
         p_star_is_2d = p_star is not None and p_star.ndim == 2
-            
-        # Reshape to 2D if needed
         p_is_1d = p.ndim == 1
+        b_is_1d = b.ndim == 1
+        
+        # Convert to 2D arrays for computation
         if p_is_1d:
             p_2d = p.reshape((nx, ny), order='F')
         else:
-            p_2d = p
+            p_2d = p.copy()
             
-        if b.ndim == 1:
+        if b_is_1d:
             b_2d = b.reshape((nx, ny), order='F')
         else:
-            b_2d = b
+            b_2d = b.copy()
         
-        # Pre-compute coefficient arrays for vectorized operations
-        # East coefficients (aE)
+        # Pre-compute coefficient arrays
+        # East coefficients
         aE = np.zeros((nx, ny))
-        aE[:-1, :] = rho * d_u[1:nx, :] * dy
+        aE[:-1, :] = rho * d_u[1:nx, :] * dy#/dx
         
-        # West coefficients (aW)
+        # West coefficients
         aW = np.zeros((nx, ny))
-        aW[1:, :] = rho * d_u[1:nx, :] * dy
+        aW[1:, :] = rho * d_u[1:nx, :] * dy#/dx
         
-        # North coefficients (aN)
+        # North coefficients
         aN = np.zeros((nx, ny))
-        aN[:, :-1] = rho * d_v[:, 1:ny] * dx
+        aN[:, :-1] = rho * d_v[:, 1:ny] * dx#/dy
         
-        # South coefficients (aS)
+        # South coefficients
         aS = np.zeros((nx, ny))
-        aS[:, 1:] = rho * d_v[:, 1:ny] * dx
+        aS[:, 1:] = rho * d_v[:, 1:ny] * dx#/dy
         
-        # Diagonal coefficients (aP)
+        # Diagonal coefficients
         aP = aE + aW + aN + aS
         
-        # Ensure reference point has proper coefficient
+        # Reference point
         aP[0, 0] = 1.0
-        aE[0, 0] = 0.0
-        aN[0, 0] = 0.0
-        aW[0, 0] = 0.0
-        aS[0, 0] = 0.0
+        aE[0, 0] = aW[0, 0] = aN[0, 0] = aS[0, 0] = 0.0
         b_2d[0, 0] = 0.0
         
         # Avoid division by zero
         aP[aP == 0] = 1.0
         
-        # Pre-compute 1/aP for efficiency
+        # Inverse of aP for efficiency
         inv_aP = 1.0 / aP
         
-        # Pre-allocate arrays for neighbor values
+        # Shifted arrays for neighbors
         p_east = np.zeros_like(p_2d)
         p_west = np.zeros_like(p_2d)
         p_north = np.zeros_like(p_2d)
         p_south = np.zeros_like(p_2d)
         
-        # Perform iterations
+        # Main iteration loop
         for k in range(num_iterations):
-            # Update shifted arrays for neighbor values
+ 
+            # Ensure reference point
+            p_2d[0, 0] = 0.0
+            
+            
+            # Update neighbor values
             p_east[:-1, :] = p_2d[1:, :]
             p_west[1:, :] = p_2d[:-1, :]
             p_north[:, :-1] = p_2d[:, 1:]
             p_south[:, 1:] = p_2d[:, :-1]
             
-            # Vectorized Jacobi update
-            p_new = (1 - self.omega) * p_2d + self.omega * (
-                (b_2d + aE * p_east + aW * p_west + aN * p_north + aS * p_south) * inv_aP
-            )
-            
-            # Ensure reference pressure point remains zero
-            p_new[0, 0] = 0.0
-            
-            # Increment inner iteration counter
+            # Calculate the standard Jacobi update first
+            p_standard = (b_2d + aE * p_east + aW * p_west + aN * p_north + aS * p_south) * inv_aP
+
+            # Then apply relaxation as a separate step (numerically more stable)
+            p_new = p_2d + self.omega * (p_standard - p_2d)
+
+            # Track iterations
             inner_iterations += 1
             
-            # Check convergence if tracking residuals
+            # Check convergence if needed
             if track_residuals:
-                # Calculate residual using true residual: r = b - Ap
-                r = b - compute_Ap_product(
-                    p_new.flatten('F') if p_is_1d else p_new, 
-                    nx, ny, dx, dy, rho, d_u, d_v
-                )
-                    
-                r_norm = np.linalg.norm(r[1:])  # Exclude reference point
-                b_norm = np.linalg.norm(b[1:])  # Exclude reference point
-                
-                # Normalize residual by RHS norm to get relative residual
-                if b_norm > 1e-15:
-                    res_norm = r_norm / b_norm
-                else:
-                    res_norm = r_norm
-                    
+                # Calculate residual using Ax - b
+                p_flat = p_new.flatten('F')
+                r = b.ravel() - compute_Ap_product(p_flat, nx, ny, dx, dy, rho, d_u, d_v)
+                res_norm = np.linalg.norm(r)
                 self.residual_history.append(res_norm)
                 
                 # Calculate convergence rate if we have enough iterations
@@ -193,34 +181,30 @@ class JacobiSolver(PressureSolver):
                     conv_rate = self.residual_history[-1] / self.residual_history[-2]
                     self.convergence_rates.append(conv_rate)
                 
-                # Also check relative change in solution
+                # Check solution change
                 if k > 0:
-                    change = np.linalg.norm(p_new - p_2d) / (np.linalg.norm(p_new) + 1e-15)
-                    if change < self.tolerance * 0.1:  # Tighter tolerance for solution change
+                    change = np.linalg.norm(p_new - p_2d) / (np.linalg.norm(p_new) )
+                    if change < self.tolerance * 0.1:
                         print(f"Jacobi converged in {k+1} iterations, solution change: {change:.6e}")
                         p_2d = p_new
                         break
                 
-                # Check convergence based on residual
+                # Check residual-based convergence
                 if res_norm < self.tolerance:
                     print(f"Jacobi converged in {k+1} iterations, residual: {res_norm:.6e}")
                     p_2d = p_new
                     break
+                #print(f"Jacobi iteration {k+1}, residual: {res_norm:.6e}")
             
-            # Update solution
             p_2d = p_new
         
-        # Store inner iterations for this solve
+        # Store inner iterations
         self.inner_iterations_history.append(inner_iterations)
         self.total_inner_iterations += inner_iterations
         
-        # Return in the same format as input or as expected by the caller
-        if p_star_is_2d:
-            return p_2d
-        elif p_is_1d:
-            return p_2d.flatten('F')
-        else:
-            return p_2d 
+        # Always return a 2D array with shape (nx, ny) for compatibility with SIMPLE algorithm
+        # This is needed because SIMPLE expects p_prime to be 2D for operations like p_star + alpha_p * p_prime
+        return p_2d
     
     def get_solver_info(self):
         """
@@ -249,4 +233,4 @@ class JacobiSolver(PressureSolver):
             'max_iterations': self.max_iterations
         }
         
-        return info 
+        return info

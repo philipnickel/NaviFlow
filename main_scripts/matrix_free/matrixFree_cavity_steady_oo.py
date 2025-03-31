@@ -23,8 +23,8 @@ nx, ny = 127, 127          # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 100000    # Maximum number of iterations (reduced for quick test)
-tolerance = 1e-9           # Convergence tolerance
+max_iterations = 10000    # Maximum number of iterations (reduced for quick test)
+tolerance = 1e-5           # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -42,7 +42,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=1e-5, max_iterations=1000)
+pressure_solver = MatrixFreeCGSolver(tolerance=1e-12, max_iterations=1000000)
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
