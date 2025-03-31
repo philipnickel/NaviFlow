@@ -32,8 +32,8 @@ start_time = time.time()
 nx, ny = 2**5-1, 2**5-1  # 127x127 grid
 
 # Relaxation factors and iterations
-max_iterations = 1000
-convergence_tolerance = 1e-4
+max_iterations = 10000
+convergence_tolerance = 1e-5
 alpha_p = 0.1  # Pressure relaxation
 alpha_u = 0.7 # Velocity relaxation
 
@@ -49,15 +49,16 @@ print(f"Reynolds number: {Re}")
 
 # Create solvers
 # Create a Gauss-Seidel smoother for the multigrid solver with SOR
-smoother = GaussSeidelSolver(use_red_black=True, omega=0.8)
+smoother = GaussSeidelSolver(omega=1, use_red_black=True)
 
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
     max_iterations=1000,    # Maximum V-cycles
     tolerance=1e-5,         # Overall tolerance
-    pre_smoothing=6,        # Pre-smoothing steps
-    post_smoothing=6,       # Post-smoothing steps
+    pre_smoothing=10,        # Pre-smoothing steps
+    post_smoothing=10,       # Post-smoothing steps
+    cycle_type='v'
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -106,17 +107,12 @@ result.plot_combined_results(
     filename=os.path.join(results_dir, f'cavity_Re{Re}_multigrid_gauss_seidel_results.pdf'),
     show=True
 )
-
-
-# After the simulation completes, plot the V-cycle results
-algorithm.pressure_solver.plot_vcycle_results(os.path.join(debug_dir, 'vcycle_analysis.pdf'))
-
 # 11. Visualize final residuals
 plot_final_residuals(
     result.u, result.v, result.p,
     algorithm.u_old, algorithm.v_old, algorithm.p_old,
     mesh,
     title=f'Final Residuals (Re={Re})',
-    filename=os.path.join(results_dir, f'final_residuals_Re{Re}.pdf'),
+    filename=os.path.join(results_dir, f'final_residuals_Re_GS{Re}.pdf'),
     show=False
 )

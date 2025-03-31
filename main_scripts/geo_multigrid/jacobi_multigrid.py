@@ -31,14 +31,14 @@ start_time = time.time()
 
 # Update parameters
 # Grid size
-nx, ny = 2**5-1, 2**5-1  # Smaller grid for testing
+nx, ny = 2**7-1, 2**7-1  # Smaller grid for testing
 
 
 # Reduced relaxation factors and iterations
 max_iterations = 2000  # Increased from 1000
-convergence_tolerance = 1e-4  # Tighter convergence (was 1e-4)
-alpha_p = 0.1  # Increased pressure relaxation (was 0.1)
-alpha_u = 0.9   # Increased velocity relaxation (was 0.7)
+convergence_tolerance = 1e-5  # Tighter convergence (was 1e-4)
+alpha_p = 0.3  # Increased pressure relaxation (was 0.1)
+alpha_u = 0.7   # Increased velocity relaxation (was 0.7)
 
 # Create mesh
 print(f"Creating mesh with {nx}x{ny} cells...")
@@ -47,23 +47,23 @@ dx, dy = mesh.get_cell_sizes()
 print(f"Cell sizes: dx={dx}, dy={dy}")
 
 # Create initial conditions
-Re = 100
+Re = 1000
 print(f"Reynolds number: {Re}")
 viscosity = 0.01
 print(f"Calculated viscosity: {viscosity}")
 
 # 4. Create solvers
 # Create a Jacobi smoother for the multigrid solver
-smoother = JacobiSolver(omega=0.9)  # Increased from 0.5 for better convergence
+smoother = JacobiSolver(omega=2/3)  # Increased from 0.5 for better convergence
 
 # Create multigrid solver with improved parameters
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
     max_iterations=2000,        # Increased from 1000
     tolerance=1e-5,             # Tighter tolerance (was 1e-4)
-    pre_smoothing=50,            # Using default values (was 10)
-    post_smoothing=50,           # Using default values (was 10)
-    smoother_omega=0.9          # Increased from 0.5 for better convergence
+    pre_smoothing=100,            # Using default values (was 10)
+    post_smoothing=100,           # Using default values (was 10)
+    cycle_type='v'
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
