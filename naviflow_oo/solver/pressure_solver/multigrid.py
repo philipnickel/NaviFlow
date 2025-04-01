@@ -262,19 +262,12 @@ class MultiGridSolver(PressureSolver):
         if nx <= 7:
             u = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
             return u  # Return solution on coarsest grid
-            
-        # Ensure u is flattened for consistent handling
-        if u.ndim == 2:
-            u = u.flatten('F')
-            
+  
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
         
-        # Ensure u is flattened for consistent handling
-        if u.ndim == 2:
-            u = u.flatten('F')
-            
+      
         Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
         r = f - Au
         
@@ -342,17 +335,14 @@ class MultiGridSolver(PressureSolver):
         
         # Apply correction - ensure both operands are 1D with the same shape
         e_interpolated_flat = e_interpolated.flatten('F')
-        u += e_interpolated_flat
+        u += e_interpolated_flat.reshape((nx, ny), order='F')
 
         
         # Post-smoothing on fine grid
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
         
-        # Ensure u is flattened for consistent handling
-        if u.ndim == 2:
-            u = u.flatten('F')
-            
+      
         u_reshaped = u.reshape((nx, ny), order='F')
         
         return u
@@ -372,19 +362,12 @@ class MultiGridSolver(PressureSolver):
         if nx <= 7:
             u = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
             return u  # Return solution on coarsest grid
-            
-        # Ensure u is flattened for consistent handling
-        if u.ndim == 2:
-            u = u.flatten('F')
-            
+     
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
         
-        # Ensure u is flattened for consistent handling
-        if u.ndim == 2:
-            u = u.flatten('F')
-            
+       
         # Compute residual: r = f - Au
         Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
         r = f - Au
@@ -466,13 +449,9 @@ class MultiGridSolver(PressureSolver):
                                           omega=omega, pre_smoothing=pre_smoothing, 
                                           post_smoothing=post_smoothing, grid_calculations=grid_calculations, 
                                           level=level+1)
-        
-        # Ensure e_coarse_correction is flattened
-        if e_coarse_correction.ndim == 2:
-            e_coarse_correction = e_coarse_correction.flatten('F')
-                                          
+                     
         # Combine corrections
-        e_coarse += e_coarse_correction
+        e_coarse += e_coarse_correction.flatten('F')
         
         # Reshape to 2D for storage and interpolation
         e_coarse_2d = e_coarse.reshape((coarse_grid_size, coarse_grid_size), order='F')
@@ -484,19 +463,14 @@ class MultiGridSolver(PressureSolver):
         
         # Apply correction
         e_interpolated_flat = e_interpolated.flatten('F')
-        u += e_interpolated_flat
+        u += e_interpolated_flat.reshape((nx, ny), order='F')
 
         
         # Post-smoothing on fine grid
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
         
-        # Ensure u is flattened for consistent handling
-        if u.ndim == 2:
-            u = u.flatten('F')
-            
-        u_reshaped = u.reshape((nx, ny), order='F')
-        
+  
         return u
         
     def _perform_f_cycle(self, u, f, mesh, rho, d_u, d_v, omega, pre_smoothing, post_smoothing, 

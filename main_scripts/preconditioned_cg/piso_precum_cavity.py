@@ -22,6 +22,7 @@ from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.solver.momentum_solver.discretization.convection_schemes import QuickDiscretization
 from naviflow_oo.solver.momentum_solver.discretization.convection_schemes import PowerLawDiscretization
+from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
@@ -30,11 +31,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 33, 33           # Grid size (smaller for quick testing)
-reynolds = 32000            # Reynolds number
-alpha_p = 1             # Pressure relaxation factor
-alpha_u = 1             # Velocity relaxation factor
-max_iterations = 100000     
+nx, ny = 127, 127           # Grid size (smaller for quick testing)
+reynolds = 100            # Reynolds number
+alpha_p = 0.3             # Pressure relaxation factor
+alpha_u = 0.7             # Velocity relaxation factor
+max_iterations = 1000    
 tolerance = 1e-3          # Convergence tolerance
 
 # 2. Create mesh
@@ -54,12 +55,12 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Preconditioned CG solver for pressure correction
 pressure_solver = PreconditionedCGSolver(
-    tolerance=1e-12,
-    max_iterations=1000000,
+    tolerance=1e-3,
+    max_iterations=100000,
     smoother='gauss_seidel',
-    presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),
-    postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 5}),
-    cycle_type='F'
+    presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
+    postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
+    cycle_type='V'
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
@@ -100,6 +101,16 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 # 10. Visualize results
 result.plot_combined_results(
     title=f'Preconditioned CG Cavity Flow with PISO Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_preconditioned_cg_piso_results.pdf'),
+    filename=os.path.join(results_dir, f'PISO_cavity_Re{reynolds}_preconditioned_cg_results.pdf'),
+    show=False
+)
+
+# 11. Visualize final residuals
+plot_final_residuals(
+    result.u, result.v, result.p,
+    algorithm.u_old, algorithm.v_old, algorithm.p_old,
+    mesh,
+    title=f'Final Residuals for Preconditioned CG Cavity Flow (Re={reynolds})',
+    filename=os.path.join(results_dir, f'PISO_Re={reynolds}_final_residuals.pdf'),
     show=False
 )

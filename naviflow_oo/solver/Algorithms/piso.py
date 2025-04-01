@@ -46,6 +46,10 @@ class PisoSolver(BaseAlgorithm):
         self.alpha_p = alpha_p
         self.alpha_u = alpha_u
         self.n_corrections = n_corrections
+        # Store old values for plotting final residuals
+        self.u_old = None
+        self.v_old = None
+        self.p_old = None
         
     def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
               track_infinity_norm=False, infinity_norm_interval=10):
@@ -129,6 +133,9 @@ class PisoSolver(BaseAlgorithm):
                 # Update pressure
                 self.p = p_star + self.alpha_p * p_prime
                 
+                # Apply pressure boundary conditions
+                self._enforce_pressure_boundary_conditions()
+                
                 # Update velocity
                 self.u, self.v = self.velocity_updater.update_velocity(
                     self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
@@ -140,18 +147,33 @@ class PisoSolver(BaseAlgorithm):
                 # Update u_star and v_star for next correction
                 u_star = self.u.copy()
                 v_star = self.v.copy()
+                
+                # Add this block to recalculate momentum equation coefficients
+                if correction < self.n_corrections - 1:  # Only if not the last correction
+                    # Recalculate momentum coefficients for next correction step
+                    u_star, d_u = self.momentum_solver.solve_u_momentum(
+                        self.mesh, self.fluid, u_star, v_star, p_star, 
+                        relaxation_factor=1.0,  # No relaxation for intermediate corrections
+                        boundary_conditions=self.bc_manager
+                    )
+                    
+                    v_star, d_v = self.momentum_solver.solve_v_momentum(
+                        self.mesh, self.fluid, u_star, v_star, p_star, 
+                        relaxation_factor=1.0,  # No relaxation for intermediate corrections
+                        boundary_conditions=self.bc_manager
+                    )
             
             # Calculate pressure residual
-            pressure_res = np.max(np.abs(self.p - p_old))
+            pressure_res = np.linalg.norm(self.p - p_old, ord=2) / np.sqrt(nx * ny)
             
             # Calculate total residual
-            u_res = np.abs(self.u - u_old)
-            v_res = np.abs(self.v - v_old)
-            max_res = max(np.max(u_res), np.max(v_res))
+            u_res = np.linalg.norm(self.u - u_old, ord=2) / np.sqrt(nx * ny)
+            v_res = np.linalg.norm(self.v - v_old, ord=2) / np.sqrt(nx * ny)
+            max_res = u_res + v_res + pressure_res
             
             # Store residual history
             self.residual_history.append(max_res)
-            self.momentum_residual_history.append(momentum_res)
+            self.momentum_residual_history.append(u_res + v_res)
             self.pressure_residual_history.append(pressure_res)
             
             # Calculate infinity norm error if requested
@@ -168,7 +190,7 @@ class PisoSolver(BaseAlgorithm):
             self.profiler.add_residual_data(
                 iteration=iteration,
                 total_residual=max_res,
-                momentum_residual=momentum_res,
+                momentum_residual=u_res + v_res,
                 pressure_residual=pressure_res,
                 infinity_norm_error=infinity_norm_error
             )
@@ -176,8 +198,13 @@ class PisoSolver(BaseAlgorithm):
             # Print progress with all residuals
             print(f"Iteration {iteration}, "
                   f"Total Residual: {max_res:.6e}, "
-                  f"Momentum Residual: {momentum_res:.6e}, "
+                  f"Momentum Residual: {u_res + v_res:.6e}, "
                   f"Pressure Residual: {pressure_res:.6e}")
+            
+            # Store old fields for final residual plotting before proceeding to next iteration
+            self.u_old = u_old
+            self.v_old = v_old
+            self.p_old = p_old
             
             iteration += 1
         
@@ -217,6 +244,8 @@ class PisoSolver(BaseAlgorithm):
             self.u, self.v, self.p, self.mesh, 
             iterations=iteration-1, 
             residuals=self.residual_history,
+            momentum_residuals=self.momentum_residual_history,
+            pressure_residuals=self.pressure_residual_history,
             divergence=divergence,
             reynolds=reynolds_value
         )

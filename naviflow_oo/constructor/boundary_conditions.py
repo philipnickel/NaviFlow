@@ -224,3 +224,27 @@ class BoundaryConditionManager:
     def to_dict(self):
         """Convert boundary conditions to a dictionary format."""
         return self.conditions 
+        
+    def get_boundary_types(self):
+        """
+        Get a dictionary mapping boundary locations to their boundary types.
+        
+        Returns:
+        --------
+        dict
+            Dictionary with boundary locations as keys and their types as values.
+            For boundaries with multiple types, returns the first type.
+        """
+        boundary_types = {}
+        for location, conditions in self.conditions.items():
+            # Use the first boundary type defined for each location
+            if conditions:
+                first_type = next(iter(conditions.keys()))
+                boundary_types[location] = first_type
+        
+        # Ensure all four boundaries are included
+        for boundary in ['top', 'bottom', 'left', 'right']:
+            if boundary not in boundary_types:
+                boundary_types[boundary] = 'wall'  # Default to wall
+                
+        return boundary_types 

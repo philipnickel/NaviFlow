@@ -124,6 +124,9 @@ class SimplerSolver(BaseAlgorithm):
                 self.mesh, u_star, v_star, d_u, d_v, p_star
             )
             
+            # Apply pressure boundary conditions to the intermediate pressure field
+            self._enforce_pressure_boundary_conditions()
+            
             # Third step: Solve momentum equations again with new pressure field
             u_star, d_u = self.momentum_solver.solve_u_momentum(
                 self.mesh, self.fluid, self.u, self.v, p_star, 
@@ -144,6 +147,9 @@ class SimplerSolver(BaseAlgorithm):
             
             # Update pressure with relaxation
             self.p = p_star + self.alpha_p * p_prime
+            
+            # Apply pressure boundary conditions
+            self._enforce_pressure_boundary_conditions()
             
             # Calculate pressure residual
             pressure_res = np.max(np.abs(self.p - p_old))
@@ -228,6 +234,8 @@ class SimplerSolver(BaseAlgorithm):
             self.u, self.v, self.p, self.mesh, 
             iterations=iteration-1, 
             residuals=self.residual_history,
+            momentum_residuals=self.momentum_residual_history,
+            pressure_residuals=self.pressure_residual_history,
             divergence=divergence,
             reynolds=reynolds_value
         )

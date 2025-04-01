@@ -53,25 +53,6 @@ class SimpleSolver(BaseAlgorithm):
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
  
-    def _enforce_pressure_boundary_conditions(self):
-        """
-        Enforce zero-gradient boundary conditions on pressure field.
-        This is essential for proper behavior of the pressure solver.
-        """
-        nx, ny = self.mesh.get_dimensions()
-        
-        # Left boundary (i=0)
-        self.p[0, :] = self.p[1, :]
-        
-        # Right boundary (i=nx-1)
-        self.p[nx-1, :] = self.p[nx-2, :]
-        
-        # Bottom boundary (j=0)
-        self.p[:, 0] = self.p[:, 1]
-        
-        # Top boundary (j=ny-1)
-        self.p[:, ny-1] = self.p[:, ny-2]
-    
     def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=False, profile_dir=None, track_infinity_norm=False, infinity_norm_interval=10, should_plot_final_residuals=False):
         """
         Solve the Navier-Stokes equations using the SIMPLE algorithm.
@@ -195,7 +176,7 @@ class SimpleSolver(BaseAlgorithm):
             # Print progress with all residuals
             print(f"Iteration {iteration}, "
                   f"Total Residual: {total_res:.6e}, "
-                  f"Momentum Residual: {u_res + v_res:.6e}, "
+                  f"Velocity Residual: {u_res + v_res:.6e}, "
                   f"Pressure Residual: {p_res:.6e}")
             
             iteration += 1
@@ -236,6 +217,8 @@ class SimpleSolver(BaseAlgorithm):
             self.u, self.v, self.p, self.mesh, 
             iterations=iteration-1, 
             residuals=self.residual_history,
+            momentum_residuals=self.momentum_residual_history,
+            pressure_residuals=self.pressure_residual_history,
             divergence=divergence,
             reynolds=reynolds_value
         )

@@ -43,7 +43,7 @@ class SimplecSolver(BaseAlgorithm):
                          velocity_updater, boundary_conditions)
         self.alpha_p = alpha_p
         self.alpha_u = alpha_u
-        
+       
     def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
               track_infinity_norm=False, infinity_norm_interval=10):
         """
@@ -231,6 +231,8 @@ class SimplecSolver(BaseAlgorithm):
             self.u, self.v, self.p, self.mesh, 
             iterations=iteration-1, 
             residuals=self.residual_history,
+            momentum_residuals=self.momentum_residual_history,
+            pressure_residuals=self.pressure_residual_history,
             divergence=divergence,
             reynolds=reynolds_value
         )

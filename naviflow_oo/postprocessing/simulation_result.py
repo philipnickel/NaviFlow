@@ -12,7 +12,8 @@ class SimulationResult:
     """
     Store and analyze simulation results.
     """
-    def __init__(self, u, v, p, mesh, iterations=0, residuals=None, divergence=None, reynolds=None):
+    def __init__(self, u, v, p, mesh, iterations=0, residuals=None, divergence=None, reynolds=None,
+                 momentum_residuals=None, pressure_residuals=None):
         """
         Initialize the simulation result.
         
@@ -32,6 +33,10 @@ class SimulationResult:
             Divergence field
         reynolds : float, optional
             Reynolds number
+        momentum_residuals : list, optional
+            Momentum convergence history
+        pressure_residuals : list, optional
+            Pressure convergence history
         """
         self.u = u
         self.v = v
@@ -39,6 +44,8 @@ class SimulationResult:
         self.mesh = mesh
         self.iterations = iterations
         self.residuals = residuals or []
+        self.momentum_residuals = momentum_residuals or []
+        self.pressure_residuals = pressure_residuals or []
         self.divergence = divergence
         self.reynolds = reynolds
         self.infinity_norm_error = None
@@ -247,3 +254,60 @@ class SimulationResult:
             reynolds=self.reynolds
         )
         return filename 
+        
+    def plot_residuals(self, title=None, filename=None, show=True):
+        """
+        Plot the residual history.
+        
+        Parameters:
+        -----------
+        title : str, optional
+            Plot title
+        filename : str, optional
+            If provided, saves the figure to this filename
+        show : bool, optional
+            Whether to display the plot
+            
+        Returns:
+        --------
+        matplotlib.figure.Figure
+            The generated figure
+        """
+        if not self.residuals:
+            raise ValueError("No residuals available to plot")
+            
+        plt.figure(figsize=(10, 6))
+        
+        # Plot total residuals
+        iterations = range(1, len(self.residuals) + 1)
+        plt.semilogy(iterations, self.residuals, 'b-', linewidth=2, label='Total Residual')
+        
+        # Plot component residuals if available
+        if self.momentum_residuals and len(self.momentum_residuals) == len(self.residuals):
+            plt.semilogy(iterations, self.momentum_residuals, 'r--', linewidth=1.5, label='Momentum Residual')
+            
+        if self.pressure_residuals and len(self.pressure_residuals) == len(self.residuals):
+            plt.semilogy(iterations, self.pressure_residuals, 'g-.', linewidth=1.5, label='Pressure Residual')
+        
+        plt.grid(True, which="both", ls="--")
+        plt.xlabel('Iteration')
+        plt.ylabel('Residual')
+        
+        if title:
+            plt.title(title)
+        else:
+            plt.title(f'Residual History (Re={self.reynolds})' if self.reynolds else 'Residual History')
+        
+        plt.legend()
+        plt.tight_layout()
+        
+        if filename:
+            plt.savefig(filename, dpi=150, bbox_inches='tight')
+            print(f"Final residuals plot saved to {filename}")
+            
+        if show:
+            plt.show()
+        else:
+            plt.close()
+            
+        return plt.gcf() 

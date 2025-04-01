@@ -158,6 +158,48 @@ class BaseAlgorithm(ABC):
         
         return max_div
     
+    def _enforce_pressure_boundary_conditions(self):
+        """
+        Apply appropriate pressure boundary conditions based on boundary types.
+        
+        This method:
+        1. Extracts the boundary types from the boundary condition manager
+        2. Applies appropriate pressure boundary conditions for each boundary
+        3. Sets a reference pressure point to prevent a floating pressure field
+        
+        By default, it applies Neumann (zero gradient) conditions for all boundaries,
+        which is appropriate for most incompressible flow problems.
+        
+        Note for derived classes:
+        This method should be called after any pressure field updates in the solver
+        algorithm implementation to ensure proper pressure boundary treatment.
+        Typical places to call this method include:
+        - After updating pressure with pressure corrections
+        - After solving intermediate pressure fields
+        - Before using pressure fields to calculate velocity fields
+        """
+        nx, ny = self.mesh.get_dimensions()
+        boundary_types = self.bc_manager.get_boundary_types()
+        
+        # Apply boundary conditions based on boundary type and location
+        for boundary, bc_type in boundary_types.items():
+            if boundary == 'left':
+                # Left boundary (i=0): Apply zero gradient
+                self.p[0, :] = self.p[1, :]
+            elif boundary == 'right':
+                # Right boundary (i=nx-1): Apply zero gradient
+                self.p[nx-1, :] = self.p[nx-2, :]
+            elif boundary == 'bottom':
+                # Bottom boundary (j=0): Apply zero gradient
+                self.p[:, 0] = self.p[:, 1]
+            elif boundary == 'top':
+                # Top boundary (j=ny-1): Apply zero gradient
+                self.p[:, ny-1] = self.p[:, ny-2]
+        
+        # Set reference pressure point to avoid floating pressure field
+        # By convention, we set the pressure at the bottom-left corner to zero
+        self.p[0, 0] = 0.0
+    
     def save_profiling_data(self, filename=None, profile_dir='results/profiles'):
         """
         Save profiling data to a file.
