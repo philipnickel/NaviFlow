@@ -29,12 +29,12 @@ os.makedirs(debug_dir, exist_ok=True)
 start_time = time.time()
 
 # Grid size - must be 2^k-1 for multigrid (e.g., 31, 63, 127, 255)
-nx, ny = 2**8-1, 2**8-1  # 63x63 grid
+nx, ny = 2**7-1, 2**7-1  # 63x63 grid
 
 # Relaxation factors and iterations
 max_iterations = 10000
-convergence_tolerance = 1e-5
-alpha_p = 0.1  # Pressure relaxation
+convergence_tolerance = 1e-4
+alpha_p = 0.3  # Pressure relaxation
 alpha_u = 0.7 # Velocity relaxation
 
 # Create mesh
@@ -49,7 +49,7 @@ print(f"Reynolds number: {Re}")
 
 # Create solvers
 # Create a Gauss-Seidel smoother for the multigrid solver with SOR
-smoother = GaussSeidelSolver(omega=1.9)
+smoother = GaussSeidelSolver(omega=1)
 
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
