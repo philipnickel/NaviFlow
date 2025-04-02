@@ -31,12 +31,12 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 127, 127           # Grid size (smaller for quick testing)
-reynolds = 100            # Reynolds number
-alpha_p = 0.3             # Pressure relaxation factor
+nx, ny = 2**7-1, 2**7-1           # Grid size (smaller for quick testing)
+reynolds = 10000            # Reynolds number
+alpha_p = 0.1             # Pressure relaxation factor
 alpha_u = 0.7             # Velocity relaxation factor
-max_iterations = 1000    
-tolerance = 1e-3          # Convergence tolerance
+max_iterations = 20000    
+tolerance = 1e-6          # Convergence tolerance
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -55,7 +55,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Preconditioned CG solver for pressure correction
 pressure_solver = PreconditionedCGSolver(
-    tolerance=1e-3,
+    tolerance=1e-6,
     max_iterations=100000,
     smoother='gauss_seidel',
     presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),

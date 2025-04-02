@@ -29,7 +29,7 @@ os.makedirs(debug_dir, exist_ok=True)
 start_time = time.time()
 
 # Grid size - must be 2^k-1 for multigrid (e.g., 31, 63, 127, 255)
-nx, ny = 2**5-1, 2**5-1  # 127x127 grid
+nx, ny = 2**8-1, 2**8-1  # 63x63 grid
 
 # Relaxation factors and iterations
 max_iterations = 10000
@@ -49,15 +49,15 @@ print(f"Reynolds number: {Re}")
 
 # Create solvers
 # Create a Gauss-Seidel smoother for the multigrid solver with SOR
-smoother = GaussSeidelSolver(omega=1, use_red_black=True)
+smoother = GaussSeidelSolver(omega=1.9)
 
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=1000,    # Maximum V-cycles
-    tolerance=1e-5,         # Overall tolerance
-    pre_smoothing=10,        # Pre-smoothing steps
-    post_smoothing=10,       # Post-smoothing steps
+    max_iterations=100,    # Maximum V-cycles
+    tolerance=1e-4,        # Overall tolerance
+    pre_smoothing=5,       # Pre-smoothing steps
+    post_smoothing=5,      # Post-smoothing steps
     cycle_type='v'
 )
 momentum_solver = StandardMomentumSolver()

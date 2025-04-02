@@ -18,7 +18,7 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 35, 35          # Grid size
+nx, ny = 127, 127          # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
@@ -41,7 +41,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=1e-5, max_iterations=10000)
+pressure_solver = MatrixFreeCGSolver(tolerance=1e-4, max_iterations=10000)
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 

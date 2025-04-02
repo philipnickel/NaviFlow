@@ -20,7 +20,7 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 35, 35         # Grid size
+nx, ny = 15, 15        # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
