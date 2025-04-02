@@ -202,12 +202,8 @@ class GaussSeidelSolver(PressureSolver):
                 #print(f" GSResidual: {res_norm:.6e}")
 
         
-        # Return in the same shape as p_star if provided, otherwise same as input
-        if output_shape is not None:
-            return p_2d
-        elif p.ndim == 1:
-            return p_2d.flatten('F')
-        return p_2d
+        
+        return p_2d  
     
     def _standard_gauss_seidel_step(self, p, b, aE, aW, aN, aS, inv_aP, nx, ny):
         """
