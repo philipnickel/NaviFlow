@@ -45,9 +45,9 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Jacobi solver for pressure correction
 pressure_solver = JacobiSolver(
-    tolerance=1e-6,  # Relaxed tolerance for inner iterations
-    max_iterations=50000,  # Fewer iterations per SIMPLE iteration
-    omega=0.8  # Weighted Jacobi for better convergence
+    tolerance=1e-5,  # Relaxed tolerance for inner iterations
+    max_iterations=500000,  # Fewer iterations per SIMPLE iteration
+    omega=0.8,  # Weighted Jacobi for better convergence
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
