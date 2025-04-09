@@ -21,7 +21,7 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63          # Grid size
+nx, ny = 15, 15          # Grid size
 reynolds = 100           # Reynolds number
 alpha_p = 0.3            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.7            # Velocity relaxation factor

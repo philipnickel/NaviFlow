@@ -62,7 +62,7 @@ def get_coeff_mat(imax, jmax, dx, dy, rho, d_u, d_v):
     # Convert to CSR format for efficient matrix operations
     return A.tocsr()
 
-def get_coeff_mat_vectorized(imax, jmax, dx, dy, rho, d_u, d_v):
+def get_coeff_mat_vec(imax, jmax, dx, dy, rho, d_u, d_v):
     """
     Form the coefficient matrix for the pressure correction equation in a vectorized way.
 

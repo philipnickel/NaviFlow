@@ -19,8 +19,55 @@ def restrict(fine_grid: np.ndarray) -> np.ndarray:
     coarse_grid = fine_grid[1::2, 1::2]
     return coarse_grid
 
+def restrict2(fine_grid: np.ndarray) -> np.ndarray:
+    """
+    Reduces a fine grid to a coarse grid using full weighting.
+    
+    Full weighting restriction uses a weighted average of neighboring points:
+    - Corner points get weight 1/16
+    - Edge points get weight 1/8  
+    - Center point gets weight 1/4
+    
+    Parameters:
+        fine_grid (np.ndarray): The input fine grid to be coarsened
+        
+    Returns:
+        np.ndarray: The coarsened grid with full weighting applied
+    """
+    # Get dimensions of fine grid
+    nf = fine_grid.shape[0]
+    # Size of coarse grid 
+    nc = (nf - 1) // 2
+    
+    # Extract points using array slicing
+    # Center points
+    centers = fine_grid[1:-1:2, 1:-1:2]
+    
+    # Edge points (north, south, east, west)
+    north = fine_grid[1:-1:2, 2::2]
+    south = fine_grid[1:-1:2, :-2:2]
+    east = fine_grid[2::2, 1:-1:2]
+    west = fine_grid[:-2:2, 1:-1:2]
+    
+    # Corner points (northeast, northwest, southeast, southwest)
+    ne = fine_grid[2::2, 2::2]
+    nw = fine_grid[:-2:2, 2::2]
+    se = fine_grid[2::2, :-2:2]
+    sw = fine_grid[:-2:2, :-2:2]
+    
+    # Combine with appropriate weights
+    coarse_grid = (
+        centers / 4.0 +                    # Center weight 1/4
+        (north + south + east + west) / 8.0 +  # Edge weights 1/8
+        (ne + nw + se + sw) / 16.0            # Corner weights 1/16
+    )
+    
+    return coarse_grid
 
-def interpolate(coarse_grid, m):
+
+
+
+def interpolate2(coarse_grid, m):
     """
     Interpolates a coarse grid to a fine grid using bilinear interpolation.
     Maintains Fortran ordering consistency.
@@ -274,3 +321,64 @@ def restrict_coefficients(d_u, d_v, nx_fine, ny_fine, nx_coarse, ny_coarse, dx_f
     d_v_coarse *= scale_factor
     
     return d_u_coarse, d_v_coarse
+
+def interpolate(coarse_grid: np.ndarray, m: int) -> np.ndarray:
+    """
+    Performs cubic interpolation from coarse to fine grid.
+    This provides higher-order accuracy than bilinear interpolation.
+    
+    Parameters:
+        coarse_grid (np.ndarray): The input coarse grid to be interpolated
+        m (int): Size of the target fine grid
+        
+    Returns:
+        np.ndarray: The interpolated fine grid with cubic interpolation
+    """
+    # Reshape to 2D if needed
+    if coarse_grid.ndim == 1:
+        mc = int(np.sqrt(coarse_grid.size))
+        coarse_grid = coarse_grid.reshape((mc, mc))
+    else:
+        mc = coarse_grid.shape[0]
+    
+    # For cubic interpolation, we'll use a 2D interpolation approach
+    # First, create coordinate grids
+    x_coarse = np.linspace(0, 1, mc)
+    y_coarse = np.linspace(0, 1, mc)
+    x_fine = np.linspace(0, 1, m)
+    y_fine = np.linspace(0, 1, m)
+    
+    # Use numpy's vectorized approach to build interpolation arrays
+    from scipy import interpolate as sp_interp
+    
+    # Create 2D cubic spline interpolation
+    # For cubic splines, we need at least 4 points in each dimension
+    if mc >= 4:
+        # Full cubic spline interpolation
+        interp_func = sp_interp.RectBivariateSpline(x_coarse, y_coarse, coarse_grid)
+        fine_grid = interp_func(x_fine, y_fine)
+    else:
+        # Fall back to quadratic or linear for small grids
+        if mc == 3:
+            # Quadratic interpolation
+            kind = 'quadratic'
+        else:
+            # Linear interpolation for very small grids
+            kind = 'linear'
+            
+        # Use regular grid interpolator for small grids
+        coords_coarse = np.array(np.meshgrid(x_coarse, y_coarse, indexing='ij')).T.reshape(-1, 2)
+        values = coarse_grid.flatten()
+        interp_func = sp_interp.RegularGridInterpolator((x_coarse, y_coarse), coarse_grid, 
+                                                       method=kind, bounds_error=False, 
+                                                       fill_value=None)
+        
+        # Create fine grid coordinates
+        XX, YY = np.meshgrid(x_fine, y_fine, indexing='ij')
+        points = np.vstack([XX.ravel(), YY.ravel()]).T
+        
+        # Interpolate and reshape
+        fine_values = interp_func(points)
+        fine_grid = fine_values.reshape((m, m))
+    
+    return fine_grid

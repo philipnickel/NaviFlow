@@ -24,8 +24,8 @@ start_time = time.time()
 nx, ny = 2**6-1, 2**6-1 
 
 # Relaxation factors and iterations
-max_iterations = 10000#00000
-convergence_tolerance = 1e-3
+max_iterations = 100000#00000
+convergence_tolerance = 1e-4
 alpha_p = 0.3  # Pressure relaxation
 alpha_u = 0.7 # Velocity relaxation
 
@@ -41,15 +41,15 @@ print(f"Reynolds number: {Re}")
 
 # Create solvers
 # Create a Gauss-Seidel smoother for the multigrid solver with SOR
-smoother = GaussSeidelSolver(omega=1.2) # somehow 1.2 is good
+smoother = GaussSeidelSolver(omega=1.3) # somehow 1.3 is good
 
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=1000,    # Maximum V-cycles
-    tolerance=1e-7,         # Overall tolerance
-    pre_smoothing=5,        # Pre-smoothing steps
-    post_smoothing=5,       # Post-smoothing steps
+    max_iterations=200,    # Maximum V-cycles
+    tolerance=1e-5,         # Overall tolerance
+    pre_smoothing=3,        # Pre-smoothing steps
+    post_smoothing=3,       # Post-smoothing steps
     cycle_type='w'
 )
 momentum_solver = StandardMomentumSolver()

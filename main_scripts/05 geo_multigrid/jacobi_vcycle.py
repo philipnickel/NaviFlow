@@ -46,15 +46,15 @@ print(f"Calculated viscosity: {viscosity}")
 
 # 4. Create solvers
 # Create a Jacobi smoother for the multigrid solver
-smoother = JacobiSolver(omega=0.75)  # Increased from 0.5 for better convergence
+smoother = JacobiSolver(omega=0.9)  # Increased from 0.5 for better convergence
 
 # Create multigrid solver with improved parameters
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
     max_iterations=1000,        # Increased from 1000
-    tolerance=1e-7,             # Tighter tolerance (was 1e-4)
-    pre_smoothing=10,            # Using default values (was 10)
-    post_smoothing=10,           # Using default values (was 10)
+    tolerance=1e-5,             # Tighter tolerance (was 1e-4)
+    pre_smoothing=20,            # Using default values (was 10)
+    post_smoothing=20,           # Using default values (was 10)
     cycle_type='v'
 )
 momentum_solver = StandardMomentumSolver()
