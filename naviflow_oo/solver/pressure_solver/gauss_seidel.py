@@ -143,7 +143,6 @@ class GaussSeidelSolver(PressureSolver):
                 if res_norm < self.tolerance:
                     print(f"Gauss-Seidel converged in {k+1} iterations, residual: {res_norm:.6e}")
                     break
-                #print(f"Gauss-Seidel iteration {k+1}, residual: {res_norm:.6e}")
         
         return p_2d
     

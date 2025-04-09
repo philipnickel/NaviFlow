@@ -31,7 +31,7 @@ class MultiGridSolver(PressureSolver):
                  smoother_omega=None,
                  smoother=None,
                  cycle_type='v',
-                 debug=True):
+                 debug=False):
         """
         Initialize the multigrid solver.
         
@@ -167,13 +167,26 @@ class MultiGridSolver(PressureSolver):
         # Optionally store the initial guess for debugging
         self._store_debug_step("Initial guess", x.reshape((nx, ny), order='F'), level=0)
     
-        # For V-cycle or W-cycle, use the standard approach
+        # Apply the appropriate cycle based on cycle_type
         for k in range(self.max_iterations):
             self.current_iteration = k + 1
             
-            # Apply the appropriate cycle
-            x = self._v_cycle(x, b, mesh, rho, d_u, d_v, self.smoother_omega, 
-                               self.pre_smoothing, self.post_smoothing, grid_calculations, level=0)
+            # Apply the appropriate cycle based on cycle_type
+            if self.cycle_type == 'v':
+                x = self._v_cycle(x, b, mesh, rho, d_u, d_v, self.smoother_omega, 
+                                self.pre_smoothing, self.post_smoothing, grid_calculations, level=0)
+            elif self.cycle_type == 'w':
+                x = self._w_cycle(x, b, mesh, rho, d_u, d_v, self.smoother_omega, 
+                                self.pre_smoothing, self.post_smoothing, grid_calculations, level=0)
+            elif self.cycle_type == 'f':
+                # For F-cycle, we only do it once at the beginning
+                if k == 0:
+                    x = self._f_cycle(x, b, mesh, rho, d_u, d_v, self.smoother_omega, 
+                                    self.pre_smoothing, self.post_smoothing, grid_calculations, level=0)
+                else:
+                    # After the initial F-cycle, use V-cycles until convergence
+                    x = self._v_cycle(x, b, mesh, rho, d_u, d_v, self.smoother_omega, 
+                                    self.pre_smoothing, self.post_smoothing, grid_calculations, level=0)
             
             # Compute residual: r = b - A*x
             Ax = compute_Ap_product(x, nx, ny, dx, dy, rho, d_u, d_v)
@@ -187,12 +200,13 @@ class MultiGridSolver(PressureSolver):
             self.residual_history.append(res_norm)
             
             # Optionally store the residual for debugging
-            self._store_debug_step("Residual after V-cycle", r.reshape((nx, ny), order='F'), level=0)
+            self._store_debug_step("Residual after cycle", r.reshape((nx, ny), order='F'), level=0)
             
             # Check convergence
             if res_norm < self.tolerance:
                 print(f"Converged in {k+1} iterations, multigrid residual: {res_norm:.6e}")
                 break
+            #print(f"Multigrid iteration {k+1}, residual: {res_norm:.6e}")
     
         # Calculate overall convergence rate (if possible)
         if len(self.residual_history) > 1:
@@ -249,11 +263,12 @@ class MultiGridSolver(PressureSolver):
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
         
         # Fix reference pressure at P(1,1) - which is (0,0) in 0-based indexing
+        # to lil
+        A = A.tolil()
         A[0, :] = 0
         A[0, 0] = 1
         eps = 1e-10
         diag_indices = sparse.find(A.diagonal())[0]
-        A = A.tolil()
         for i in diag_indices:
             A[i, i] += eps
         A = A.tocsr()
@@ -296,14 +311,20 @@ class MultiGridSolver(PressureSolver):
         dx, dy = mesh.get_cell_sizes()
     
         # If at the coarsest grid, solve directly (here, we simply return zeros)
-        if nx <= 3:
-            u = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
+        if nx <= 7:
+
+            #u = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
+            # use smoother
+            u = self.smoother.solve(mesh=mesh, p=u, b=f,
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=50, track_residuals=False)
             self._store_debug_step(f"Level {level}: Coarsest grid solution", u.reshape((nx, ny), order='F'), level)
-            return u
+            return u  
   
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
                                 d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+   
+
         self._store_debug_step(f"Level {level}: After pre-smoothing", u.reshape((nx, ny), order='F'), level)
         
         # Compute the residual: r = f - A*u
@@ -315,13 +336,14 @@ class MultiGridSolver(PressureSolver):
         r_reshaped = r.reshape((nx, ny), order='F')
         
         # Restrict residual to coarser grid
-        r_coarse = restrict(r_reshaped)
+        r_coarse = restrict(r_reshaped) 
         self._store_debug_step(f"Level {level}: Restricted residual", r_coarse, level)
         
         # Determine coarse grid size and create coarse grid mesh
         coarse_grid_size = r_coarse.shape[0]
+
         mesh_coarse = StructuredMesh(nx=coarse_grid_size, ny=coarse_grid_size, 
-                                     length=mesh.length, height=mesh.height)
+                                        length=mesh.length, height=mesh.height)
         
         # Restrict coefficients for the coarse grid
         d_u_coarse, d_v_coarse = restrict_coefficients(
@@ -347,13 +369,217 @@ class MultiGridSolver(PressureSolver):
         self._store_debug_step(f"Level {level}: Interpolated error", e_interpolated.reshape((nx, ny), order='F'), level)
         
         # Apply the error correction
-        u += e_interpolated.flatten('F').reshape((nx, ny), order='F')
+        u += e_interpolated.flatten('F').reshape((nx, ny), order='F') 
         self._store_debug_step(f"Level {level}: After correction (adding interpolated error)", u.reshape((nx, ny), order='F'), level)
         
         # Post-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
                                 d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
         self._store_debug_step(f"Level {level}: After post-smoothing", u.reshape((nx, ny), order='F'), level)
+        
+        return u
+    
+    def _w_cycle(self, u, f, mesh, rho, d_u, d_v, omega, pre_smoothing, post_smoothing, 
+                 grid_calculations, level=0):
+        """
+        Performs one W-cycle of the multigrid method.
+        
+        Parameters:
+        -----------
+        u : ndarray
+            Current approximation (flattened).
+        f : ndarray
+            Right-hand side (flattened).
+        mesh : StructuredMesh
+            The current grid mesh.
+        rho : float
+            Fluid density.
+        d_u, d_v : ndarray
+            Momentum equation coefficients.
+        omega : float
+            Relaxation factor.
+        pre_smoothing : int
+            Number of pre-smoothing iterations.
+        post_smoothing : int
+            Number of post-smoothing iterations.
+        grid_calculations : list
+            List to track grid sizes (not used for debugging here).
+        level : int
+            Current grid level of the multigrid hierarchy.
+        """
+        nx, ny = mesh.get_dimensions()
+        dx, dy = mesh.get_cell_sizes()
+    
+        # If at the coarsest grid, use the smoother instead of direct solve
+        if nx <= 7:
+            # Use smoother instead
+            u = self.smoother.solve(mesh=mesh, p=u, b=f,
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=50, track_residuals=False)
+            self._store_debug_step(f"Level {level}: Coarsest grid solution (W-cycle)", u.reshape((nx, ny), order='F'), level)
+            return u
+  
+        # Pre-smoothing steps
+        u = self.smoother.solve(mesh=mesh, p=u, b=f,
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+        self._store_debug_step(f"Level {level}: After pre-smoothing (W-cycle)", u.reshape((nx, ny), order='F'), level)
+        
+        # Compute the residual: r = f - A*u
+        Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
+        r = f - Au
+        self._store_debug_step(f"Level {level}: Residual (f - A*u) (W-cycle)", r.reshape((nx, ny), order='F'), level)
+        
+        # Reshape residual to 2D for restriction
+        r_reshaped = r.reshape((nx, ny), order='F')
+        
+        # Restrict residual to coarser grid
+        r_coarse = restrict(r_reshaped) 
+        self._store_debug_step(f"Level {level}: Restricted residual (W-cycle)", r_coarse, level)
+        
+        # Determine coarse grid size and create coarse grid mesh
+        coarse_grid_size = r_coarse.shape[0]
+        mesh_coarse = StructuredMesh(nx=coarse_grid_size, ny=coarse_grid_size, 
+                                        length=mesh.length, height=mesh.height)
+        
+        # Restrict coefficients for the coarse grid
+        d_u_coarse, d_v_coarse = restrict_coefficients(
+            d_u, d_v, 
+            nx, ny, 
+            coarse_grid_size, coarse_grid_size, 
+            dx, dy
+        )
+        
+        # First recursive W-cycle on coarse grid
+        r_coarse_flat = r_coarse.flatten('F')
+        e_coarse1 = self._w_cycle(u=np.zeros_like(r_coarse_flat), f=r_coarse_flat, 
+                                 mesh=mesh_coarse, rho=rho, d_u=d_u_coarse, d_v=d_v_coarse, 
+                                 omega=omega, pre_smoothing=pre_smoothing, 
+                                 post_smoothing=post_smoothing, grid_calculations=grid_calculations, 
+                                 level=level+1)
+        
+        # Second recursive W-cycle on coarse grid (this is what makes it a W-cycle)
+        e_coarse2 = self._w_cycle(u=e_coarse1, f=r_coarse_flat, 
+                                 mesh=mesh_coarse, rho=rho, d_u=d_u_coarse, d_v=d_v_coarse, 
+                                 omega=omega, pre_smoothing=pre_smoothing, 
+                                 post_smoothing=post_smoothing, grid_calculations=grid_calculations, 
+                                 level=level+1)
+        
+        # Optionally store the coarse grid error solution
+        e_coarse_2D = e_coarse2.reshape((coarse_grid_size, coarse_grid_size), order='F')
+        self._store_debug_step(f"Level {level}: Coarse grid error solution (W-cycle)", e_coarse_2D, level+1)
+       
+        # Interpolate error correction to fine grid
+        e_interpolated = interpolate(e_coarse2, nx)
+        self._store_debug_step(f"Level {level}: Interpolated error (W-cycle)", e_interpolated.reshape((nx, ny), order='F'), level)
+        
+        # Apply the error correction
+        u += e_interpolated.flatten('F').reshape((nx, ny), order='F') 
+        self._store_debug_step(f"Level {level}: After correction (W-cycle)", u.reshape((nx, ny), order='F'), level)
+        
+        # Post-smoothing steps
+        u = self.smoother.solve(mesh=mesh, p=u, b=f,
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
+        self._store_debug_step(f"Level {level}: After post-smoothing (W-cycle)", u.reshape((nx, ny), order='F'), level)
+        
+        return u
+    
+    def _f_cycle(self, u, f, mesh, rho, d_u, d_v, omega, pre_smoothing, post_smoothing, 
+                 grid_calculations, level=0):
+        """
+        Performs one F-cycle of the multigrid method.
+        An F-cycle starts from the coarsest grid and moves up, then performs V-cycles at the finest level.
+        
+        Parameters:
+        -----------
+        u : ndarray
+            Current approximation (flattened).
+        f : ndarray
+            Right-hand side (flattened).
+        mesh : StructuredMesh
+            The current grid mesh.
+        rho : float
+            Fluid density.
+        d_u, d_v : ndarray
+            Momentum equation coefficients.
+        omega : float
+            Relaxation factor.
+        pre_smoothing : int
+            Number of pre-smoothing iterations.
+        post_smoothing : int
+            Number of post-smoothing iterations.
+        grid_calculations : list
+            List to track grid sizes (not used for debugging here).
+        level : int
+            Current grid level of the multigrid hierarchy.
+        """
+        nx, ny = mesh.get_dimensions()
+        dx, dy = mesh.get_cell_sizes()
+    
+        # If at the coarsest grid, solve directly
+        if nx <= 7:
+            u = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
+            self._store_debug_step(f"Level {level}: Coarsest grid solution (F-cycle)", u.reshape((nx, ny), order='F'), level)
+            return u
+        
+        # For F-cycle, we need to track the finest level to know when to switch to V-cycles
+        if level == 0:
+            # At the finest level, we'll do a V-cycle
+            return self._v_cycle(u, f, mesh, rho, d_u, d_v, omega, pre_smoothing, post_smoothing, 
+                                grid_calculations, level)
+        
+        # Pre-smoothing steps
+        u = self.smoother.solve(mesh=mesh, p=u, b=f,
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+        self._store_debug_step(f"Level {level}: After pre-smoothing (F-cycle)", u.reshape((nx, ny), order='F'), level)
+        
+        # Compute the residual: r = f - A*u
+        Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
+        r = f - Au
+        self._store_debug_step(f"Level {level}: Residual (f - A*u) (F-cycle)", r.reshape((nx, ny), order='F'), level)
+        
+        # Reshape residual to 2D for restriction
+        r_reshaped = r.reshape((nx, ny), order='F')
+        
+        # Restrict residual to coarser grid
+        r_coarse = restrict(r_reshaped) 
+        self._store_debug_step(f"Level {level}: Restricted residual (F-cycle)", r_coarse, level)
+        
+        # Determine coarse grid size and create coarse grid mesh
+        coarse_grid_size = r_coarse.shape[0]
+        mesh_coarse = StructuredMesh(nx=coarse_grid_size, ny=coarse_grid_size, 
+                                        length=mesh.length, height=mesh.height)
+        
+        # Restrict coefficients for the coarse grid
+        d_u_coarse, d_v_coarse = restrict_coefficients(
+            d_u, d_v, 
+            nx, ny, 
+            coarse_grid_size, coarse_grid_size, 
+            dx, dy
+        )
+        
+        # Recursive F-cycle on coarse grid
+        r_coarse_flat = r_coarse.flatten('F')
+        e_coarse = self._f_cycle(u=np.zeros_like(r_coarse_flat), f=r_coarse_flat, 
+                                 mesh=mesh_coarse, rho=rho, d_u=d_u_coarse, d_v=d_v_coarse, 
+                                 omega=omega, pre_smoothing=pre_smoothing, 
+                                 post_smoothing=post_smoothing, grid_calculations=grid_calculations, 
+                                 level=level+1)
+        
+        # Optionally store the coarse grid error solution
+        e_coarse_2D = e_coarse.reshape((coarse_grid_size, coarse_grid_size), order='F')
+        self._store_debug_step(f"Level {level}: Coarse grid error solution (F-cycle)", e_coarse_2D, level+1)
+       
+        # Interpolate error correction to fine grid
+        e_interpolated = interpolate(e_coarse, nx)
+        self._store_debug_step(f"Level {level}: Interpolated error (F-cycle)", e_interpolated.reshape((nx, ny), order='F'), level)
+        
+        # Apply the error correction
+        u += e_interpolated.flatten('F').reshape((nx, ny), order='F') 
+        self._store_debug_step(f"Level {level}: After correction (F-cycle)", u.reshape((nx, ny), order='F'), level)
+        
+        # Post-smoothing steps
+        u = self.smoother.solve(mesh=mesh, p=u, b=f,
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
+        self._store_debug_step(f"Level {level}: After post-smoothing (F-cycle)", u.reshape((nx, ny), order='F'), level)
         
         return u
     

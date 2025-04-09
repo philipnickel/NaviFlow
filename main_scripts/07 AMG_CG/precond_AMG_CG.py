@@ -29,11 +29,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63           # Grid size (smaller for quick testing)
-reynolds = 100            # Reynolds number
+nx, ny = 2**8-1, 2**8-1           # Grid size (smaller for quick testing)
+reynolds = 10000            # Reynolds number
 alpha_p = 0.3            # Even more conservative pressure relaxation
 alpha_u = 0.7             # Even more conservative velocity relaxation
-max_iterations = 100000    
+max_iterations = 10    
 tolerance = 1e-4          # Convergence tolerance
 
 # 2. Create mesh
@@ -53,7 +53,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Preconditioned CG solver for pressure correction
 pressure_solver = PreconditionedCGSolver(
-    tolerance=1e-5,        # Even tighter tolerance for pressure solver
+    tolerance=1e-7,        # Even tighter tolerance for pressure solver
     max_iterations=100000,   # More iterations allowed
     smoother='gauss_seidel',
     presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),

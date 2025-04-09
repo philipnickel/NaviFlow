@@ -20,11 +20,11 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 31, 31 # Grid size
+nx, ny = 63, 63 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 1     # Maximum number of iterations
+max_iterations = 1000000     # Maximum number of iterations
 tolerance = 1e-4           # Convergence tolerance
 
 # 2. Create mesh

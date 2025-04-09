@@ -21,11 +21,11 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 start_time = time.time()
 
 # Grid size - must be 2^k-1 for multigrid (e.g., 31, 63, 127, 255)
-nx, ny = 31, 31 
+nx, ny = 2**6-1, 2**6-1 
 
 # Relaxation factors and iterations
-max_iterations = 1
-convergence_tolerance = 1e-4
+max_iterations = 10000#00000
+convergence_tolerance = 1e-3
 alpha_p = 0.3  # Pressure relaxation
 alpha_u = 0.7 # Velocity relaxation
 
@@ -41,16 +41,16 @@ print(f"Reynolds number: {Re}")
 
 # Create solvers
 # Create a Gauss-Seidel smoother for the multigrid solver with SOR
-smoother = GaussSeidelSolver(omega=0.87)
+smoother = GaussSeidelSolver(omega=1.2) # somehow 1.2 is good
 
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=1,    # Maximum V-cycles
-    tolerance=1e-4,         # Overall tolerance
-    pre_smoothing=2,        # Pre-smoothing steps
-    post_smoothing=2,       # Post-smoothing steps
-    cycle_type='v'
+    max_iterations=1000,    # Maximum V-cycles
+    tolerance=1e-7,         # Overall tolerance
+    pre_smoothing=5,        # Pre-smoothing steps
+    post_smoothing=5,       # Post-smoothing steps
+    cycle_type='w'
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()

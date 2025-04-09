@@ -17,35 +17,8 @@ def restrict(fine_grid: np.ndarray) -> np.ndarray:
         np.ndarray: The coarsened grid
     """
     coarse_grid = fine_grid[1::2, 1::2]
-    # Ensure zeros in boundary cells
-    #coarse_grid[0, :] = 0
-    #coarse_grid[-1, :] = 0
-    #coarse_grid[:, 0] = 0
-    #coarse_grid[:, -1] = 0
     return coarse_grid
 
-
-def interpolate2(coarse_grid: np.ndarray, m: int) -> np.ndarray:
-    """
-    Interpolates a coarse grid to a fine grid using linear interpolation.
-    
-    Parameters:
-        coarse_grid (np.ndarray): The input coarse grid to be interpolated
-        m (int): Size of the target fine grid
-        
-    Returns:
-        np.ndarray: The interpolated fine grid
-    """
-    fine_grid = np.zeros((m, m))
-
-    fine_grid[1::2, 1::2] = coarse_grid.copy() 
-    fine_grid[1::2, 2::2] += fine_grid[1::2, 1::2] / 2 
-    fine_grid[1::2, :-1:2] += fine_grid[1::2, 1::2] / 2 
-
-    fine_grid[2::2, :] += fine_grid[1::2, :] / 2 
-    fine_grid[:-1:2, :] += fine_grid[1::2, :] / 2 
-        
-    return fine_grid
 
 def interpolate(coarse_grid, m):
     """
@@ -167,3 +140,137 @@ def interpolate(coarse_grid, m):
         return fine_grid.flatten(order='F')
     
     return fine_grid
+
+
+
+def restrict_coefficients(d_u, d_v, nx_fine, ny_fine, nx_coarse, ny_coarse, dx_fine, dy_fine):
+    """
+    Properly restrict coefficients from fine to coarse grid using harmonic averaging.
+    
+    Parameters:
+    -----------
+    d_u, d_v : ndarray
+        Momentum equation coefficients on fine grid
+    nx_fine, ny_fine : int
+        Dimensions of fine grid
+    nx_coarse, ny_coarse : int
+        Dimensions of coarse grid
+    dx_fine, dy_fine : float
+        Cell sizes on fine grid
+    
+    Returns:
+    --------
+    d_u_coarse, d_v_coarse : ndarray
+        Properly restricted coefficients for coarse grid
+    """
+    # Initialize coarse grid coefficients
+    d_u_coarse = np.zeros((nx_coarse+1, ny_coarse))
+    d_v_coarse = np.zeros((nx_coarse, ny_coarse+1))
+    
+    # Scale factor for Poisson equation
+    dx_coarse = dx_fine * 2
+    dy_coarse = dy_fine * 2
+    scale_factor = (dx_fine/dx_coarse)**2
+    
+    # FULLY VECTORIZED IMPLEMENTATION
+    
+    # --- For d_u coefficients (interior points) ---
+    # Create meshgrid of coarse grid indices
+    i_coarse = np.arange(1, nx_coarse)
+    j_coarse = np.arange(ny_coarse)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    # Map to fine grid indices (multiply by 2)
+    I_fine = 2 * I_coarse
+    J_fine = 2 * J_coarse
+    
+    # Create mask for valid indices (within fine grid bounds)
+    valid_mask = (I_fine < nx_fine) & (J_fine < ny_fine)
+    
+    # Extract values from fine grid only where valid
+    # Need to use advanced indexing, so we flatten the indices
+    valid_indices = np.where(valid_mask)
+    i_fine_valid = I_fine[valid_indices]
+    j_fine_valid = J_fine[valid_indices]
+    
+    # Get the actual values
+    d1 = d_u[i_fine_valid, j_fine_valid]
+    d2 = d_u[i_fine_valid + 1, j_fine_valid]
+    
+    # Compute harmonic mean where both values are positive
+    harmonic_mask = (d1 > 0) & (d2 > 0)
+    
+    # Initialize with arithmetic mean
+    result = 0.5 * (d1 + d2)
+    
+    # Apply harmonic mean where applicable
+    if np.any(harmonic_mask):
+        result[harmonic_mask] = 2.0 / (1.0 / d1[harmonic_mask] + 1.0 / d2[harmonic_mask])
+    
+    # Assign results back to coarse grid
+    i_coarse_valid = I_coarse[valid_indices]
+    j_coarse_valid = J_coarse[valid_indices]
+    d_u_coarse[i_coarse_valid, j_coarse_valid] = result
+    
+    # --- For d_v coefficients (interior points) ---
+    # Create meshgrid of coarse grid indices
+    i_coarse = np.arange(nx_coarse)
+    j_coarse = np.arange(1, ny_coarse)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    # Map to fine grid indices (multiply by 2)
+    I_fine = 2 * I_coarse
+    J_fine = 2 * J_coarse
+    
+    # Create mask for valid indices (within fine grid bounds)
+    valid_mask = (I_fine < nx_fine) & (J_fine < ny_fine)
+    
+    # Extract values from fine grid only where valid
+    valid_indices = np.where(valid_mask)
+    i_fine_valid = I_fine[valid_indices]
+    j_fine_valid = J_fine[valid_indices]
+    
+    # Get the actual values
+    d1 = d_v[i_fine_valid, j_fine_valid]
+    d2 = d_v[i_fine_valid, j_fine_valid + 1]
+    
+    # Compute harmonic mean where both values are positive
+    harmonic_mask = (d1 > 0) & (d2 > 0)
+    
+    # Initialize with arithmetic mean
+    result = 0.5 * (d1 + d2)
+    
+    # Apply harmonic mean where applicable
+    if np.any(harmonic_mask):
+        result[harmonic_mask] = 2.0 / (1.0 / d1[harmonic_mask] + 1.0 / d2[harmonic_mask])
+    
+    # Assign results back to coarse grid
+    i_coarse_valid = I_coarse[valid_indices]
+    j_coarse_valid = J_coarse[valid_indices]
+    d_v_coarse[i_coarse_valid, j_coarse_valid] = result
+    
+    # --- Handle boundary coefficients using vectorized operations ---
+    
+    # Left boundary (i=0) for d_u
+    j_indices = np.arange(ny_coarse)
+    j_fine_indices = 2 * j_indices
+    valid_j = j_fine_indices < ny_fine
+    d_u_coarse[0, valid_j] = d_u[0, j_fine_indices[valid_j]]
+    
+    # Right boundary (i=nx_coarse) for d_u
+    d_u_coarse[nx_coarse, valid_j] = d_u[nx_fine, j_fine_indices[valid_j]]
+    
+    # Bottom boundary (j=0) for d_v
+    i_indices = np.arange(nx_coarse)
+    i_fine_indices = 2 * i_indices
+    valid_i = i_fine_indices < nx_fine
+    d_v_coarse[valid_i, 0] = d_v[i_fine_indices[valid_i], 0]
+    
+    # Top boundary (j=ny_coarse) for d_v
+    d_v_coarse[valid_i, ny_coarse] = d_v[i_fine_indices[valid_i], ny_fine]
+    
+    # Apply scaling based on the PDE and grid coarsening
+    d_u_coarse *= scale_factor
+    d_v_coarse *= scale_factor
+    
+    return d_u_coarse, d_v_coarse

@@ -41,7 +41,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=1e-5, max_iterations=1000000)
+pressure_solver = MatrixFreeCGSolver(tolerance=1e-8, max_iterations=1000000)
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
