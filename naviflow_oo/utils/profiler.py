@@ -451,4 +451,9 @@ class Profiler:
                 self._store_dict_to_h5_group(subgroup, value)
             else:
                 # Store simple values as attributes
-                group.attrs[key] = value 
+                # Convert Python objects to strings if they're not native HDF5 types
+                if isinstance(value, (int, float, str, bool, np.number)):
+                    group.attrs[key] = value
+                else:
+                    # Convert other types to string representation
+                    group.attrs[key] = str(value) 

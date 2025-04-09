@@ -1,10 +1,7 @@
-"""
-Matrix-free geometric multigrid solver for pressure correction equation.
-"""
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from .base_pressure_solver import PressureSolver
 from .helpers.rhs_construction import get_rhs
 from .helpers.matrix_free import compute_Ap_product
@@ -12,6 +9,7 @@ from .helpers.multigrid_helpers import restrict, interpolate, restrict_coefficie
 from .jacobi import JacobiSolver
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from scipy import sparse
+from scipy.sparse.linalg import spsolve
 
 class MultiGridSolver(PressureSolver):
     """
@@ -21,41 +19,54 @@ class MultiGridSolver(PressureSolver):
     the pressure correction equation without explicitly forming matrices.
     It requires grid sizes to be 2^k-1 (e.g., 3, 7, 15, 31, 63, 127, etc.)
     to ensure proper coarsening down to a 1x1 grid.
+    
+    Added debug functionality: when debug is True, the solver stores intermediate 
+    arrays (after pre-smoothing, residual computation, restriction, interpolation, 
+    correction, and post-smoothing) and outputs a multi-page PDF that plots these arrays 
+    in chronological order.
     """
     
     def __init__(self, tolerance=1e-6, max_iterations=1000, 
                  pre_smoothing=3, post_smoothing=3,
                  smoother_omega=None,
                  smoother=None,
-                 cycle_type='v'):
+                 cycle_type='v',
+                 debug=True):
         """
         Initialize the multigrid solver.
         
         Parameters:
         -----------
         tolerance : float, optional
-            Convergence tolerance for the overall solver
+            Convergence tolerance for the overall solver.
         max_iterations : int, optional
-            Maximum number of iterations for the overall solver
+            Maximum number of iterations for the overall solver.
         pre_smoothing : int, optional
-            Number of pre-smoothing steps
+            Number of pre-smoothing steps.
         post_smoothing : int, optional
-            Number of post-smoothing steps
+            Number of post-smoothing steps.
         smoother_omega : float, optional
-            Relaxation factor for the smoother (if None and auto_omega=True, will be computed)
+            Relaxation factor for the smoother (if None and auto_omega=True, will be computed).
         smoother : PressureSolver, optional
-            External smoother to use (if None, will use internal Jacobi smoother)
+            External smoother to use (if None, will use internal Jacobi smoother).
         cycle_type : str, optional
-            Type of multigrid cycle to use: 'v', 'w', or 'f'
+            Type of multigrid cycle to use: 'v', 'w', or 'f'.
+        debug : bool, optional
+            When True, stores intermediate debugging arrays and plots them into a PDF.
         """
         super().__init__(tolerance=tolerance, max_iterations=max_iterations)
         self.pre_smoothing = pre_smoothing
         self.post_smoothing = post_smoothing
         self.smoother_omega = smoother_omega
         self.residual_history = []
-        self.vcycle_data = []  # Store V-cycle data
-        self.presmooth_diagnostics = {}  # Dictionary to store presmooth diagnostics across different grid levels
+        self.vcycle_data = []  # Existing storage for V-cycle data (if needed)
+        self.presmooth_diagnostics = {}  # Diagnostics across different grid levels
         self.current_iteration = 0  # Track current iteration
+        
+        # Debug flag: if True, store intermediate results for later plotting.
+        self.debug = debug
+        if self.debug:
+            self.debug_data = []  # List to store dictionaries of debugging info
         
         # Validate cycle type
         if cycle_type.lower() not in ['v', 'w', 'f']:
@@ -66,6 +77,52 @@ class MultiGridSolver(PressureSolver):
             omega=smoother_omega if smoother_omega is not None else 0.8
         )
        
+    def _store_debug_step(self, description, array, level, iteration=None):
+        """
+        Store a debugging step if debugging is enabled.
+        
+        Parameters:
+        -----------
+        description : str
+            Description for the current debug step.
+        array : ndarray
+            The array to be stored.
+        level : int
+            Current V-cycle grid level.
+        iteration : int, optional
+            The current iteration (default: current_iteration attribute).
+        """
+        if self.debug:
+            self.debug_data.append({
+                "description": description,
+                "array": array.copy(),
+                "level": level,
+                "iteration": iteration if iteration is not None else self.current_iteration
+            })
+    
+    def generate_debug_pdf(self, filename="multigrid_debug.pdf"):
+        """
+        Generate a multi-page PDF file plotting the stored debug arrays in chronological order.
+        
+        Parameters:
+        -----------
+        filename : str, optional
+            The name of the output PDF file.
+        """
+        if not self.debug or not self.debug_data:
+            print("No debug data stored. Ensure debug=True when instantiating the solver.")
+            return
+        
+        with PdfPages(filename) as pdf:
+            for i, debug_step in enumerate(self.debug_data):
+                fig, ax = plt.subplots()
+                im = ax.imshow(debug_step["array"], origin='lower', aspect='auto')
+                ax.set_title(f"{debug_step['description']} (Level {debug_step['level']}, Iter {debug_step['iteration']})")
+                plt.colorbar(im, ax=ax)
+                pdf.savefig(fig)
+                plt.close(fig)
+        print(f"Debug PDF saved as {filename}")
+    
     def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
         """
         Solve the pressure correction equation using the matrix-free multigrid method.
@@ -73,18 +130,18 @@ class MultiGridSolver(PressureSolver):
         Parameters:
         -----------
         mesh : StructuredMesh
-            The computational mesh
+            The computational mesh.
         u_star, v_star : ndarray
-            Intermediate velocity fields
+            Intermediate velocity fields.
         d_u, d_v : ndarray
-            Momentum equation coefficients
+            Momentum equation coefficients.
         p_star : ndarray
-            Current pressure field
+            Current pressure field.
             
         Returns:
         --------
         p_prime : ndarray
-            Pressure correction field
+            Pressure correction field.
         """
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
@@ -95,6 +152,8 @@ class MultiGridSolver(PressureSolver):
         self.residual_history = []
         self.presmooth_diagnostics = {}
         self.current_iteration = 0
+        if self.debug:
+            self.debug_data = []
         
         # Get right-hand side of pressure correction equation
         b = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
@@ -105,44 +164,44 @@ class MultiGridSolver(PressureSolver):
         # Perform multigrid cycles based on the selected type
         grid_calculations = []  # Track grid sizes used
         
-
+        # Optionally store the initial guess for debugging
+        self._store_debug_step("Initial guess", x.reshape((nx, ny), order='F'), level=0)
     
         # For V-cycle or W-cycle, use the standard approach
         for k in range(self.max_iterations):
-            # Update current iteration
             self.current_iteration = k + 1
             
             # Apply the appropriate cycle
             x = self._v_cycle(x, b, mesh, rho, d_u, d_v, self.smoother_omega, 
-                                self.pre_smoothing, self.post_smoothing, grid_calculations)
+                               self.pre_smoothing, self.post_smoothing, grid_calculations, level=0)
             
-            # Compute residual: r = b - Ax
+            # Compute residual: r = b - A*x
             Ax = compute_Ap_product(x, nx, ny, dx, dy, rho, d_u, d_v)
             r = b - Ax
             
             # Calculate residual norm
             r_norm = np.linalg.norm(r, 2)
             b_norm = np.linalg.norm(b, 2)
-            
             res_norm = r_norm / b_norm
             
             self.residual_history.append(res_norm)
+            
+            # Optionally store the residual for debugging
+            self._store_debug_step("Residual after V-cycle", r.reshape((nx, ny), order='F'), level=0)
             
             # Check convergence
             if res_norm < self.tolerance:
                 print(f"Converged in {k+1} iterations, multigrid residual: {res_norm:.6e}")
                 break
     
-        # Calculate overall convergence rate
+        # Calculate overall convergence rate (if possible)
         if len(self.residual_history) > 1:
-            # Use geometric mean of convergence rates for overall rate
             try:
                 conv_rates = []
                 for i in range(1, len(self.residual_history)):
                     prev_res = self.residual_history[i-1]
                     if prev_res > 1e-12:  # Avoid division by very small values
                         rate = self.residual_history[i] / prev_res
-                        # Filter out invalid or extreme values
                         if not np.isnan(rate) and not np.isinf(rate) and abs(rate) < 1.0:
                             conv_rates.append(rate)
                 
@@ -157,6 +216,10 @@ class MultiGridSolver(PressureSolver):
         # Reshape to 2D with Fortran ordering
         p_prime = x.reshape((nx, ny), order='F')
        
+        # If debugging, generate the PDF with all debug plots
+        if self.debug:
+            self.generate_debug_pdf()
+       
         return p_prime
     
     def _solve_residual_direct(self, mesh, residual, d_u, d_v, rho=1.0):
@@ -166,34 +229,28 @@ class MultiGridSolver(PressureSolver):
         Parameters:
         -----------
         mesh : StructuredMesh
-            The computational mesh
+            The computational mesh.
         residual : ndarray
-            The residual vector to solve for
+            The residual vector to solve for.
         d_u, d_v : ndarray
-            Momentum equation coefficients
+            Momentum equation coefficients.
         rho : float, optional
-            Fluid density
+            Fluid density.
             
         Returns:
         --------
         p_prime : ndarray
-            Solution of the residual equation
+            Solution of the residual equation.
         """
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
         
-        # Get coefficient matrix
         from .helpers.coeff_matrix import get_coeff_mat
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
         
         # Fix reference pressure at P(1,1) - which is (0,0) in 0-based indexing
-        # Set the first row of the matrix to enforce P'(1,1) = 0
-        A_lil = A.tolil()
-        A_lil[0, :] = 0
-        A_lil[0, 0] = 1
-        A = A_lil.tocsr()
-        
-        # Add small regularization to improve conditioning
+        A[0, :] = 0
+        A[0, 0] = 1
         eps = 1e-10
         diag_indices = sparse.find(A.diagonal())[0]
         A = A.tolil()
@@ -201,58 +258,72 @@ class MultiGridSolver(PressureSolver):
             A[i, i] += eps
         A = A.tocsr()
         
-        # Set the RHS value at the reference point to enforce P'(1,1) = 0
-        #residual[0] = 0.0
-        
         # Solve the system
-        from scipy.sparse.linalg import spsolve
         p_prime_flat = spsolve(A, residual)
-        
-        # Reshape to 2D with Fortran ordering
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
-        
-        # Ensure reference pressure is exactly zero
-        #p_prime[0, 0] = 0.0
         
         return p_prime
 
-
     def _v_cycle(self, u, f, mesh, rho, d_u, d_v, omega, pre_smoothing, post_smoothing, 
-                grid_calculations, level=0):
+                 grid_calculations, level=0):
         """
         Performs one V-cycle of the multigrid method.
-        """
         
+        Parameters:
+        -----------
+        u : ndarray
+            Current approximation (flattened).
+        f : ndarray
+            Right-hand side (flattened).
+        mesh : StructuredMesh
+            The current grid mesh.
+        rho : float
+            Fluid density.
+        d_u, d_v : ndarray
+            Momentum equation coefficients.
+        omega : float
+            Relaxation factor.
+        pre_smoothing : int
+            Number of pre-smoothing iterations.
+        post_smoothing : int
+            Number of post-smoothing iterations.
+        grid_calculations : list
+            List to track grid sizes (not used for debugging here).
+        level : int
+            Current grid level of the multigrid hierarchy.
+        """
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
     
-        # If we're at the coarsest grid, solve directly
-        if nx <=7:
+        # If at the coarsest grid, solve directly (here, we simply return zeros)
+        if nx <= 3:
             u = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
-            return u#-1/16*f  # Return solution on coarsest grid
+            self._store_debug_step(f"Level {level}: Coarsest grid solution", u.reshape((nx, ny), order='F'), level)
+            return u
   
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
-                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+        self._store_debug_step(f"Level {level}: After pre-smoothing", u.reshape((nx, ny), order='F'), level)
         
-      
+        # Compute the residual: r = f - A*u
         Au = compute_Ap_product(u, nx, ny, dx, dy, rho, d_u, d_v)
         r = f - Au
+        self._store_debug_step(f"Level {level}: Residual (f - A*u)", r.reshape((nx, ny), order='F'), level)
         
+        # Reshape residual to 2D for restriction
         r_reshaped = r.reshape((nx, ny), order='F')
         
         # Restrict residual to coarser grid
-        r_coarse = restrict(r_reshaped) 
+        r_coarse = restrict(r_reshaped)
+        self._store_debug_step(f"Level {level}: Restricted residual", r_coarse, level)
         
-        
-        # Size of coarse grid
+        # Determine coarse grid size and create coarse grid mesh
         coarse_grid_size = r_coarse.shape[0]
-        
-        # Create coarse grid mesh
         mesh_coarse = StructuredMesh(nx=coarse_grid_size, ny=coarse_grid_size, 
-                                   length=mesh.length, height=mesh.height)
+                                     length=mesh.length, height=mesh.height)
         
-        # Use the new function for better coefficient restriction
+        # Restrict coefficients for the coarse grid
         d_u_coarse, d_v_coarse = restrict_coefficients(
             d_u, d_v, 
             nx, ny, 
@@ -263,25 +334,26 @@ class MultiGridSolver(PressureSolver):
         # Recursive V-cycle on coarse grid
         r_coarse_flat = r_coarse.flatten('F')
         e_coarse = self._v_cycle(u=np.zeros_like(r_coarse_flat), f=r_coarse_flat, 
-                                mesh=mesh_coarse, rho=rho, d_u=d_u_coarse, d_v=d_v_coarse, 
-                                omega=omega, pre_smoothing=pre_smoothing, 
-                                post_smoothing=post_smoothing, grid_calculations=grid_calculations, 
-                                level=level+1)
+                                 mesh=mesh_coarse, rho=rho, d_u=d_u_coarse, d_v=d_v_coarse, 
+                                 omega=omega, pre_smoothing=pre_smoothing, 
+                                 post_smoothing=post_smoothing, grid_calculations=grid_calculations, 
+                                 level=level+1)
+        # Optionally store the coarse grid error solution
+        e_coarse_2D = e_coarse.reshape((coarse_grid_size, coarse_grid_size), order='F')
+        self._store_debug_step(f"Level {level}: Coarse grid error solution", e_coarse_2D, level+1)
        
-        # should already be at the right scale
+        # Interpolate error correction to fine grid
         e_interpolated = interpolate(e_coarse, nx)
+        self._store_debug_step(f"Level {level}: Interpolated error", e_interpolated.reshape((nx, ny), order='F'), level)
         
-        # Apply correction - ensure both operands are 1D with the same shape
-        e_interpolated_flat = e_interpolated.flatten('F')
-        u += e_interpolated_flat.reshape((nx, ny), order='F') #* 1.2
-
+        # Apply the error correction
+        u += e_interpolated.flatten('F').reshape((nx, ny), order='F')
+        self._store_debug_step(f"Level {level}: After correction (adding interpolated error)", u.reshape((nx, ny), order='F'), level)
         
-        # Post-smoothing on fine grid
+        # Post-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u, b=f,
-                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
-        
-      
-        u_reshaped = u.reshape((nx, ny), order='F')
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
+        self._store_debug_step(f"Level {level}: After post-smoothing", u.reshape((nx, ny), order='F'), level)
         
         return u
     
@@ -292,28 +364,27 @@ class MultiGridSolver(PressureSolver):
         Returns:
         --------
         dict
-            Dictionary containing solver performance metrics
+            Dictionary containing solver performance metrics.
         """
-        # Get smoother info if available
         smoother_info = {}
         if hasattr(self.smoother, 'get_solver_info'):
             smoother_info = self.smoother.get_solver_info()
         
         info = {
             'name': 'MultiGridSolver',
-            'inner_iterations_history': [],  # We don't track this directly
-            'total_inner_iterations': 0,     # We don't track this directly
-            'convergence_rate': None         # We don't track this directly
+            'inner_iterations_history': [],  # Not tracked directly
+            'total_inner_iterations': 0,       # Not tracked directly
+            'convergence_rate': None           # Not tracked directly
         }
         
-        # Add solver-specific information
         info['solver_specific'] = {
             'pre_smoothing': self.pre_smoothing,
             'post_smoothing': self.post_smoothing,
             'smoother_type': smoother_info.get('name', 'Unknown'),
             'tolerance': self.tolerance,
             'max_iterations': self.max_iterations,
-            'cycle_type': self.cycle_type
+            'cycle_type': self.cycle_type,
+            'debug_mode': self.debug
         }
         
         return info

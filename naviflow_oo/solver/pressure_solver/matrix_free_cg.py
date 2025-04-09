@@ -60,6 +60,7 @@ class MatrixFreeCGSolver(PressureSolver):
         
         # Get right-hand side of pressure correction equation
         rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
+        
         # Initial guess
         x0 = np.zeros_like(rhs)
         
@@ -94,6 +95,5 @@ class MatrixFreeCGSolver(PressureSolver):
         
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
-        
         
         return p_prime 
