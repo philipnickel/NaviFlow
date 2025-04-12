@@ -14,7 +14,7 @@ from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
 from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
-from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 
@@ -46,16 +46,16 @@ print(f"Calculated viscosity: {viscosity}")
 
 # 4. Create solvers
 # Create a Jacobi smoother for the multigrid solver
-smoother = JacobiSolver(omega=0.9)  # Increased from 0.5 for better convergence
+smoother = JacobiSolver(omega=0.79)  # Increased from 0.5 for better convergence
 
 # Create multigrid solver with improved parameters
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
     max_iterations=1000,        # Increased from 1000
     tolerance=1e-5,             # Tighter tolerance (was 1e-4)
-    pre_smoothing=20,            # Using default values (was 10)
-    post_smoothing=20,           # Using default values (was 10)
-    cycle_type='v'
+    pre_smoothing=10,            # Using default values (was 10)
+    post_smoothing=10,           # Using default values (was 10)
+    cycle_type='w'
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()

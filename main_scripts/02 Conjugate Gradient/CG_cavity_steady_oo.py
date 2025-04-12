@@ -10,7 +10,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.matrix_free_cg import MatrixFreeCGSolver
-from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
@@ -19,7 +19,7 @@ start_time = time.time()
 
 # 1. Set up simulation parameters
 nx, ny = 63, 63          # Grid size
-reynolds = 100             # Reynolds number
+reynolds = 3200             # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
 max_iterations = 100000    # Maximum number of iterations (reduced for quick test)
@@ -41,8 +41,8 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=1e-8, max_iterations=1000000)
-momentum_solver = StandardMomentumSolver()
+pressure_solver = MatrixFreeCGSolver(tolerance=1e-5, max_iterations=1000000)
+momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm

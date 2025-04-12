@@ -18,7 +18,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simplec import SimplecSolver
 from naviflow_oo.solver.pressure_solver.preconditioned_cg_solver import PreconditionedCGSolver
-from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')

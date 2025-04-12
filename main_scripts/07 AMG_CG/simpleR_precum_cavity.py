@@ -18,7 +18,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simpler import SimplerSolver
 from naviflow_oo.solver.pressure_solver.preconditioned_cg_solver import PreconditionedCGSolver
-from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.solver.momentum_solver.discretization.convection_schemes import QuickDiscretization
 from naviflow_oo.solver.momentum_solver.discretization.convection_schemes import PowerLawDiscretization

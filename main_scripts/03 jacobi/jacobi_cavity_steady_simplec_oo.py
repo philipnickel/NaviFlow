@@ -12,7 +12,7 @@ from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
 from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simplec import SimplecSolver
 from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
-from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 
 # Create results directory

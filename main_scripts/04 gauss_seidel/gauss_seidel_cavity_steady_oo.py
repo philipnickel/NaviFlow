@@ -10,7 +10,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
-from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Create results directory
@@ -47,7 +47,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 pressure_solver = GaussSeidelSolver(
     tolerance=1e-5,  # Relaxed tolerance for inner iterations
     max_iterations=5000000,  # Fewer iterations per SIMPLE iteration
-    omega=0.87, 
+    omega=1.2, 
 )
 momentum_solver = StandardMomentumSolver()
 velocity_updater = StandardVelocityUpdater()

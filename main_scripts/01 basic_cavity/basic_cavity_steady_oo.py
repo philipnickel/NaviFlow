@@ -12,7 +12,8 @@ from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
 from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.direct import DirectPressureSolver
-from naviflow_oo.solver.momentum_solver.standard import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.tvd import TVDMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 
@@ -20,11 +21,11 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63 # Grid size
+nx, ny = 2**10-1, 2**10-1 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 1000000     # Maximum number of iterations
+max_iterations = 5     # Maximum number of iterations
 tolerance = 1e-4           # Convergence tolerance
 
 # 2. Create mesh
@@ -43,7 +44,8 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 pressure_solver = DirectPressureSolver()
-momentum_solver = StandardMomentumSolver()
+#momentum_solver = TVDMomentumSolver()
+momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
