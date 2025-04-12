@@ -4,7 +4,7 @@ Helper functions for the multigrid solver.
 
 import numpy as np
 
-def restrict(fine_grid: np.ndarray) -> np.ndarray:
+def restrict_inject(fine_grid: np.ndarray) -> np.ndarray:
     """
     Reduces a fine grid to a coarse grid by taking every other point.
     Uses direct injection at odd indices (1, 3, 5, ...) for consistent
@@ -19,7 +19,7 @@ def restrict(fine_grid: np.ndarray) -> np.ndarray:
     coarse_grid = fine_grid[1::2, 1::2]
     return coarse_grid
 
-def restrict2(fine_grid: np.ndarray) -> np.ndarray:
+def restrict_full_weighting(fine_grid: np.ndarray) -> np.ndarray:
     """
     Reduces a fine grid to a coarse grid using full weighting.
     
@@ -64,10 +64,68 @@ def restrict2(fine_grid: np.ndarray) -> np.ndarray:
     
     return coarse_grid
 
+def restrict_hybrid(fine_grid: np.ndarray) -> np.ndarray:
+    """
+    Hybrid restriction: 
+    - Use injection at the boundary
+    - Use full-weighting in the interior
+    """
+    nf = fine_grid.shape[0]
+    nc = (nf - 1) // 2
+    coarse_grid = np.zeros((nc, nc))
+    
+    # Injection for boundaries
+    coarse_grid[:, :] = fine_grid[1::2, 1::2]
+
+    # Full-weighting in the interior (excluding edges)
+    if nc > 2:
+        # Index ranges for the interior coarse grid
+        i = slice(1, -1)
+        j = slice(1, -1)
+
+        centers = fine_grid[3:-2:2, 3:-2:2]
+        north   = fine_grid[3:-2:2, 4:-1:2]
+        south   = fine_grid[3:-2:2, 2:-4:2]
+        east    = fine_grid[4:-1:2, 3:-2:2]
+        west    = fine_grid[2:-4:2, 3:-2:2]
+        ne      = fine_grid[4:-1:2, 4:-1:2]
+        nw      = fine_grid[2:-4:2, 4:-1:2]
+        se      = fine_grid[4:-1:2, 2:-4:2]
+        sw      = fine_grid[2:-4:2, 2:-4:2]
+
+        # Apply full-weighting in the interior
+        coarse_grid[i, j] = (
+            centers / 4.0 +
+            (north + south + east + west) / 8.0 +
+            (ne + nw + se + sw) / 16.0
+        )
+    
+    return coarse_grid
+
+def restrict_half_weighting(fine_grid: np.ndarray) -> np.ndarray:
+    """
+    Half-weighting restriction:
+    - Center point: 1/2
+    - Edge points (N, S, E, W): 1/8 each
+    """
+    nf = fine_grid.shape[0]
+    nc = (nf - 1) // 2
+
+    centers = fine_grid[1:-1:2, 1:-1:2]
+    north   = fine_grid[1:-1:2, 2::2]
+    south   = fine_grid[1:-1:2, :-2:2]
+    east    = fine_grid[2::2, 1:-1:2]
+    west    = fine_grid[:-2:2, 1:-1:2]
+
+    coarse_grid = (
+        0.5 * centers +
+        0.125 * (north + south + east + west)
+    )
+
+    return coarse_grid
 
 
-
-def interpolate2(coarse_grid, m):
+def interpolate_linear(coarse_grid, m):
     """
     Interpolates a coarse grid to a fine grid using bilinear interpolation.
     Maintains Fortran ordering consistency.
@@ -322,7 +380,7 @@ def restrict_coefficients(d_u, d_v, nx_fine, ny_fine, nx_coarse, ny_coarse, dx_f
     
     return d_u_coarse, d_v_coarse
 
-def interpolate(coarse_grid: np.ndarray, m: int) -> np.ndarray:
+def interpolate_cubic(coarse_grid, m):
     """
     Performs cubic interpolation from coarse to fine grid.
     This provides higher-order accuracy than bilinear interpolation.

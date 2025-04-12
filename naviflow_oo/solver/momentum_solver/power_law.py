@@ -3,10 +3,10 @@ Standard implementation of momentum solver.
 """
 
 import numpy as np
-from ..momentum_solver.base_momentum_solver import MomentumSolver
+from .base_momentum_solver import MomentumSolver
 from ...constructor.boundary_conditions import BoundaryConditionManager
 
-class StandardMomentumSolver(MomentumSolver):
+class PowerLawMomentumSolver(MomentumSolver):
     """
     Standard implementation of momentum equations solver.
     Uses power-law scheme for convection-diffusion terms.

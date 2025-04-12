@@ -624,3 +624,95 @@ def plot_final_residuals(u, v, p, u_old, v_old, p_old, mesh, title=None, filenam
     
     return fig
 
+def plot_live_residuals(residual_history, momentum_residuals=None, pressure_residuals=None, 
+                       title=None, show=True, clear_figure=True):
+    """
+    Plot residuals in real-time during simulation with autoscaling and stop button.
+    
+    Parameters:
+    -----------
+    residual_history : list
+        History of total residuals
+    momentum_residuals : list, optional
+        History of momentum residuals
+    pressure_residuals : list, optional
+        History of pressure residuals
+    title : str, optional
+        Plot title
+    show : bool, optional
+        Whether to display the plot
+    clear_figure : bool, optional
+        Whether to clear the figure before plotting
+        
+    Returns:
+    --------
+    tuple
+        (matplotlib.figure.Figure, bool) - The figure and whether to stop the simulation
+    """
+    if clear_figure:
+        plt.clf()
+    
+    # Create figure if it doesn't exist
+    if not plt.get_fignums():
+        # Get screen size and create full screen figure
+        screen_width, screen_height = plt.rcParams['figure.figsize']
+        fig = plt.figure(figsize=(screen_width, screen_height))
+        # Add stop button
+        ax_stop = plt.axes([0.8, 0.01, 0.1, 0.04])
+        stop_button = plt.Button(ax_stop, 'Stop')
+        stop_button.on_clicked(lambda x: plt.close())
+    else:
+        fig = plt.gcf()
+    
+    # Function to handle window resize
+    def on_resize(event):
+        if event.inaxes is None:
+            return
+        # Get the current figure size
+        fig_width, fig_height = fig.get_size_inches()
+        # Update the figure size to match the window
+        fig.set_size_inches(fig_width, fig_height, forward=True)
+        # Redraw the figure
+        fig.canvas.draw_idle()
+    
+    # Connect the resize event
+    fig.canvas.mpl_connect('resize_event', on_resize)
+    
+    # Plot total residuals
+    iterations = range(1, len(residual_history) + 1)
+    plt.semilogy(iterations, residual_history, 'b-', linewidth=2, label='Total')
+    
+    # Plot component residuals if available
+    if momentum_residuals and len(momentum_residuals) == len(residual_history):
+        plt.semilogy(iterations, momentum_residuals, 'r--', linewidth=1.5, label='Momentum')
+        
+    if pressure_residuals and len(pressure_residuals) == len(residual_history):
+        plt.semilogy(iterations, pressure_residuals, 'g-.', linewidth=1.5, label='Pressure')
+    
+    # Autoscale the axes
+    plt.autoscale(enable=True, axis='both', tight=True)
+    
+    plt.grid(True, which="both", ls="--")
+    plt.xlabel('Iteration')
+    plt.ylabel('Residual')
+    
+    if title:
+        plt.title(title)
+    else:
+        plt.title('Residual History')
+    
+    # Simplify legend to only show the three main types
+    plt.legend(loc='upper right')
+    
+    # Adjust subplot parameters to fill the window
+    plt.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.1)
+    plt.tight_layout(pad=0.1)
+    
+    if show:
+        plt.pause(0.001)  # Small pause to allow the plot to update
+    
+    # Check if the figure is still open
+    should_stop = not plt.fignum_exists(fig.number)
+    
+    return fig, should_stop
+

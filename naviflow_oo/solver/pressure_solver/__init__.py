@@ -7,3 +7,4 @@ from .pyamg_solver import PyAMGSolver
 from .preconditioned_cg_solver import PreconditionedCGSolver
 from .gauss_seidel import GaussSeidelSolver 
 from .matrix_cg import ConjugateGradientSolver
+from .geo_multigrid_cg import GeoMultigridPrecondCGSolver

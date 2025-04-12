@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
 from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error
-from ...postprocessing.visualization import plot_final_residuals
+from ...postprocessing.visualization import plot_final_residuals, plot_live_residuals
 
 class SimpleSolver(BaseAlgorithm):
     """
@@ -53,7 +53,8 @@ class SimpleSolver(BaseAlgorithm):
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
  
-    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=False, profile_dir=None, track_infinity_norm=False, infinity_norm_interval=10, should_plot_final_residuals=False):
+    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=False, profile_dir=None, 
+              track_infinity_norm=False, infinity_norm_interval=10, should_plot_final_residuals=False):
         """
         Solve the Navier-Stokes equations using the SIMPLE algorithm.
         
@@ -94,92 +95,98 @@ class SimpleSolver(BaseAlgorithm):
                                 'main_scripts', 'geo_multigrid', 'multigrid_debugging', 'arrays_5x5')
         os.makedirs(debug_dir, exist_ok=True)
         print(f"Using relaxation factors: alpha_p = {self.alpha_p}, alpha_u = {self.alpha_u}") 
-        while (iteration <= max_iterations) and (total_res > tolerance):
-            # Store old values for convergence check
-            self.u_old = self.u.copy()
-            self.v_old = self.v.copy()
-            self.p_old = self.p.copy()
-            
-            # Solve momentum equations with relaxation factor
-            u_star, d_u = self.momentum_solver.solve_u_momentum(
-                self.mesh, self.fluid, self.u, self.v, p_star, 
-                relaxation_factor=self.alpha_u,
-                boundary_conditions=self.bc_manager
-            )
-            
-            v_star, d_v = self.momentum_solver.solve_v_momentum(
-                self.mesh, self.fluid, self.u, self.v, p_star, 
-                relaxation_factor=self.alpha_u,
-                boundary_conditions=self.bc_manager
-            )
-            
-            # Calculate momentum residual using 2-norm
-            u_momentum_res = np.linalg.norm(u_star - self.u, ord=2)
-            v_momentum_res = np.linalg.norm(v_star - self.v, ord=2)
+        
+        try:
+            while (iteration <= max_iterations) and (total_res > tolerance):
+                # Store old values for convergence check
+                self.u_old = self.u.copy()
+                self.v_old = self.v.copy()
+                self.p_old = self.p.copy()
+                
+                # Solve momentum equations with relaxation factor
+                u_star, d_u = self.momentum_solver.solve_u_momentum(
+                    self.mesh, self.fluid, self.u, self.v, p_star, 
+                    relaxation_factor=self.alpha_u,
+                    boundary_conditions=self.bc_manager
+                )
+                
+                v_star, d_v = self.momentum_solver.solve_v_momentum(
+                    self.mesh, self.fluid, self.u, self.v, p_star, 
+                    relaxation_factor=self.alpha_u,
+                    boundary_conditions=self.bc_manager
+                )
 
-            momentum_res =(u_momentum_res + v_momentum_res)
-            # Solve pressure correction equation
-            p_prime = self.pressure_solver.solve(
-                self.mesh, u_star, v_star, d_u, d_v, p_star
-            )
-            # Update pressure with relaxation
-            self.p = p_star + self.alpha_p * p_prime
-            
-            # Apply zero-gradient boundary conditions to pressure
-            self._enforce_pressure_boundary_conditions()
-            
-            # Calculate pressure residual using 2-norm
-            pressure_res = np.linalg.norm(self.p - self.p_old, ord=2)
-            p_star = self.p
-            
-            # Update velocity
-            self.u, self.v = self.velocity_updater.update_velocity(
-                self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
-            )
-            
-            # Calculate scaled residuals
-            n_cells = nx * ny
+                # Calculate momentum residual using 2-norm
+                u_momentum_res = np.linalg.norm(u_star - self.u, ord=2)
+                v_momentum_res = np.linalg.norm(v_star - self.v, ord=2)
 
-            # Velocity residuals (normalized by number of cells)
-            u_res = np.linalg.norm(self.u - self.u_old, ord=2) / np.sqrt(n_cells)
-            v_res = np.linalg.norm(self.v - self.v_old, ord=2) / np.sqrt(n_cells)
+                momentum_res =(u_momentum_res + v_momentum_res)
+                # Solve pressure correction equation
+                p_prime = self.pressure_solver.solve(
+                    self.mesh, u_star, v_star, d_u, d_v, p_star
+                )
+                # Update pressure with relaxation
+                self.p = p_star + self.alpha_p * p_prime
+                
+                # Apply zero-gradient boundary conditions to pressure
+                self._enforce_pressure_boundary_conditions()
+                
+                # Calculate pressure residual using 2-norm
+                pressure_res = np.linalg.norm(self.p - self.p_old, ord=2)
+                p_star = self.p
+                
+                # Update velocity
+                self.u, self.v = self.velocity_updater.update_velocity(
+                    self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
+                )
+                
+                # Calculate scaled residuals
+                n_cells = nx * ny
 
-            # Pressure residual (normalized)
-            p_res = np.linalg.norm(self.p - self.p_old, ord=2) / np.sqrt(n_cells)
-            # Combined residual as sum of velocity components and pressure only
-            total_res = u_res + v_res + p_res
+                # Velocity residuals (normalized by number of cells)
+                u_res = np.linalg.norm(self.u - self.u_old, ord=2) / np.sqrt(n_cells)
+                v_res = np.linalg.norm(self.v - self.v_old, ord=2) / np.sqrt(n_cells)
 
-            # Store all residuals separately for monitoring
-            self.residual_history.append(total_res)
-            self.momentum_residual_history.append(u_res + v_res)
-            self.pressure_residual_history.append(p_res)
-            
-            # Calculate infinity norm error if requested
-            infinity_norm_error = None
-            if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or total_res <= tolerance):
-                try:
-                    infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
-                    self.infinity_norm_history.append(infinity_norm_error)
-                    print(f"Iteration {iteration}, Infinity Norm Error: {infinity_norm_error:.6e}")
-                except Exception as e:
-                    print(f"Warning: Could not calculate infinity norm error: {str(e)}")
-            
-            # Add detailed residual data to profiler
-            self.profiler.add_residual_data(
-                iteration=iteration,
-                total_residual=total_res,
-                momentum_residual=u_res + v_res,
-                pressure_residual=p_res,
-                infinity_norm_error=infinity_norm_error
-            )
-            
-            # Print progress with all residuals
-            print(f"Iteration {iteration}, "
-                  f"Total Residual: {total_res:.6e}, "
-                  f"Velocity Residual: {u_res + v_res:.6e}, "
-                  f"Pressure Residual: {p_res:.6e}")
-            
-            iteration += 1
+                # Pressure residual (normalized)
+                p_res = np.linalg.norm(self.p - self.p_old, ord=2) / np.sqrt(n_cells)
+                # Combined residual as sum of velocity components and pressure only
+                total_res = u_res + v_res + p_res
+
+                # Store all residuals separately for monitoring
+                self.residual_history.append(total_res)
+                self.momentum_residual_history.append(u_res + v_res)
+                self.pressure_residual_history.append(p_res)
+                
+                # Calculate infinity norm error if requested
+                infinity_norm_error = None
+                if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or total_res <= tolerance):
+                    try:
+                        infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
+                        self.infinity_norm_history.append(infinity_norm_error)
+                        print(f"Iteration {iteration}, Infinity Norm Error: {infinity_norm_error:.6e}")
+                    except Exception as e:
+                        print(f"Warning: Could not calculate infinity norm error: {str(e)}")
+                
+                # Add detailed residual data to profiler
+                self.profiler.add_residual_data(
+                    iteration=iteration,
+                    total_residual=total_res,
+                    momentum_residual=u_res + v_res,
+                    pressure_residual=p_res,
+                    infinity_norm_error=infinity_norm_error
+                )
+                
+                # Print progress with all residuals
+                print(f"Iteration {iteration}, "
+                      f"Total Residual: {total_res:.6e}, "
+                      f"Velocity Residual: {u_res + v_res:.6e}, "
+                      f"Pressure Residual: {p_res:.6e}")
+                
+                iteration += 1
+                
+        except KeyboardInterrupt:
+            print("\nSimulation stopped by keyboard interrupt (Ctrl+C).")
+            # Continue with the rest of the code to save results
         
         # Update profiling data
         self.profiler.set_iterations(iteration - 1)
