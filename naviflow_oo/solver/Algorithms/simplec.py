@@ -6,7 +6,7 @@ import numpy as np
 import os
 from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
-from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error
+from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error, calculate_l2_norm_error
 
 class SimplecSolver(BaseAlgorithm):
     """
@@ -45,7 +45,7 @@ class SimplecSolver(BaseAlgorithm):
         self.alpha_u = alpha_u
        
     def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
-              track_infinity_norm=False, infinity_norm_interval=10):
+              track_infinity_norm=False, infinity_norm_interval=10, use_l2_norm=False):
         """
         Solve using the SIMPLEC algorithm with vectorized operations.
         
@@ -63,12 +63,17 @@ class SimplecSolver(BaseAlgorithm):
             Whether to track infinity norm error against Ghia data
         infinity_norm_interval : int, optional
             Interval (in iterations) at which to calculate infinity norm error
+        use_l2_norm : bool, optional
+            Whether to use L2 norm instead of infinity norm for error calculation
             
         Returns:
         --------
         SimulationResult
             Object containing the solution fields and convergence history
         """
+        # Save use_l2_norm parameter for later use
+        self.use_l2_norm = use_l2_norm
+        
         # Start profiling
         self.profiler.start()
         
@@ -170,13 +175,21 @@ class SimplecSolver(BaseAlgorithm):
             
             # Calculate infinity norm error if requested
             infinity_norm_error = None
+            l2_norm_error = None
             if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or max_res <= tolerance):
                 try:
+                    # Calculate both error metrics
                     infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
-                    self.infinity_norm_history.append(infinity_norm_error)
-                    print(f"Iteration {iteration}, Infinity Norm Error: {infinity_norm_error:.6e}")
+                    l2_norm_error = calculate_l2_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
+                    
+                    # Store the one requested (or infinity norm by default)
+                    error_to_store = l2_norm_error if use_l2_norm else infinity_norm_error
+                    self.infinity_norm_history.append(error_to_store)
+                    
+                    # Print both errors on the same line
+                    print(f"Iteration {iteration}, Infinity Norm Error: {infinity_norm_error:.6e}, L2 Norm Error: {l2_norm_error:.6e}")
                 except Exception as e:
-                    print(f"Warning: Could not calculate infinity norm error: {str(e)}")
+                    print(f"Warning: Could not calculate error: {str(e)}")
             
             # Add detailed residual data to profiler
             self.profiler.add_residual_data(
@@ -240,10 +253,18 @@ class SimplecSolver(BaseAlgorithm):
         # Calculate final infinity norm error if not already done
         if track_infinity_norm and not self.infinity_norm_history:
             try:
-                result.calculate_infinity_norm_error()
-                print(f"Final Infinity Norm Error: {result.infinity_norm_error:.6e}")
+                # Calculate both error metrics for the final result
+                inf_error = result.calculate_infinity_norm_error()
+                l2_error = result.calculate_l2_norm_error()
+                
+                # Print both on same line
+                print(f"Final Errors - Infinity Norm: {inf_error:.6e}, L2 Norm: {l2_error:.6e}")
+                
+                # Set the right one for backward compatibility based on use_l2_norm if available
+                if use_l2_norm:
+                    result.infinity_norm_error = l2_error
             except Exception as e:
-                print(f"Warning: Could not calculate final infinity norm error: {str(e)}")
+                print(f"Warning: Could not calculate final error: {str(e)}")
         elif self.infinity_norm_history:
             result.infinity_norm_error = self.infinity_norm_history[-1]
         

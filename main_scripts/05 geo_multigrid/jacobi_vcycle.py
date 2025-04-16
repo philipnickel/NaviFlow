@@ -14,23 +14,27 @@ from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
 from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
-from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 
 # Start timing
 start_time = time.time()
 
-# Update parameters
-# Grid size
-nx, ny = 63, 63
+# 1. Set up simulation parameters
+nx, ny = 2**6-1, 2**6-1 # Grid size
+reynolds = 100             # Reynolds number
+alpha_p = 0.3              # Pressure relaxation factor
+alpha_u = 0.7              # Velocity relaxation factor
+max_iterations = 10000     # Maximum number of iterations
 
-
-# Reduced relaxation factors and iterations
-max_iterations = 20000  # Increased from 1000
-convergence_tolerance = 1e-4  # Tighter convergence (was 1e-4)
-alpha_p = 0.3  # Increased pressure relaxation (was 0.1)
-alpha_u = 0.7   # Increased velocity relaxation (was 0.7)
+h = 1/nx 
+disc_order = 1
+expected_disc_error = h**(disc_order)
+tolerance = expected_disc_error * 1e-3
+pressure_tolerance = expected_disc_error 
+print(f"Tolerance: {tolerance}")
+print(f"Pressure tolerance: {pressure_tolerance}")
 
 # Create mesh
 print(f"Creating mesh with {nx}x{ny} cells...")
@@ -52,12 +56,15 @@ smoother = JacobiSolver(omega=0.79)  # Increased from 0.5 for better convergence
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
     max_iterations=1000,        # Increased from 1000
-    tolerance=1e-5,             # Tighter tolerance (was 1e-4)
-    pre_smoothing=10,            # Using default values (was 10)
-    post_smoothing=10,           # Using default values (was 10)
-    cycle_type='w'
+    tolerance=tolerance,             # Tighter tolerance (was 1e-4)
+    pre_smoothing=20,            # Using default values (was 10)
+    post_smoothing=20,           # Using default values (was 10)
+    cycle_type='w',
+    coarsest_grid_size=7,
+    restriction_method='restrict_inject',
+    interpolation_method='interpolate_cubic'
 )
-momentum_solver = StandardMomentumSolver()
+momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -87,7 +94,7 @@ os.makedirs(results_dir, exist_ok=True)
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=convergence_tolerance, 
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, 
                          track_infinity_norm=True, infinity_norm_interval=5, save_profile=True, profile_dir=results_dir)
 
 # End timing

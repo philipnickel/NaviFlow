@@ -95,15 +95,13 @@ class PisoSolver(BaseAlgorithm):
         
         # Main iteration loop
         iteration = 1
-        max_res = 1000
-        momentum_res = 1000
-        pressure_res = 1000
+        vel_res = 1000
         
-        while (iteration <= max_iterations) and (max_res > tolerance):
+        while (iteration <= max_iterations) and (vel_res > tolerance):
             # Store old values for convergence check
-            u_old = self.u.copy()
-            v_old = self.v.copy()
-            p_old = self.p.copy()
+            self.u_old = self.u.copy()
+            self.v_old = self.v.copy()
+            self.p_old = self.p.copy()
             
             # Predictor step: Solve momentum equations
             u_star, d_u = self.momentum_solver.solve_u_momentum(
@@ -163,22 +161,24 @@ class PisoSolver(BaseAlgorithm):
                         boundary_conditions=self.bc_manager
                     )
             
-            # Calculate pressure residual
-            pressure_res = np.linalg.norm(self.p - p_old, ord=2) / np.sqrt(nx * ny)
+            # Calculate residuals just like SIMPLE
+            n_cells = nx * ny
             
-            # Calculate total residual
-            u_res = np.linalg.norm(self.u - u_old, ord=2) / np.sqrt(nx * ny)
-            v_res = np.linalg.norm(self.v - v_old, ord=2) / np.sqrt(nx * ny)
-            max_res = u_res + v_res + pressure_res
+            # Velocity residuals (normalized by number of cells)
+            u_res = np.linalg.norm(self.u - self.u_old, ord=2) / np.sqrt(n_cells)
+            v_res = np.linalg.norm(self.v - self.v_old, ord=2) / np.sqrt(n_cells)
+            vel_res = u_res + v_res
+            
+            # Pressure residual (normalized)
+            p_res = np.linalg.norm(self.p - self.p_old, ord=2) / np.sqrt(n_cells)
             
             # Store residual history
-            self.residual_history.append(max_res)
-            self.momentum_residual_history.append(u_res + v_res)
-            self.pressure_residual_history.append(pressure_res)
+            self.momentum_residual_history.append(vel_res)
+            self.pressure_residual_history.append(p_res)
             
             # Calculate infinity norm error if requested
             infinity_norm_error = None
-            if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or max_res <= tolerance):
+            if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or vel_res <= tolerance):
                 try:
                     infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
                     self.infinity_norm_history.append(infinity_norm_error)
@@ -189,22 +189,16 @@ class PisoSolver(BaseAlgorithm):
             # Add detailed residual data to profiler
             self.profiler.add_residual_data(
                 iteration=iteration,
-                total_residual=max_res,
-                momentum_residual=u_res + v_res,
-                pressure_residual=pressure_res,
+                total_residual=vel_res + p_res,  # Just for completeness in the profile
+                momentum_residual=vel_res,
+                pressure_residual=p_res,
                 infinity_norm_error=infinity_norm_error
             )
             
             # Print progress with all residuals
             print(f"Iteration {iteration}, "
-                  f"Total Residual: {max_res:.6e}, "
-                  f"Momentum Residual: {u_res + v_res:.6e}, "
-                  f"Pressure Residual: {pressure_res:.6e}")
-            
-            # Store old fields for final residual plotting before proceeding to next iteration
-            self.u_old = u_old
-            self.v_old = v_old
-            self.p_old = p_old
+                  f"Velocity Residual: {vel_res:.6e}, "
+                  f"Pressure Residual: {p_res:.6e}")
             
             iteration += 1
         
@@ -212,8 +206,8 @@ class PisoSolver(BaseAlgorithm):
         self.profiler.set_iterations(iteration - 1)
         
         # Set convergence information
-        final_residual = max_res
-        converged = max_res <= tolerance
+        final_residual = vel_res  # Using velocity residual as the final residual
+        converged = vel_res <= tolerance
         self.profiler.set_convergence_info(
             tolerance=tolerance,
             final_residual=final_residual,

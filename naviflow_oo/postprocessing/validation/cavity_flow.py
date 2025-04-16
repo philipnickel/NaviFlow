@@ -237,4 +237,67 @@ def calculate_infinity_norm_error(u, v, mesh, reynolds):
     
     return inf_norm_error
 
+
+def calculate_l2_norm_error(u, v, mesh, reynolds):
+    """
+    Calculate the L2 norm error against Ghia data.
+    
+    Parameters:
+    -----------
+    u, v : ndarray
+        Velocity fields
+    mesh : StructuredMesh
+        The computational mesh
+    reynolds : int
+        Reynolds number
+        
+    Returns:
+    --------
+    float
+        L2 norm error
+    """
+    # Get mesh dimensions and coordinates
+    nx, ny = mesh.get_dimensions()
+    dx, dy = mesh.get_cell_sizes()
+    
+    # Create x and y coordinates
+    x = np.linspace(dx/2, 1-dx/2, nx)
+    y = np.linspace(dy/2, 1-dy/2, ny)
+    
+    # Get benchmark data for the given Reynolds number
+    ghia_data = BenchmarkData.get_ghia_data(reynolds)
+    if ghia_data is None:
+        # If no exact match, use the closest available Reynolds number
+        available_re = [100, 400, 1000, 3200, 5000, 7500, 10000]
+        closest_re = min(available_re, key=lambda re: abs(re - reynolds))
+        ghia_data = BenchmarkData.get_ghia_data(closest_re)
+        print(f"Warning: No Ghia data for Re={reynolds}, using closest available Re={closest_re}")
+    
+    # Extract benchmark data
+    x_benchmark = ghia_data['x']
+    v_benchmark = ghia_data['v']
+    y_benchmark = ghia_data['y']
+    u_benchmark = ghia_data['u']
+    
+    # Interpolate simulation data to benchmark coordinates
+    u_centerline = u[nx//2, :]  # u along vertical centerline
+    v_centerline = v[:, ny//2]  # v along horizontal centerline
+    
+    # Create interpolation functions
+    u_interp = interp1d(y, u_centerline, kind='cubic', bounds_error=False, fill_value="extrapolate")
+    v_interp = interp1d(x, v_centerline, kind='cubic', bounds_error=False, fill_value="extrapolate")
+    
+    # Evaluate at benchmark coordinates
+    u_sim_at_benchmark = u_interp(y_benchmark)
+    v_sim_at_benchmark = v_interp(x_benchmark)
+    
+    # Calculate squared errors
+    u_error_squared = (u_sim_at_benchmark - u_benchmark) ** 2
+    v_error_squared = (v_sim_at_benchmark - v_benchmark) ** 2
+    
+    # L2 norm error is the square root of mean squared error
+    l2_norm_error = np.sqrt((np.sum(u_error_squared) + np.sum(v_error_squared)) / (len(u_benchmark) + len(v_benchmark)))
+    
+    return l2_norm_error
+
  

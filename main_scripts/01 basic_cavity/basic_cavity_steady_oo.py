@@ -19,14 +19,14 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 
 # Start timing
 start_time = time.time()
-
 # 1. Set up simulation parameters
-nx, ny = 2**10-1, 2**10-1 # Grid size
+nx, ny = 2**6-1, 2**6-1 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 5     # Maximum number of iterations
-tolerance = 1e-4           # Convergence tolerance
+max_iterations = 10000     # Maximum number of iterations
+tolerance = 1e-4
+
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -78,6 +78,7 @@ result = algorithm.solve(
     profile_dir=results_dir,
     track_infinity_norm=True,
     infinity_norm_interval=10,
+    use_l2_norm=True  
 )
 
 # End timing
@@ -96,7 +97,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_results.pdf'),
-    show=False
+    show=True
 )
 
 # 11. Visualize final residuals

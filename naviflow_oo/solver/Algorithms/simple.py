@@ -7,7 +7,7 @@ import os
 import matplotlib.pyplot as plt
 from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
-from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error
+from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error, calculate_l2_norm_error
 from ...postprocessing.visualization import plot_final_residuals, plot_live_residuals
 
 class SimpleSolver(BaseAlgorithm):
@@ -53,19 +53,32 @@ class SimpleSolver(BaseAlgorithm):
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
  
-    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=False, profile_dir=None, 
-              track_infinity_norm=False, infinity_norm_interval=10, should_plot_final_residuals=False):
+    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
+              track_infinity_norm=False, infinity_norm_interval=10, use_l2_norm=False):
         """
-        Solve the Navier-Stokes equations using the SIMPLE algorithm.
+        Solve using the SIMPLE algorithm.
         
-        Args:
-            max_iterations (int): Maximum number of iterations
-            tolerance (float): Convergence tolerance
-            save_profile (bool): Whether to save profiling data
-            profile_dir (str): Directory to save profiling data
-            track_infinity_norm (bool): Whether to track infinity norm
-            infinity_norm_interval (int): Interval for tracking infinity norm
-            should_plot_final_residuals (bool): Whether to plot final residuals
+        Parameters:
+        -----------
+        max_iterations : int
+            Maximum number of iterations
+        tolerance : float
+            Convergence tolerance
+        save_profile : bool, optional
+            Whether to save profiling data to a file
+        profile_dir : str, optional
+            Directory to save profiling data
+        track_infinity_norm : bool, optional
+            Whether to track error against Ghia data
+        infinity_norm_interval : int, optional
+            Interval (in iterations) at which to calculate error
+        use_l2_norm : bool, optional
+            Whether to use L2 norm instead of infinity norm for error calculation
+            
+        Returns:
+        --------
+        SimulationResult
+            Object containing the solution fields and convergence history
         """
         # Start profiling
         self.profiler.start()
@@ -87,18 +100,12 @@ class SimpleSolver(BaseAlgorithm):
         # Main iteration loop
         iteration = 1
         total_res = 1000
-        momentum_res = 1000
-        pressure_res = 1000
-        
-        # Create directory for debugging arrays
-        debug_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 
-                                'main_scripts', 'geo_multigrid', 'multigrid_debugging', 'arrays_5x5')
-        os.makedirs(debug_dir, exist_ok=True)
+        vel_res = 1000
         print(f"Using relaxation factors: alpha_p = {self.alpha_p}, alpha_u = {self.alpha_u}") 
         
         try:
-            while (iteration <= max_iterations) and (total_res > tolerance):
-                # Store old values for convergence check
+            while (iteration <= max_iterations) and (vel_res > tolerance):
+                    # Store old values for convergence check
                 self.u_old = self.u.copy()
                 self.v_old = self.v.copy()
                 self.p_old = self.p.copy()
@@ -115,12 +122,8 @@ class SimpleSolver(BaseAlgorithm):
                     relaxation_factor=self.alpha_u,
                     boundary_conditions=self.bc_manager
                 )
-
-                # Calculate momentum residual using 2-norm
-                u_momentum_res = np.linalg.norm(u_star - self.u, ord=2)
-                v_momentum_res = np.linalg.norm(v_star - self.v, ord=2)
-
-                momentum_res =(u_momentum_res + v_momentum_res)
+                
+                
                 # Solve pressure correction equation
                 p_prime = self.pressure_solver.solve(
                     self.mesh, u_star, v_star, d_u, d_v, p_star
@@ -131,8 +134,6 @@ class SimpleSolver(BaseAlgorithm):
                 # Apply zero-gradient boundary conditions to pressure
                 self._enforce_pressure_boundary_conditions()
                 
-                # Calculate pressure residual using 2-norm
-                pressure_res = np.linalg.norm(self.p - self.p_old, ord=2)
                 p_star = self.p
                 
                 # Update velocity
@@ -146,43 +147,51 @@ class SimpleSolver(BaseAlgorithm):
                 # Velocity residuals (normalized by number of cells)
                 u_res = np.linalg.norm(self.u - self.u_old, ord=2) / np.sqrt(n_cells)
                 v_res = np.linalg.norm(self.v - self.v_old, ord=2) / np.sqrt(n_cells)
+                vel_res = u_res + v_res
 
                 # Pressure residual (normalized)
                 p_res = np.linalg.norm(self.p - self.p_old, ord=2) / np.sqrt(n_cells)
                 # Combined residual as sum of velocity components and pressure only
-                total_res = u_res + v_res + p_res
+                #total_res = vel_res + p_res
 
                 # Store all residuals separately for monitoring
-                self.residual_history.append(total_res)
-                self.momentum_residual_history.append(u_res + v_res)
+                #self.residual_history.append(total_res)
+                self.momentum_residual_history.append(vel_res)
                 self.pressure_residual_history.append(p_res)
                 
                 # Calculate infinity norm error if requested
                 infinity_norm_error = None
+                l2_norm_error = None
                 if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or total_res <= tolerance):
                     try:
+                        # Calculate both error metrics
                         infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
-                        self.infinity_norm_history.append(infinity_norm_error)
-                        print(f"Iteration {iteration}, Infinity Norm Error: {infinity_norm_error:.6e}")
+                        l2_norm_error = calculate_l2_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
+                        
+                        # Store the one requested by use_l2_norm for convergence history
+                        error_to_store = l2_norm_error if use_l2_norm else infinity_norm_error
+                        self.infinity_norm_history.append(error_to_store)
+                        
+                        # Print both errors on the same line
+                        print(f"Iteration {iteration}, Infinity Norm Error: {infinity_norm_error:.6e}, L2 Norm Error: {l2_norm_error:.6e}")
                     except Exception as e:
-                        print(f"Warning: Could not calculate infinity norm error: {str(e)}")
+                        print(f"Warning: Could not calculate error: {str(e)}")
                 
                 # Add detailed residual data to profiler
                 self.profiler.add_residual_data(
                     iteration=iteration,
                     total_residual=total_res,
-                    momentum_residual=u_res + v_res,
+                    momentum_residual=vel_res,
                     pressure_residual=p_res,
                     infinity_norm_error=infinity_norm_error
                 )
                 
                 # Print progress with all residuals
                 print(f"Iteration {iteration}, "
-                      f"Total Residual: {total_res:.6e}, "
-                      f"Velocity Residual: {u_res + v_res:.6e}, "
-                      f"Pressure Residual: {p_res:.6e}")
+                    f"Velocity Residual: {vel_res:.6e}, "
+                    f"Pressure Residual: {p_res:.6e}")
                 
-                iteration += 1
+                iteration += 1 
                 
         except KeyboardInterrupt:
             print("\nSimulation stopped by keyboard interrupt (Ctrl+C).")
@@ -233,10 +242,18 @@ class SimpleSolver(BaseAlgorithm):
         # Calculate final infinity norm error if not already done
         if track_infinity_norm and not self.infinity_norm_history:
             try:
-                result.calculate_infinity_norm_error()
-                print(f"Final Infinity Norm Error: {result.infinity_norm_error:.6e}")
+                # Calculate both error metrics for the final result
+                inf_error = result.calculate_infinity_norm_error()
+                l2_error = result.calculate_l2_norm_error()
+                
+                # Print both on same line
+                print(f"Final Errors - Infinity Norm: {inf_error:.6e}, L2 Norm: {l2_error:.6e}")
+                
+                # Set the right one for backward compatibility
+                if use_l2_norm:
+                    result.infinity_norm_error = l2_error
             except Exception as e:
-                print(f"Warning: Could not calculate final infinity norm error: {str(e)}")
+                print(f"Warning: Could not calculate final error: {str(e)}")
         elif self.infinity_norm_history:
             result.infinity_norm_error = self.infinity_norm_history[-1]
         
@@ -249,16 +266,5 @@ class SimpleSolver(BaseAlgorithm):
             )
             profile_path = self.save_profiling_data(filename)
             print(f"Profiling data saved to: {profile_path}")
-        
-        # Plot final residuals if requested
-        if should_plot_final_residuals:
-            plot_final_residuals(
-                self.u, self.v, self.p,
-                self.u_old, self.v_old, self.p_old,
-                self.mesh,
-                title=f'Final Residuals (Re={reynolds_value})',
-                filename='final_residuals.pdf',
-                show=True
-            )
         
         return result

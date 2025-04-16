@@ -24,7 +24,9 @@ class GeoMultigridPrecondCGSolver(PressureSolver):
     """
     
     def __init__(self, tolerance=1e-5, max_iterations=500, mg_pre_smoothing=3, 
-                 mg_post_smoothing=2, mg_cycles=1, mg_cycle_type='w', smoother=None):
+                 mg_post_smoothing=2, mg_cycles=1, mg_cycle_type='f', mg_cycle_type_buildup='w',
+                 mg_max_cycles_buildup=1, mg_coarsest_grid_size=7, mg_restriction_method='restrict_inject',
+                 mg_interpolation_method='interpolate_cubic', smoother=None):
         """
         Initialize the multigrid-preconditioned conjugate gradient solver.
         
@@ -57,7 +59,12 @@ class GeoMultigridPrecondCGSolver(PressureSolver):
             pre_smoothing=mg_pre_smoothing,
             post_smoothing=mg_post_smoothing,
             smoother=smoother,
-            cycle_type=mg_cycle_type
+            cycle_type=mg_cycle_type,
+            cycle_type_buildup=mg_cycle_type_buildup,
+            max_cycles_buildup=mg_max_cycles_buildup,
+            coarsest_grid_size=mg_coarsest_grid_size,
+            restriction_method=mg_restriction_method,
+            interpolation_method=mg_interpolation_method
         )
         
         # Get omega from smoother if it exists
@@ -123,8 +130,8 @@ class GeoMultigridPrecondCGSolver(PressureSolver):
             for _ in range(self.mg_cycles):
                 if self.mg_precond.cycle_type == 'v':
                     u = self.mg_precond._v_cycle(
-                        u=u, 
-                        f=x,  # x is the right-hand side vector b in A⁻¹b
+                        p=u, 
+                        rhs=x,  # x is the right-hand side vector b in A⁻¹b
                         mesh=mesh, 
                         rho=rho, 
                         d_u=d_u, 
@@ -147,18 +154,16 @@ class GeoMultigridPrecondCGSolver(PressureSolver):
                         post_smoothing=self.mg_precond.post_smoothing,
                         level=0
                     )
-                elif self.mg_precond.cycle_type == 'f':
-                    u = self.mg_precond._f_cycle(
-                        u=u, 
-                        f=x,
-                        mesh=mesh, 
-                        rho=rho, 
-                        d_u=d_u, 
-                        d_v=d_v, 
-                        omega=self.omega,
-                        pre_smoothing=self.mg_precond.pre_smoothing, 
-                        post_smoothing=self.mg_precond.post_smoothing,
-                        level=0
+                elif self.mg_precond.cycle_type == 'fmg':
+                    u = self.mg_precond._fmg_cycle(
+                        rhs_fine=x,
+                        mesh_fine=mesh, 
+                        d_u_fine=d_u, 
+                        d_v_fine=d_v, 
+                        nx_finest=mesh.get_dimensions()[0],
+                        ny_finest=mesh.get_dimensions()[1],
+                        dx_finest=mesh.get_cell_sizes()[0],
+                        dy_finest=mesh.get_cell_sizes()[1]
                     )
             
             return u

@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from .visualization import plot_velocity_field, plot_combined_results_matrix
 from .validation import BenchmarkData
-from .validation.cavity_flow import calculate_infinity_norm_error
+from .validation.cavity_flow import calculate_infinity_norm_error, calculate_l2_norm_error
 
 class SimulationResult:
     """
@@ -49,6 +49,7 @@ class SimulationResult:
         self.divergence = divergence
         self.reynolds = reynolds
         self.infinity_norm_error = None
+        self.l2_norm_error = None
     
     def plot_velocity_field(self, title=None, filename=None, show=True):
         """
@@ -234,6 +235,21 @@ class SimulationResult:
         
         self.infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.reynolds)
         return self.infinity_norm_error 
+
+    def calculate_l2_norm_error(self):
+        """
+        Calculate the L2 norm error against Ghia data.
+        
+        Returns:
+        --------
+        float
+            L2 norm error
+        """
+        if self.reynolds is None:
+            raise ValueError("Reynolds number must be set to calculate L2 norm error")
+        
+        self.l2_norm_error = calculate_l2_norm_error(self.u, self.v, self.mesh, self.reynolds)
+        return self.l2_norm_error
 
     def save_solution(self, filename):
         """

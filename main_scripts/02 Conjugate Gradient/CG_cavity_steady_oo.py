@@ -16,14 +16,19 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
 
 start_time = time.time()
-
 # 1. Set up simulation parameters
-nx, ny = 63, 63          # Grid size
-reynolds = 3200             # Reynolds number
+nx, ny = 2**8-1, 2**8-1 # Grid size
+reynolds = 100             # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 100000    # Maximum number of iterations (reduced for quick test)
-tolerance = 1e-4           # Convergence tolerance
+max_iterations = 10000     # Maximum number of iterations
+tolerance = 1e-5
+h = 1/nx 
+disc_order = 1
+expected_disc_error = h**(disc_order)
+pressure_tolerance = expected_disc_error 
+print(f"Tolerance: {tolerance}")
+print(f"Pressure tolerance: {pressure_tolerance}")
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -41,7 +46,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=1e-5, max_iterations=1000000)
+pressure_solver = MatrixFreeCGSolver(tolerance=pressure_tolerance, max_iterations=1000000)
 momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
@@ -68,7 +73,7 @@ os.makedirs(results_dir, exist_ok=True)
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10, use_l2_norm=True)
 
 # End timing
 end_time = time.time()

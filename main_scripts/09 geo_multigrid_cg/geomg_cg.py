@@ -25,10 +25,20 @@ start_time = time.time()
 nx, ny = 2**7-1, 2**7-1 
 
 # Relaxation factors and iterations
-max_iterations = 1
-convergence_tolerance = 1e-4
+max_iterations = 10000
+convergence_tolerance = 1e-5
 alpha_p = 0.3  # Pressure relaxation
 alpha_u = 0.7  # Velocity relaxation
+Re = 100
+
+h = 1/nx 
+disc_order = 1
+expected_disc_error = h**(disc_order)
+#tolerance = expected_disc_error * 1e-3
+tolerance = 1e-6
+pressure_tolerance = expected_disc_error * 1e-2
+
+
 
 # Create mesh
 print(f"Creating mesh with {nx}x{ny} cells...")
@@ -37,22 +47,28 @@ dx, dy = mesh.get_cell_sizes()
 print(f"Cell sizes: dx={dx}, dy={dy}")
 
 # Create initial conditions
-Re = 3200
 print(f"Reynolds number: {Re}")
 
 # Create a Gauss-Seidel smoother for the multigrid solver with SOR
-smoother = GaussSeidelSolver(omega=1.2)
+smoother = GaussSeidelSolver(omega=0.87)
 
 # Create the geometric multigrid preconditioned CG solver
 geomg_cg_solver = GeoMultigridPrecondCGSolver(
-    tolerance=1e-3,        # CG tolerance
-    max_iterations=10000,   # Maximum CG iterations - increased for better convergence
-    mg_pre_smoothing=3,    # Multigrid pre-smoothing steps
-    mg_post_smoothing=2,   # Multigrid post-smoothing steps
+    tolerance=pressure_tolerance,        # CG tolerance
+    max_iterations=100000,   # Maximum CG iterations - increased for better convergence
+    mg_pre_smoothing=1,    # Multigrid pre-smoothing steps
+    mg_post_smoothing=0,   # Multigrid post-smoothing steps
     mg_cycles=1,           # Increased from 1 to 2 cycles per preconditioning step
-    mg_cycle_type='v',     # Use W-cycle for better preconditioning
+    mg_cycle_type='w',     # Use W-cycle for better preconditioning
+    mg_cycle_type_buildup='v',
+    mg_max_cycles_buildup=1,
+    mg_coarsest_grid_size=7,
+    mg_restriction_method='restrict_inject',
+    mg_interpolation_method='interpolate_cubic',
     smoother=smoother      # Smoother to use in the multigrid
 )
+
+
 
 momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()

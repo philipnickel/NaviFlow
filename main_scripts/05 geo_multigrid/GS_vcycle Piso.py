@@ -11,7 +11,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
 from naviflow_oo.preprocessing.fields.vector_field import VectorField
-from naviflow_oo.solver.Algorithms.simple import SimpleSolver
+from naviflow_oo.solver.Algorithms.piso import PisoSolver
 from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
 from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
 from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
@@ -20,17 +20,17 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**6-1, 2**6-1 # Grid size
+nx, ny = 2**7-1, 2**7-1 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 10000     # Maximum number of iterations
+max_iterations = 5     # Maximum number of iterations
 
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
 #tolerance = expected_disc_error * 1e-3
-tolerance = 1e-4
+tolerance = 1e-6
 pressure_tolerance = expected_disc_error 
 print(f"Tolerance: {tolerance}")
 print(f"Pressure tolerance: {pressure_tolerance}")
@@ -55,8 +55,8 @@ multigrid_solver = MultiGridSolver(
     #tolerance=pressure_tolerance,         # Overall tolerance
     pre_smoothing=3,        # Pre-smoothing steps
     post_smoothing=3,       # Post-smoothing steps
-    tolerance=1e-5,#expected_disc_error,
-    cycle_type='v',         # Use W-cycles
+    tolerance=expected_disc_error,
+    cycle_type='fmg',         # Use W-cycles
     cycle_type_buildup='w',
     cycle_type_final='w',
     max_cycles_buildup=1,
@@ -70,7 +70,7 @@ momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # Create algorithm
-algorithm = SimpleSolver(
+algorithm = PisoSolver(
     mesh=mesh,
     fluid=FluidProperties(
         density=1.0,
@@ -99,7 +99,6 @@ print("Starting simulation...")
 result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, 
                         track_infinity_norm=True, infinity_norm_interval=5, 
                         save_profile=True, profile_dir=results_dir, 
-                        use_l2_norm=True
                         )  # Plot every iteration
 
 # End timing
@@ -116,7 +115,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # Visualize results
 result.plot_combined_results(
-    title=f'Multigrid with Gauss-Seidel Smoother Cavity Flow Results (Re={reynolds})',
+    title=f'PISO Multigrid with Gauss-Seidel Smoother Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_multigrid_gauss_seidel_results.pdf'),
     show=True
 )
@@ -125,7 +124,7 @@ plot_final_residuals(
     result.u, result.v, result.p,
     algorithm.u_old, algorithm.v_old, algorithm.p_old,
     mesh,
-    title=f'Final Residuals (Re={reynolds})',
+    title=f'PISO Final Residuals (Re={reynolds})',
     filename=os.path.join(results_dir, f'final_residuals_Re_GS{reynolds}.pdf'),
     show=False
 )
