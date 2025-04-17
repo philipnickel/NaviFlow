@@ -389,7 +389,7 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
         ax2.set_title(f'Streamlines (Re={Re})')
     ax2.set_xlabel('x')
     ax2.set_ylabel('y')
-    
+
     # 3. Validation plot (right)
     if Re is not None:
         try:
@@ -442,32 +442,32 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
                 x_normalized = np.linspace(0, 1, imax)
                 y_normalized = np.linspace(0, 1, jmax)
                 
-                # Create a twin axis for the second plot
-                ax3b = ax3.twinx()
+                # Clear the axis first
+                ax3.clear()
                 
-                # Plot v-velocity on the left y-axis
-                line1, = ax3.plot(x_normalized, v_centerline, 'b-', linewidth=2, label='v-velocity (simulation)')
-                line2, = ax3.plot(ghia_x, ghia_v, 'bo', markersize=6, label='v-velocity (Ghia et al.)')
-                ax3.set_xlabel('Position')
-                ax3.set_ylabel('v-velocity', color='blue')
-                ax3.tick_params(axis='y', labelcolor='blue')
+                # Get colors from coolwarm colormap
+                u_color = cm.coolwarm(0.95)  # Blue-ish color from coolwarm
+                v_color = cm.coolwarm(0.05)  # Red-ish color from coolwarm
                 
-                # Plot u-velocity on the right y-axis
-                line3, = ax3b.plot(u_centerline, y_normalized, 'r-', linewidth=2, label='u-velocity (simulation)')
-                line4, = ax3b.plot(ghia_u, ghia_y, 'ro', markersize=6, label='u-velocity (Ghia et al.)')
-                ax3b.set_ylabel('u-velocity', color='red')
-                ax3b.tick_params(axis='y', labelcolor='red')
+                # Plot u-velocity along vertical centerline (y vs u)
+                ax3.plot(y_normalized, u_centerline, '-', label='u solution', color=u_color)
+                ax3.scatter(ghia_y, ghia_u, marker='o', label='u from Ghia et al.', color=u_color)
                 
-                # Add a title
-                ax3.set_title('Velocity Profiles Comparison')
+                # Plot v-velocity along horizontal centerline (x vs v)
+                ax3.plot(x_normalized, v_centerline, '-', label='v solution', color=v_color)
+                ax3.scatter(ghia_x, ghia_v, marker='o', label='v from Ghia et al.', color=v_color)
                 
-                # Add a combined legend
-                lines = [line1, line2, line3, line4]
-                labels = [l.get_label() for l in lines]
-                ax3.legend(lines, labels, loc='best')
-                
-                # Add grid
+                # Set labels and grid
+                ax3.set_xlabel('y')
+                ax3.set_ylabel('u, v')
                 ax3.grid(True)
+                ax3.set_title(f'Comparison with Ghia et al. (Re={Re})')
+                ax3.legend(loc='best')
+                
+                # Set DPI higher for better quality
+                fig = plt.gcf()
+                fig.set_dpi(150)
+                
         except Exception as e:
             # If validation fails, just show a message
             ax3.text(0.5, 0.5, f"Validation unavailable\n{str(e)}", 
@@ -477,6 +477,7 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
         ax3.text(0.5, 0.5, "Validation requires Reynolds number", 
                 ha='center', va='center', transform=ax3.transAxes)
         ax3.set_title("Validation")
+
 
     # Set overall title
     if title:
@@ -715,4 +716,108 @@ def plot_live_residuals(residual_history, momentum_residuals=None, pressure_resi
     should_stop = not plt.fignum_exists(fig.number)
     
     return fig, should_stop
+
+def plot_u_v_continuity_residuals(u_residuals, v_residuals, continuity_residuals, title=None, filename=None, 
+                                 show=True, figsize=(10, 6), output_dir=None):
+    """
+    Plot u-velocity, v-velocity, and continuity residuals using logarithmic y-axis.
+    
+    Parameters:
+    -----------
+    u_residuals : list
+        History of u-velocity (x-momentum) residuals
+    v_residuals : list
+        History of v-velocity (y-momentum) residuals
+    continuity_residuals : list
+        History of continuity residuals
+    title : str, optional
+        Plot title
+    filename : str, optional
+        If provided, saves the figure to this filename
+    show : bool, optional
+        Whether to display the plot
+    figsize : tuple, optional
+        Figure size (width, height) in inches
+    output_dir : str, optional
+        Directory where to save the output. If None, uses 'results' in the calling script's directory.
+        
+    Returns:
+    --------
+    matplotlib.figure.Figure
+        The generated figure
+    """
+    if not u_residuals or not v_residuals or not continuity_residuals:
+        raise ValueError("Residual data is missing")
+        
+    plt.figure(figsize=figsize)
+    
+    # Plot all three residual types
+    iterations = range(1, len(u_residuals) + 1)
+    plt.semilogy(iterations, u_residuals, color=plt.cm.coolwarm(0.9), linewidth=2, label='u-velocity Residual')
+    plt.semilogy(iterations, v_residuals, color=plt.cm.coolwarm(0.7), linewidth=2, label='v-velocity Residual') 
+    plt.semilogy(iterations, continuity_residuals, color=plt.cm.coolwarm(0.1), linewidth=2, label='Continuity Residual', linestyle='--')
+    plt.grid(True, which="both", ls="--")
+    plt.xlabel('Iteration')
+    plt.ylabel('Residual')
+    
+    if title:
+        plt.title(title)
+    else:
+        plt.title('Residual History')
+    
+    plt.legend()
+    plt.tight_layout()
+    
+    if filename:
+        # Ensure output directory exists and get full path
+        full_path = _ensure_output_directory(filename, output_dir)
+        plt.savefig(full_path, dpi=150, bbox_inches='tight')
+        print(f"Residual history plot saved to {full_path}")
+        
+    if show:
+        plt.show()
+    else:
+        plt.close()
+        
+    return plt.gcf()
+
+def animate_velocity_field(u_list, v_list, x, y, title=None, filename=None, interval=200,
+                           cmap='viridis', show=True, figsize=(8, 6), colorbar=True, levels=50):
+    """
+    Create an animation of the velocity field over time.
+    
+    Parameters:
+    -----------
+    u_list : list of ndarray
+        List of x-velocity components at different times
+    v_list : list of ndarray
+        List of y-velocity components at different times
+    x : ndarray
+        x-coordinates
+    y : ndarray
+        y-coordinates
+    title : str, optional
+        Plot title
+    filename : str, optional
+        If provided, saves the animation to this filename
+    interval : int, optional
+        Delay between frames in milliseconds
+    cmap : str, optional
+        Colormap to use
+    show : bool, optional
+        Whether to display the animation
+    figsize : tuple, optional
+        Figure size (width, height) in inches
+    colorbar : bool, optional
+        Whether to show the colorbar
+    levels : int, optional
+        Number of contour levels
+        
+    Returns:
+    --------
+    matplotlib.animation.FuncAnimation
+        The generated animation
+    """
+    # Implementation would go here
+    pass
 

@@ -6,6 +6,7 @@ from .base_pressure_solver import PressureSolver
 from .helpers.rhs_construction import get_rhs
 from .helpers.matrix_free import compute_Ap_product
 from .helpers.multigrid_helpers import  restrict_coefficients,restrict_inject, restrict_full_weighting, interpolate_linear, interpolate_cubic
+from .helpers.boundary_conditions import enforce_zero_gradient_bc
 from .jacobi import JacobiSolver
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from scipy import sparse
@@ -124,6 +125,13 @@ class MultiGridSolver(PressureSolver):
             Momentum equation coefficients.
         p_star : ndarray
             Current pressure field.
+        use_zero_pressure_bc : bool, optional
+            If True, applies zero pressure (Dirichlet) boundary conditions
+            instead of the default zero gradient (Neumann) conditions.
+        zero_pressure_boundaries : list or str, optional
+            Specifies which boundaries to apply zero pressure BC.
+            Can include 'west', 'east', 'south', 'north', or 'all'.
+            Only used when use_zero_pressure_bc is True.
             
         Returns:
         --------
@@ -132,8 +140,11 @@ class MultiGridSolver(PressureSolver):
         """
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
-
+        
         self.rho = 1.0  # This should come from fluid properties
+        
+        # Store mesh for boundary conditions
+        self.mesh = mesh
         
         # Reset residual history and diagnostics
         self.residual_history = []
@@ -220,9 +231,13 @@ class MultiGridSolver(PressureSolver):
                     else:
                         print(f"No convergence rate, iterations: {k+1}, residual: {res_norm:.2e}")
                     break
+                #print(f"multigrid residual: {res_norm:.2e}")
+                #print(f"No convergence, iterations: {k+1}, residual: {res_norm:.2e}")
         
         # Reshape to 2D with Fortran ordering
         p_prime = x.reshape((nx, ny), order='F')
+        
+    
         
         return p_prime
     
@@ -253,19 +268,13 @@ class MultiGridSolver(PressureSolver):
         
         # Fix reference pressure at P(1,1) - which is (0,0) in 0-based indexing
         # to lil
-        A = A.tolil()
-        A[0, :] = 0
-        A[0, 0] = 1
-        eps = 1e-10
-        diag_indices = sparse.find(A.diagonal())[0]
-        for i in diag_indices:
-            A[i, i] += eps
-        A = A.tocsr()
         
         # Solve the system
         p_prime_flat = spsolve(A, residual)
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
-        
+
+        # enforce zero gradient boundary conditions
+        #p_prime = self._enforce_pressure_boundary_conditions(mesh, p_prime)
         return p_prime
 
     def _v_cycle(self, p, rhs, mesh, rho, d_u, d_v, omega, pre_smoothing, post_smoothing, level=0):
@@ -301,16 +310,27 @@ class MultiGridSolver(PressureSolver):
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
         
+        
+        
         # If at the coarsest grid, solve directly
         if nx <= self.coarsest_grid_size:
             # Direct solve requires reshaping p and rhs if they came in flat
             # But _solve_residual_direct expects rhs flat, and returns flat result
             p_direct = self._solve_residual_direct(mesh, rhs, d_u, d_v, rho)
-            return p_direct.flatten(order='F') # Ensure it returns flat
+            p_direct_2d = p_direct.reshape((nx, ny), order='F')
+            
+            # Apply zero gradient boundary conditions to the direct solution
+            #p_direct_2d = self._enforce_pressure_boundary_conditions(mesh, p_direct_2d)
+                
+            return p_direct_2d.flatten(order='F') # Ensure it returns flat
 
         # Pre-smoothing steps
         p = self.smoother.solve(mesh=mesh, p=p.reshape((nx, ny), order='F'), b=rhs.reshape((nx, ny), order='F'),
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+                              
+        # Apply zero gradient boundary conditions after pre-smoothing
+        #p = self._enforce_pressure_boundary_conditions(mesh, p)
+            
         p = p.flatten(order='F') # Smoother returns 2D, flatten it back
 
         # Compute the residual: r = rhs - A*p
@@ -319,14 +339,17 @@ class MultiGridSolver(PressureSolver):
 
         # Reshape residual to 2D for restriction
         r_reshaped = r.reshape((nx, ny), order='F')
-
-        # Restrict residual to coarser grid using the selected operator
-        r_coarse_2D = self.restriction_operators[self.restriction_method](r_reshaped) 
+        
+            # Restrict residual to coarser grid using the selected operator
+        r_coarse_2D = self.restriction_operators[self.restriction_method](r_reshaped)  
 
         # Determine coarse grid size and create coarse grid mesh
         nx_coarse, ny_coarse = r_coarse_2D.shape
         mesh_coarse = StructuredMesh(nx=nx_coarse, ny=ny_coarse,
                                     length=mesh.length, height=mesh.height)
+
+        # apply zero gradient boundary conditions to the coarse residual
+        #r_coarse_2D = self._enforce_pressure_boundary_conditions(mesh_coarse, r_coarse_2D)
 
         # Restrict coefficients for the coarse grid
         d_u_coarse, d_v_coarse = restrict_coefficients(
@@ -348,21 +371,36 @@ class MultiGridSolver(PressureSolver):
             omega=omega,
             pre_smoothing=pre_smoothing,
             post_smoothing=post_smoothing,
-            level=level+1
+            level=level+1,
         )
 
         # Reshape coarse error for interpolation
         e_coarse_2D = e_coarse_flat.reshape((nx_coarse, ny_coarse), order='F')
+        
+    
 
         # Interpolate error correction to fine grid using the selected operator
         e_interpolated_2D = self.interpolation_operators[self.interpolation_method](e_coarse_2D, nx)
+        
+        # Apply zero gradient boundary conditions to the interpolated error
+        #e_interpolated_2D = self._enforce_pressure_boundary_conditions(mesh, e_interpolated_2D)
 
         # Apply the error correction (p = p + e)
-        p += e_interpolated_2D.flatten('F') # Add flat error to flat p
+        p_2d = p.reshape((nx, ny), order='F')
+        p_2d += e_interpolated_2D #* 0.9
+        
+        # Apply zero gradient boundary conditions after error correction
+        #p_2d = self._enforce_pressure_boundary_conditions(mesh, p_2d)
+            
+        p = p_2d.flatten('F')
 
         # Post-smoothing steps
         p = self.smoother.solve(mesh=mesh, p=p.reshape((nx, ny), order='F'), b=rhs.reshape((nx, ny), order='F'),
                               d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
+                              
+        # Apply zero gradient boundary conditions after post-smoothing
+        #p = self._enforce_pressure_boundary_conditions(mesh, p)
+            
         p = p.flatten(order='F') # Smoother returns 2D, flatten it back
 
         return p
@@ -391,18 +429,31 @@ class MultiGridSolver(PressureSolver):
             Number of post-smoothing iterations.
         level : int
             Current grid level of the multigrid hierarchy.
+            Specifies which boundaries to apply zero pressure BC.
+            Can include 'west', 'east', 'south', 'north', or 'all'.
+            Only used when use_zero_pressure_bc is True.
         """
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
+        
     
         # If at the coarsest grid, solve directly
         if nx <= self.coarsest_grid_size:
             u_direct = self._solve_residual_direct(mesh, f, d_u, d_v, rho)
-            return u_direct.flatten(order='F') # Ensure it returns flat
+            u_direct_2d = u_direct.reshape((nx, ny), order='F')
+            
+            # Apply zero gradient boundary conditions to the direct solution
+            #u_direct_2d = self._enforce_pressure_boundary_conditions(mesh, u_direct_2d)
+                
+            return u_direct_2d.flatten(order='F') # Ensure it returns flat
   
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u.reshape((nx, ny), order='F'), b=f.reshape((nx, ny), order='F'),
                                 d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+            
+        # Apply zero gradient boundary conditions after pre-smoothing
+        #u = self._enforce_pressure_boundary_conditions(mesh, u)
+            
         u = u.flatten(order='F') # Flatten back
         
         # Compute the residual: r = f - A*u
@@ -411,6 +462,7 @@ class MultiGridSolver(PressureSolver):
         
         # Reshape residual to 2D for restriction
         r_reshaped = r.reshape((nx, ny), order='F')
+        
         
         # Restrict residual to coarser grid
         r_coarse_2D = self.restriction_operators[self.restriction_method](r_reshaped) 
@@ -436,150 +488,176 @@ class MultiGridSolver(PressureSolver):
         
         # Perform two recursive calls for W-cycle
         for _ in range(2):
-             e_coarse_flat = self._w_cycle(u=e_coarse_flat, f=r_coarse_flat,
-                                      mesh=mesh_coarse, rho=rho, d_u=d_u_coarse, d_v=d_v_coarse,
-                                      omega=omega, pre_smoothing=pre_smoothing,
-                                      post_smoothing=post_smoothing,
-                                      level=level+1)
+             e_coarse_flat = self._w_cycle(
+                 u=e_coarse_flat, 
+                 f=r_coarse_flat,
+                 mesh=mesh_coarse,
+                 rho=rho,
+                 d_u=d_u_coarse,
+                 d_v=d_v_coarse,
+                 omega=omega,
+                 pre_smoothing=pre_smoothing,
+                 post_smoothing=post_smoothing,
+                 level=level+1,
+             )
         
         # Reshape coarse error for interpolation
         e_coarse_2D = e_coarse_flat.reshape((nx_coarse, ny_coarse), order='F')
         
-        # Interpolate error correction to fine grid
+        
+        # Interpolate error correction to fine grid using the selected operator
         e_interpolated_2D = self.interpolation_operators[self.interpolation_method](e_coarse_2D, nx)
         
-        # Apply the error correction: u = u + e
-        u += e_interpolated_2D.flatten('F')
+        # Apply zero gradient boundary conditions to the interpolated error
+        #e_interpolated_2D = self._enforce_pressure_boundary_conditions(mesh, e_interpolated_2D)
+        
+        # Apply the error correction (u = u + e)
+        u_2d = u.reshape((nx, ny), order='F')
+        u_2d += e_interpolated_2D
+        
+        # Apply zero gradient boundary conditions after error correction
+        #u_2d = self._enforce_pressure_boundary_conditions(mesh, u_2d)
+            
+        u = u_2d.flatten('F')
         
         # Post-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u.reshape((nx, ny), order='F'), b=f.reshape((nx, ny), order='F'),
                                 d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
-        u = u.flatten(order='F') # Flatten back
+        
+        # Apply zero gradient boundary conditions after post-smoothing
+        #u = self._enforce_pressure_boundary_conditions(mesh, u)
+       
+        u = u.flatten('F') # Flatten back
         
         return u
 
-    def _fmg_cycle(self, rhs_fine, mesh_fine, d_u_fine, d_v_fine, nx_finest, ny_finest, dx_finest, dy_finest):
+    def _fmg_cycle(self, rhs_fine, mesh_fine, d_u_fine, d_v_fine, nx_finest, ny_finest, dx_finest, dy_finest, use_zero_pressure_bc=False, zero_pressure_boundaries=None):
         """
         Perform a recursive Full Multigrid (FMG) cycle.
         
         Parameters:
         -----------
         rhs_fine : ndarray
-            Right-hand side vector on the current fine grid (flattened).
+            Right-hand side of the equation on the finest level
         mesh_fine : StructuredMesh
-            The current fine computational mesh.
+            The computational mesh on the finest level
         d_u_fine, d_v_fine : ndarray
-            Momentum equation coefficients on the current fine grid.
+            Momentum equation coefficients on the finest level
         nx_finest, ny_finest : int
-            Dimensions of the original finest grid.
+            Grid dimensions of the original finest grid.
         dx_finest, dy_finest : float
-             Grid spacings of the original finest grid.
-
-        Returns:
+            Grid spacings of the original finest grid.
+              Returns:
         --------
         ndarray
-            Solution on the current fine grid (flattened).
+            Solution field interpolated back to the finest level.
         """
         nx_fine, ny_fine = mesh_fine.get_dimensions()
         dx_fine, dy_fine = mesh_fine.get_cell_sizes()
 
-        # Base case: If the current grid is the coarsest grid, solve directly
+
+        # If we're at the coarsest level, solve directly
         if nx_fine <= self.coarsest_grid_size:
-            #print(f"FMG Base Case: Solving on {nx_fine}x{ny_fine} grid directly.")
-            #solution_coarse_2D = self._solve_residual_direct(
-            #    mesh_fine, rhs_fine, d_u_fine, d_v_fine, self.rho
-            #)
-            # solve using smoother
-            solution_coarse_2D = self.smoother.solve(mesh=mesh_fine, p=rhs_fine.reshape((nx_fine, ny_fine), order='F'), b=rhs_fine.reshape((nx_fine, ny_fine), order='F'),
-                              d_u=d_u_fine, d_v=d_v_fine, rho=self.rho, num_iterations=100, track_residuals=False)
-            return solution_coarse_2D.flatten(order='F')
-        
-        grid_scale = (dx_finest / dx_fine)
+            rhs_fine_flat = rhs_fine
+            if rhs_fine.ndim == 2:
+                rhs_fine_flat = rhs_fine.flatten(order='F')
 
-        # Recursive step:
-        # 1. Restrict the problem to the coarser grid
-        rhs_fine_2D = rhs_fine.reshape((nx_fine, ny_fine), order='F')
-        # For a Poisson equation, when restricting the right-hand side, a factor of 4 is needed 
-        # to maintain consistency with the differential operator scaling
-        rhs_coarse_2D = self.restriction_operators['restrict_full_weighting'](rhs_fine_2D) * 4
+            solution_fine = self._solve_residual_direct(mesh_fine, rhs_fine_flat, d_u_fine, d_v_fine, self.rho)
+            solution_fine_2d = solution_fine.reshape((nx_fine, ny_fine), order='F')
+            
+            # Apply zero gradient boundary conditions to the direct solution
+            #solution_fine_2d = self._enforce_pressure_boundary_conditions(mesh_fine, solution_fine_2d)
+                
+            return solution_fine_2d.flatten(order='F')
+
+        # Reshape RHS to 2D for restriction if it's flattened
+        if rhs_fine.ndim == 1:
+            rhs_fine_2D = rhs_fine.reshape((nx_fine, ny_fine), order='F')
+        else:
+            rhs_fine_2D = rhs_fine
+
+
+        # Restrict RHS to coarser grid and create coarse mesh
+        rhs_coarse_2D = self.restriction_operators[self.restriction_method](rhs_fine_2D)
         nx_coarse, ny_coarse = rhs_coarse_2D.shape
+        mesh_coarse = StructuredMesh(nx=nx_coarse, ny=ny_coarse, 
+                                  length=mesh_fine.length, height=mesh_fine.height)
 
-        mesh_coarse = StructuredMesh(nx=nx_coarse, ny=ny_coarse,
-                                     length=mesh_fine.length, height=mesh_fine.height)
-
-        # Restrict coefficients from fine to coarse grid
+        # Restrict coefficients
         d_u_coarse, d_v_coarse = restrict_coefficients(
-            d_u_fine, d_v_fine,
-            nx_fine, ny_fine,
-            nx_coarse, ny_coarse,
+            d_u_fine, d_v_fine, 
+            nx_fine, ny_fine, 
+            nx_coarse, ny_coarse, 
             dx_fine, dy_fine
         )
 
-        # 2. Solve the coarse grid problem recursively using FMG
+        # Recursive FMG on coarser grid
         solution_coarse_flat = self._fmg_cycle(
             rhs_coarse_2D.flatten(order='F'), mesh_coarse, d_u_coarse, d_v_coarse,
-            nx_finest, ny_finest, dx_finest, dy_finest # Pass finest grid info down
+            nx_finest, ny_finest, dx_finest, dy_finest, # Pass finest grid info down
         )
         solution_coarse_2D = solution_coarse_flat.reshape((nx_coarse, ny_coarse), order='F')
-        # 3. Interpolate the coarse grid solution to the fine grid
-        solution_fine_initial_2D = self.interpolation_operators[self.interpolation_method](
-            solution_coarse_2D, nx_fine
-        ) #/ grid_scale
-        solution_fine_flat = solution_fine_initial_2D.flatten(order='F')
-        # print min max and mean of interpolated solution
-        #print(f"solution_fine_flat min: {np.min(solution_fine_flat)}, max: {np.max(solution_fine_flat)}, mean: {np.mean(solution_fine_flat)}")
-
-        # 4. Refine the solution on the fine grid using V/W cycles
-        # Calculate discretization error tolerance for this level
-        #h_factor_sq = (dx_fine * dy_fine) / (dx_finest * dy_finest) # Approximation of (h/h_finest)^2
-        #level_tolerance = self.tolerance * h_factor_sq # Target relative residual for this level (e.g., 0.1 * ||tau||)
-        current_h = max(dx_fine, dy_fine)
-        level_tolerance = current_h#**self.disc_order # Target relative residual for this level (e.g., 0.1 * ||tau||)
-        #print(f"FMG Refinement: Level {nx_fine}x{ny_fine}, Target Tolerance: {level_tolerance:.2e}")
-        #level_tolerance = 0.1 * h_factor_sq # Target relative residual for this level (e.g., 0.1 * ||tau||)
-
-        #print(f"FMG Refinement: Level {nx_fine}x{ny_fine}, Target Tolerance: {level_tolerance:.2e}")
-
-        # Use specified buildup cycle type (V or W)
-        cycle_method = self._v_cycle if self.cycle_type_buildup == 'v' else self._w_cycle
-        cycle_arg_name = 'p' if self.cycle_type_buildup == 'v' else 'u' # Argument name for solution differs
-        # if current grid is the finest grid return
-
-        for cycle_num in range(self.max_cycles_buildup):
-             # Prepare arguments for the cycle method
-             cycle_args = {
-                 cycle_arg_name: solution_fine_flat,
-                 'f' if cycle_arg_name == 'u' else 'rhs': rhs_fine, # RHS argument name differs
-                 'mesh': mesh_fine,
-                 'rho': self.rho,
-                 'd_u': d_u_fine,
-                 'd_v': d_v_fine,
-                 'omega': self.smoother_omega,
-                 'pre_smoothing': self.pre_smoothing,
-                 'post_smoothing': self.post_smoothing,
-                 'level': 0 # Level argument might not be strictly needed here but pass for consistency
-             }
-             solution_fine_flat = cycle_method(**cycle_args)
-
-             # Check residual against level tolerance
-             Ax = compute_Ap_product(solution_fine_flat, nx_fine, ny_fine, dx_fine, dy_fine, self.rho, d_u_fine, d_v_fine)
-             residual = rhs_fine - Ax
-             r_norm = np.linalg.norm(residual, 2)
-             b_norm = np.linalg.norm(rhs_fine, 2)
-             rel_res = r_norm / b_norm if b_norm > 0 else r_norm
-
-             #print(f"  FMG Refinement Cycle {cycle_num+1}/{self.max_cycles_buildup}: Relative Residual = {rel_res:.2e}")
-
-             if rel_res < level_tolerance:
-                 #print(f"  FMG Refinement converged in {cycle_num+1} cycles.")
-                 #break
-                 pass
-        else:
-            pass
-             #print(f"  FMG Refinement finished {self.max_cycles_buildup} cycles without reaching tolerance {level_tolerance:.2e}.")
 
 
-        return solution_fine_flat
+        # Interpolate to fine grid with boundary preservation
+        solution_fine_2D = self.interpolation_operators[self.interpolation_method](solution_coarse_2D, nx_fine)
+        
+        # Apply zero gradient boundary conditions after interpolation
+        #solution_fine_2D = self._enforce_pressure_boundary_conditions(mesh_fine, solution_fine_2D)
+
+        # Perform additional V/W cycles if desired
+        # Outer loop performs at most max_cycles_buildup cycles
+        # or stops if tolerance is reached
+        if self.max_cycles_buildup > 0:
+            for k in range(self.max_cycles_buildup):
+                # Determine type of cycle to use during buildup
+                if self.cycle_type_buildup == 'v':
+                    solution_fine_2D = self._v_cycle(
+                        solution_fine_2D.flatten(order='F'),
+                        rhs_fine_2D.flatten(order='F'),
+                        mesh_fine, 
+                        self.rho, 
+                        d_u_fine, 
+                        d_v_fine, 
+                        self.smoother_omega, 
+                        self.pre_smoothing, 
+                        self.post_smoothing,
+                        level=0,
+                    )
+                elif self.cycle_type_buildup == 'w':
+                    solution_fine_2D = self._w_cycle(
+                        solution_fine_2D.flatten(order='F'), 
+                        rhs_fine_2D.flatten(order='F'), 
+                        mesh_fine, 
+                        self.rho, 
+                        d_u_fine, 
+                        d_v_fine, 
+                        self.smoother_omega, 
+                        self.pre_smoothing, 
+                        self.post_smoothing,
+                        level=0,
+                    )
+                
+                solution_fine_2D = solution_fine_2D.reshape((nx_fine, ny_fine), order='F')
+                
+                # Apply zero gradient boundary conditions after each cycle
+                #solution_fine_2D = self._enforce_pressure_boundary_conditions(mesh_fine, solution_fine_2D)
+                
+                # Check convergence if requested
+                if self.tolerance < 1.0:
+                    solution_flat = solution_fine_2D.flatten(order='F')
+                    Ax = compute_Ap_product(solution_flat, nx_fine, ny_fine, dx_fine, dy_fine, 
+                                         self.rho, d_u_fine, d_v_fine)
+                    
+                    r = rhs_fine_2D.flatten(order='F') - Ax
+                    r_norm = np.linalg.norm(r)
+                    rhs_norm = np.linalg.norm(rhs_fine_2D)
+                    rel_res = r_norm / rhs_norm if rhs_norm > 0 else r_norm
+                    
+                    if rel_res < self.tolerance:
+                        break
+
+        return solution_fine_2D.flatten(order='F')
 
     def get_solver_info(self):
         """
@@ -616,6 +694,7 @@ class MultiGridSolver(PressureSolver):
         }
         
         return info
+        
 
     def add_restriction_operator(self, name, operator):
         """

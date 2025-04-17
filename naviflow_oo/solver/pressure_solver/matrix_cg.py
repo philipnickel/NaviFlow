@@ -73,12 +73,12 @@ class ConjugateGradientSolver(PressureSolver):
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
         
         # Fix reference pressure at (0,0) - use lil_matrix for efficient modification
+        # 
         A_lil = A.tolil()
         A_lil[0, :] = 0
         A_lil[0, 0] = 1
         A = A_lil.tocsr()
-        
-        # Create a callback function to track convergence
+        #Create a callback function to track convergence
         def callback(xk):
             # Compute residual: ||Ax - b||
             r = A.dot(xk) - b
@@ -103,6 +103,9 @@ class ConjugateGradientSolver(PressureSolver):
         
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
+        
+        # Enforce boundary conditions
+        #self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
         return p_prime
     

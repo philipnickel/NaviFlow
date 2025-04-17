@@ -50,221 +50,231 @@ class SimpleSolver(BaseAlgorithm):
         self.u_old = None  # Store old u values
         self.v_old = None  # Store old v values
         self.p_old = None  # Store old p values
+        
+        # Coefficient storage for residual calculations
+        self.u_coeffs = None  # x-momentum coefficients
+        self.v_coeffs = None  # y-momentum coefficients
+        self.p_coeffs = None  # pressure equation coefficients
+        
+        # Initialize residual histories
+        self.x_momentum_residuals = []  # Track x-momentum residuals
+        self.y_momentum_residuals = []  # Track y-momentum residuals
+        self.continuity_residuals = []  # Track continuity residuals
+        
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
- 
-    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
-              track_infinity_norm=False, infinity_norm_interval=10, use_l2_norm=False):
+    
+    def calculate_physical_u_residual(self, u, v, p):
         """
-        Solve using the SIMPLE algorithm.
+        Compute L2 norm of the physical (unrelaxed) x-momentum residual.
+        """
+        nx, ny = self.mesh.get_dimensions()
+        self.momentum_solver.calculate_coefficients(
+            self.mesh, self.fluid, u, v, p, self.bc_manager, relaxation_factor=1.0
+        )
+
+        sum_squared_residual = 0.0
+        for j in range(1, ny - 1):
+            for i in range(1, nx - 1):
+                a_e = self.momentum_solver.u_a_e[i, j]
+                a_w = self.momentum_solver.u_a_w[i, j]
+                a_n = self.momentum_solver.u_a_n[i, j]
+                a_s = self.momentum_solver.u_a_s[i, j]
+                a_p = self.momentum_solver.u_a_p[i, j]
+                source = self.momentum_solver.u_source[i, j]
+
+                lhs = a_p * u[i, j]
+                rhs = (
+                    a_e * u[i+1, j] +
+                    a_w * u[i-1, j] +
+                    a_n * u[i, j+1] +
+                    a_s * u[i, j-1] +
+                    source
+                )
+                residual = lhs - rhs
+                sum_squared_residual += residual ** 2
+
+        return np.sqrt(sum_squared_residual)
+
+
+    def calculate_physical_v_residual(self, u, v, p):
+        """
+        Compute L2 norm of the physical (unrelaxed) y-momentum residual.
+        """
+        nx, ny = self.mesh.get_dimensions()
+        self.momentum_solver.calculate_coefficients(
+            self.mesh, self.fluid, u, v, p, self.bc_manager, relaxation_factor=1.0
+        )
+
+        sum_squared_residual = 0.0
+        for j in range(1, ny - 1):
+            for i in range(1, nx - 1):
+                a_e = self.momentum_solver.v_a_e[i, j]
+                a_w = self.momentum_solver.v_a_w[i, j]
+                a_n = self.momentum_solver.v_a_n[i, j]
+                a_s = self.momentum_solver.v_a_s[i, j]
+                a_p = self.momentum_solver.v_a_p[i, j]
+                source = self.momentum_solver.v_source[i, j]
+
+                lhs = a_p * v[i, j]
+                rhs = (
+                    a_e * v[i+1, j] +
+                    a_w * v[i-1, j] +
+                    a_n * v[i, j+1] +
+                    a_s * v[i, j-1] +
+                    source
+                )
+                residual = lhs - rhs
+                sum_squared_residual += residual ** 2
+
+        return np.sqrt(sum_squared_residual)
+    
+    def calculate_continuity_residual(self, u, v):
+        """
+        Calculate the L2 norm of the continuity equation residual.
+        
+        This implementation calculates the mass imbalance for each cell,
+        which for incompressible flow should be zero (divergence-free).
         
         Parameters:
         -----------
-        max_iterations : int
-            Maximum number of iterations
-        tolerance : float
-            Convergence tolerance
-        save_profile : bool, optional
-            Whether to save profiling data to a file
-        profile_dir : str, optional
-            Directory to save profiling data
-        track_infinity_norm : bool, optional
-            Whether to track error against Ghia data
-        infinity_norm_interval : int, optional
-            Interval (in iterations) at which to calculate error
-        use_l2_norm : bool, optional
-            Whether to use L2 norm instead of infinity norm for error calculation
+        u, v : ndarray
+            Velocity fields
             
         Returns:
         --------
-        SimulationResult
-            Object containing the solution fields and convergence history
+        float
+            L2 norm of the continuity equation residual
         """
-        # Start profiling
-        self.profiler.start()
-        
-        # Get mesh dimensions and fluid properties
+        # Get mesh dimensions
         nx, ny = self.mesh.get_dimensions()
         dx, dy = self.mesh.get_cell_sizes()
-        rho = self.fluid.get_density()
-        mu = self.fluid.get_viscosity()
         
-        # Initialize variables
+        # Initialize sum for residual
+        sum_residual = 0.0
+        
+        # Calculate mass imbalance for interior cells
+        for j in range(1, ny-1):
+            for i in range(1, nx-1):
+                # Calculate velocities at cell faces
+                u_e = u[i+1, j]    # East face u-velocity
+                u_w = u[i, j]      # West face u-velocity
+                v_n = v[i, j+1]    # North face v-velocity 
+                v_s = v[i, j]      # South face v-velocity
+                
+                # Calculate mass imbalance (divergence of velocity field)
+                # For incompressible flow, this should be zero (div(u) = 0)
+                mdot = (u_e - u_w) * dy + (v_n - v_s) * dx
+                
+                # Square the residual and add to sum
+                sum_residual += mdot**2
+        
+        # Return L2 norm of residuals
+        return np.sqrt(sum_residual)
+    
+    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
+              track_infinity_norm=False, infinity_norm_interval=10, use_l2_norm=False):
+        self.profiler.start()
+        nx, ny = self.mesh.get_dimensions()
         p_star = self.p.copy()
         p_prime = np.zeros((nx, ny))
-        self.residual_history = []  # Reset residual history
-        self.momentum_residual_history = []  # Track momentum residuals
-        self.pressure_residual_history = []  # Track pressure residuals
-        self.infinity_norm_history = []  # Track infinity norm errors
-        
-        # Main iteration loop
+        self.residual_history = []
+        self.momentum_residual_history = []
+        self.pressure_residual_history = []
+        self.infinity_norm_history = []
+
         iteration = 1
-        total_res = 1000
-        vel_res = 1000
-        print(f"Using relaxation factors: alpha_p = {self.alpha_p}, alpha_u = {self.alpha_u}") 
-        
+        u_res = v_res = p_res = total_res = 1e6
+        print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u} with physical (α=1) residuals.")
+
         try:
-            while (iteration <= max_iterations) and (vel_res > tolerance):
-                    # Store old values for convergence check
+            while iteration <= max_iterations and max(u_res, v_res, p_res) > tolerance:
                 self.u_old = self.u.copy()
                 self.v_old = self.v.copy()
                 self.p_old = self.p.copy()
-                
-                # Solve momentum equations with relaxation factor
+
                 u_star, d_u = self.momentum_solver.solve_u_momentum(
-                    self.mesh, self.fluid, self.u, self.v, p_star, 
+                    self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
                     boundary_conditions=self.bc_manager
                 )
-                
+
                 v_star, d_v = self.momentum_solver.solve_v_momentum(
-                    self.mesh, self.fluid, self.u, self.v, p_star, 
+                    self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
                     boundary_conditions=self.bc_manager
                 )
-                
-                
-                # Solve pressure correction equation
-                p_prime = self.pressure_solver.solve(
-                    self.mesh, u_star, v_star, d_u, d_v, p_star
-                )
-                # Update pressure with relaxation
+
+                p_prime = self.pressure_solver.solve(self.mesh, u_star, v_star, d_u, d_v, p_star)
                 self.p = p_star + self.alpha_p * p_prime
-                
-                # Apply zero-gradient boundary conditions to pressure
                 self._enforce_pressure_boundary_conditions()
-                
-                p_star = self.p
-                
-                # Update velocity
+                p_star = self.p.copy()
+
                 self.u, self.v = self.velocity_updater.update_velocity(
                     self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
                 )
-                
-                # Calculate scaled residuals
-                n_cells = nx * ny
 
-                # Velocity residuals (normalized by number of cells)
-                u_res = np.linalg.norm(self.u - self.u_old, ord=2) / np.sqrt(n_cells)
-                v_res = np.linalg.norm(self.v - self.v_old, ord=2) / np.sqrt(n_cells)
-                vel_res = u_res + v_res
+                # ✅ Use α = 1.0 to compute physical residuals
+                u_res = self.calculate_physical_u_residual(self.u, self.v, self.p)
+                v_res = self.calculate_physical_v_residual(self.u, self.v, self.p)
+                p_res = self.calculate_continuity_residual(self.u, self.v)
 
-                # Pressure residual (normalized)
-                p_res = np.linalg.norm(self.p - self.p_old, ord=2) / np.sqrt(n_cells)
-                # Combined residual as sum of velocity components and pressure only
-                #total_res = vel_res + p_res
+                self.x_momentum_residuals.append(u_res)
+                self.y_momentum_residuals.append(v_res)
+                self.continuity_residuals.append(p_res)
 
-                # Store all residuals separately for monitoring
-                #self.residual_history.append(total_res)
-                self.momentum_residual_history.append(vel_res)
+                total_res = max(u_res, v_res, p_res)
+                self.residual_history.append(total_res)
+                self.momentum_residual_history.append(max(u_res, v_res))
                 self.pressure_residual_history.append(p_res)
-                
-                # Calculate infinity norm error if requested
-                infinity_norm_error = None
-                l2_norm_error = None
-                if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or total_res <= tolerance):
+
+                if track_infinity_norm and (iteration % infinity_norm_interval == 0 or total_res < tolerance):
                     try:
-                        # Calculate both error metrics
-                        infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
-                        l2_norm_error = calculate_l2_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
-                        
-                        # Store the one requested by use_l2_norm for convergence history
-                        error_to_store = l2_norm_error if use_l2_norm else infinity_norm_error
-                        self.infinity_norm_history.append(error_to_store)
-                        
-                        # Print both errors on the same line
-                        print(f"Iteration {iteration}, Infinity Norm Error: {infinity_norm_error:.6e}, L2 Norm Error: {l2_norm_error:.6e}")
+                        inf_err = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
+                        l2_err = calculate_l2_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
+                        self.infinity_norm_history.append(l2_err if use_l2_norm else inf_err)
+                        print(f"Iteration {iteration}: ∞-norm error = {inf_err:.3e}, L2 error = {l2_err:.3e}")
                     except Exception as e:
-                        print(f"Warning: Could not calculate error: {str(e)}")
-                
-                # Add detailed residual data to profiler
-                self.profiler.add_residual_data(
-                    iteration=iteration,
-                    total_residual=total_res,
-                    momentum_residual=vel_res,
-                    pressure_residual=p_res,
-                    infinity_norm_error=infinity_norm_error
-                )
-                
-                # Print progress with all residuals
-                print(f"Iteration {iteration}, "
-                    f"Velocity Residual: {vel_res:.6e}, "
-                    f"Pressure Residual: {p_res:.6e}")
-                
-                iteration += 1 
-                
+                        print(f"Error calc failed: {e}")
+
+                print(f"[{iteration}] Residuals -> u: {u_res:.3e}, v: {v_res:.3e}, continuity: {p_res:.3e}")
+                iteration += 1
+
         except KeyboardInterrupt:
-            print("\nSimulation stopped by keyboard interrupt (Ctrl+C).")
-            # Continue with the rest of the code to save results
-        
-        # Update profiling data
+            print("Interrupted by user.")
+
         self.profiler.set_iterations(iteration - 1)
-        
-        # Set convergence information
-        final_residual = total_res
-        converged = total_res <= tolerance
         self.profiler.set_convergence_info(
             tolerance=tolerance,
-            final_residual=final_residual,
+            final_residual=total_res,
             residual_history=self.residual_history,
-            converged=converged
+            converged=(total_res < tolerance)
         )
-        
-        # Collect pressure solver performance metrics if available
+
         if hasattr(self.pressure_solver, 'get_solver_info'):
-            solver_info = self.pressure_solver.get_solver_info()
+            info = self.pressure_solver.get_solver_info()
             self.profiler.set_pressure_solver_info(
-                solver_name=solver_info.get('name', self.pressure_solver.__class__.__name__),
-                inner_iterations=solver_info.get('inner_iterations_history'),
-                convergence_rate=solver_info.get('convergence_rate'),
-                solver_specific=solver_info.get('solver_specific')
+                solver_name=info.get('name', 'unknown'),
+                inner_iterations=info.get('inner_iterations_history'),
+                convergence_rate=info.get('convergence_rate'),
+                solver_specific=info.get('solver_specific')
             )
-        
-        # End profiling
+
         self.profiler.end()
-        
-        # Calculate divergence for final solution
-        divergence = self.calculate_divergence()
-        
-        # Create result object with the Reynolds number
-        reynolds_value = self.fluid.get_reynolds_number()
-        
+
         result = SimulationResult(
-            self.u, self.v, self.p, self.mesh, 
-            iterations=iteration-1, 
+            self.u, self.v, self.p, self.mesh,
+            iterations=iteration-1,
             residuals=self.residual_history,
             momentum_residuals=self.momentum_residual_history,
             pressure_residuals=self.pressure_residual_history,
-            divergence=divergence,
-            reynolds=reynolds_value
+            divergence=self.calculate_divergence(),
+            reynolds=self.fluid.get_reynolds_number()
         )
-        
-        # Calculate final infinity norm error if not already done
-        if track_infinity_norm and not self.infinity_norm_history:
-            try:
-                # Calculate both error metrics for the final result
-                inf_error = result.calculate_infinity_norm_error()
-                l2_error = result.calculate_l2_norm_error()
-                
-                # Print both on same line
-                print(f"Final Errors - Infinity Norm: {inf_error:.6e}, L2 Norm: {l2_error:.6e}")
-                
-                # Set the right one for backward compatibility
-                if use_l2_norm:
-                    result.infinity_norm_error = l2_error
-            except Exception as e:
-                print(f"Warning: Could not calculate final error: {str(e)}")
-        elif self.infinity_norm_history:
-            result.infinity_norm_error = self.infinity_norm_history[-1]
-        
-        # Save profiling data if requested
+
         if save_profile:
             os.makedirs(profile_dir, exist_ok=True)
-            filename = os.path.join(
-                profile_dir, 
-                f"SIMPLE_Re{int(reynolds_value)}_mesh{nx}x{ny}_profile.h5"
-            )
-            profile_path = self.save_profiling_data(filename)
-            print(f"Profiling data saved to: {profile_path}")
-        
+            filename = os.path.join(profile_dir, f"SIMPLE_Re{int(self.fluid.get_reynolds_number())}_mesh{nx}x{ny}_profile.h5")
+            print(f"Saved profile to {self.save_profiling_data(filename)}")
+
         return result

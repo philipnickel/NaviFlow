@@ -10,7 +10,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
-from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Create results directory
@@ -21,11 +21,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 15, 15          # Grid size
+nx, ny = 63, 63          # Grid size
 reynolds = 100           # Reynolds number
-alpha_p = 0.3            # Pressure relaxation factor (lower for stability)
-alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 100000     # Maximum number of iterations
+alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
+alpha_u = 0.8            # Velocity relaxation factor
+max_iterations = 2000     # Maximum number of iterations
 tolerance = 1e-4         # Convergence tolerance
 
 # 2. Create mesh
@@ -45,11 +45,11 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Gauss-Seidel solver for pressure correction
 pressure_solver = GaussSeidelSolver(
-    tolerance=1e-5,  # Relaxed tolerance for inner iterations
-    max_iterations=5000000,  # Fewer iterations per SIMPLE iteration
-    omega=1.2, 
+    tolerance=1e-3,  # Relaxed tolerance for inner iterations
+    max_iterations=1000,  # Fewer iterations per SIMPLE iteration
+    omega=0.86, 
 )
-momentum_solver = StandardMomentumSolver()
+momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -89,7 +89,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Gauss-Seidel Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_gauss_seidel_results.pdf'),
-    show=False
+    show=True
 )
 
 # 11. Visualize final residuals

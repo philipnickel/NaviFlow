@@ -26,6 +26,9 @@ class DirectPressureSolver(PressureSolver):
         # No need for tolerance or max_iterations for a direct solver
         super().__init__()
         self.residual_history = []
+        self.mesh = None
+        self.bc_manager = None
+        self.p = None
     
     def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
         """
@@ -48,6 +51,11 @@ class DirectPressureSolver(PressureSolver):
             Pressure correction field
         """
         
+        # Store the mesh for use in boundary conditions
+        self.mesh = mesh
+        self.p = p_star
+        self.bc_manager = getattr(mesh, 'bc_manager', None)
+        
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
         rho = 1.0  # This should come from fluid properties
@@ -55,15 +63,15 @@ class DirectPressureSolver(PressureSolver):
         # Get right-hand side of pressure correction equation
         rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
         
-        # Get coefficient matrix
+        # Get coefficient matrix with boundary conditions already integrated
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
-        # # Add small regularization to improve conditioning
-        eps = 1e-10
-        diag_indices = sparse.find(A.diagonal())[0]
-        A = A.tolil()
-        for i in diag_indices:
-            A[i, i] += eps
-        A = A.tocsr()
+        
+        # Fix reference pressure at (0,0) - first index in flattened system
+        # Convert to LIL format for efficient single element modifications
+        #A = A.tolil()
+        #A[0, :] = 0  # Zero out entire row for reference point
+        #A[0, 0] = 1  # Set diagonal to 1 for reference equation
+        #rhs[0] = 0  # Set right-hand side to zero at reference point
         
         # Solve the system
         p_prime_flat = spsolve(A, rhs)
@@ -74,6 +82,9 @@ class DirectPressureSolver(PressureSolver):
         
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
+        
+        # Enforce pressure boundary conditions
+        #self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
         return p_prime
         

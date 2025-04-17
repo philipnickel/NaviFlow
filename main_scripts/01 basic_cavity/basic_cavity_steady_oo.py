@@ -15,16 +15,16 @@ from naviflow_oo.solver.pressure_solver.direct import DirectPressureSolver
 from naviflow_oo.solver.momentum_solver.tvd import TVDMomentumSolver
 from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_oo.postprocessing.visualization import plot_final_residuals, plot_u_v_continuity_residuals
 
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**6-1, 2**6-1 # Grid size
+nx, ny = 2**5-1, 2**5-1 # Grid size
 reynolds = 100             # Reynolds number
-alpha_p = 0.3              # Pressure relaxation factor
-alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 10000     # Maximum number of iterations
+alpha_p = 0.1              # Pressure relaxation factor
+alpha_u = 0.8              # Velocity relaxation factor
+max_iterations = 1500     # Maximum number of iterations
 tolerance = 1e-4
 
 
@@ -78,7 +78,7 @@ result = algorithm.solve(
     profile_dir=results_dir,
     track_infinity_norm=True,
     infinity_norm_interval=10,
-    use_l2_norm=True  
+    #use_l2_norm=True  
 )
 
 # End timing
@@ -107,6 +107,16 @@ plot_final_residuals(
     mesh,
     title=f'Final Residuals (Re={reynolds})',
     filename=os.path.join(results_dir, f'final_residuals_Re{reynolds}.pdf'),
+    show=False
+)
+
+# 12. Visualize residual history
+plot_u_v_continuity_residuals(
+    algorithm.x_momentum_residuals, 
+    algorithm.y_momentum_residuals, 
+    algorithm.continuity_residuals,
+    title=f'Residual History (Re={reynolds})',
+    filename=os.path.join(results_dir, f'residual_history_Re{reynolds}.pdf'),
     show=False
 )
 

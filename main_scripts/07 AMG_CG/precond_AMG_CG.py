@@ -21,7 +21,7 @@ from naviflow_oo.solver.pressure_solver.preconditioned_cg_solver import Precondi
 from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.momentum_solver.tvd import TVDMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_oo.postprocessing.visualization import plot_final_residuals, plot_u_v_continuity_residuals
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
@@ -30,12 +30,12 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 2**11-1, 2**11-1 # Grid size
-reynolds = 5000             # Reynolds number
-alpha_p = 0.3              # Pressure relaxation factor
-alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 1     # Maximum number of iterations
-tolerance = 1e-5
+nx, ny = 2**7-1, 2**7-1 # Grid size
+reynolds = 1000             # Reynolds number
+alpha_p = 0.1              # Pressure relaxation factor
+alpha_u = 0.8              # Velocity relaxation factor
+max_iterations = 5000# Maximum number of iterations
+tolerance = 1e-7
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
@@ -59,11 +59,11 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Preconditioned CG solver for pressure correction
 pressure_solver = PreconditionedCGSolver(
-    tolerance=tolerance,        # Even tighter tolerance for pressure solver
-    max_iterations=100000,   # More iterations allowed
+    tolerance=1e-2,#pressure_tolerance,        # Even tighter tolerance for pressure solver
+    max_iterations=10000,   # More iterations allowed
     smoother='gauss_seidel',
-    presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
-    postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
+    presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 1}),
+    postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 1}),
     cycle_type='V'         # Use V-cycle for better stability
 )
 momentum_solver = PowerLawMomentumSolver()
@@ -107,7 +107,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Preconditioned CG Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_preconditioned_cg_results.pdf'),
-    show=False
+    show=True
 )
 
 # 11. Visualize final residuals
@@ -119,3 +119,15 @@ plot_final_residuals(
     filename=os.path.join(results_dir, f'final_residuals_Re{reynolds}.pdf'),
     show=False
 )
+
+# 12. Visualize residual history
+plot_u_v_continuity_residuals(
+    algorithm.x_momentum_residuals, 
+    algorithm.y_momentum_residuals, 
+    algorithm.continuity_residuals,
+    title=f'Residual History (Re={reynolds})',
+    filename=os.path.join(results_dir, f'residual_history_Re{reynolds}.pdf'),
+    show=True
+)
+
+

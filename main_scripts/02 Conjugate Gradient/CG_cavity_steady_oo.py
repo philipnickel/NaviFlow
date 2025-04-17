@@ -13,15 +13,16 @@ from naviflow_oo.solver.pressure_solver.matrix_free_cg import MatrixFreeCGSolver
 from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residuals
 # Start timing
 
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**8-1, 2**8-1 # Grid size
+nx, ny = 2**6-1, 2**6-1 # Grid size
 reynolds = 100             # Reynolds number
-alpha_p = 0.3              # Pressure relaxation factor
-alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 10000     # Maximum number of iterations
+alpha_p = 0.1              # Pressure relaxation factor
+alpha_u = 0.8              # Velocity relaxation factor
+max_iterations = 1000     # Maximum number of iterations
 tolerance = 1e-5
 h = 1/nx 
 disc_order = 1
@@ -46,7 +47,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=pressure_tolerance, max_iterations=1000000)
+pressure_solver = MatrixFreeCGSolver(tolerance=pressure_tolerance, max_iterations=10000)
 momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
@@ -91,7 +92,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'CG Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_CG_results.pdf'),
-    show=False
+    show=True
 )
 
 # 11. Visualize final residuals
@@ -103,4 +104,12 @@ plot_final_residuals(
     filename=os.path.join(results_dir, f'final_residuals_Re{reynolds}.pdf'),
     show=False
 )
-
+# 12. Visualize residual history
+plot_u_v_continuity_residuals(
+    algorithm.x_momentum_residuals, 
+    algorithm.y_momentum_residuals, 
+    algorithm.continuity_residuals,
+    title=f'Residual History (Re={reynolds})',
+    filename=os.path.join(results_dir, f'residual_history_Re{reynolds}.pdf'),
+    show=False
+)

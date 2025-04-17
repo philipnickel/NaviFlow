@@ -143,43 +143,65 @@ class GaussSeidelSolver(PressureSolver):
                 if res_norm < self.tolerance:
                     print(f"Gauss-Seidel converged in {k+1} iterations, residual: {res_norm:.6e}")
                     break
+                #print(f"Gauss-Seidel iteration {k+1}, residual: {res_norm:.6e}")
         
         return p_2d
     
     def _precompute_coefficients(self, nx, ny, dx, dy, rho, d_u, d_v):
         """
         Precompute coefficient arrays for the pressure equation.
+        This exactly matches the coefficient calculation in compute_Ap_product.
         
         Returns:
         --------
         tuple
             (aE, aW, aN, aS, inv_aP) coefficient arrays
         """
-        # East coefficients
+        # Create coefficient arrays
         aE = np.zeros((nx, ny))
+        aW = np.zeros((nx, ny))
+        aN = np.zeros((nx, ny))
+        aS = np.zeros((nx, ny))
+        aP = np.zeros((nx, ny))
+        
+        # East coefficients (aE) - For interior cells: i < nx-1
+        # Using explicit loops to match compute_Ap_product exactly
+        # East coefficients (aE) - For interior cells: i < nx-1
         aE[:-1, :] = rho * d_u[1:nx, :] * dy
         
-        # West coefficients
-        aW = np.zeros((nx, ny))
+        # West coefficients (aW) - For interior cells: i > 0
         aW[1:, :] = rho * d_u[1:nx, :] * dy
         
-        # North coefficients
-        aN = np.zeros((nx, ny))
+        # North coefficients (aN) - For interior cells: j < ny-1
         aN[:, :-1] = rho * d_v[:, 1:ny] * dx
         
-        # South coefficients
-        aS = np.zeros((nx, ny))
+        # South coefficients (aS) - For interior cells: j > 0
         aS[:, 1:] = rho * d_v[:, 1:ny] * dx
+        # Apply boundary conditions by modifying coefficients
+        # West boundary (i=0)
+        aP[0, :] += aE[0, :]
+        aE[0, :] = 0
         
-        # Diagonal coefficients
-        aP = aE + aW + aN + aS
+        # East boundary (i=nx-1)
+        aP[nx-1, :] += aW[nx-1, :]
+        aW[nx-1, :] = 0
         
-        # Fix reference pressure at (0,0)
-        aP[0, 0] = 0.0
-        aE[0, 0] = aW[0, 0] = aN[0, 0] = aS[0, 0] = 0.0
+        # South boundary (j=0)
+        aP[:, 0] += aN[:, 0]
+        aN[:, 0] = 0
+        
+        # North boundary (j=ny-1)
+        aP[:, ny-1] += aS[:, ny-1]
+        aS[:, ny-1] = 0
+        
+        # Diagonal term is sum of all coefficients
+        aP += aE + aW + aN + aS
+        
+        # IMPORTANT: No special handling for reference pressure point here
+        # Reference point is handled in the main solve loop with p[0, 0] = 0.0
         
         # Avoid division by zero
-        aP[aP == 0] = 1.0
+        aP[aP < 1e-15] = 1.0
         
         return aE, aW, aN, aS, aP
     

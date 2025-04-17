@@ -69,8 +69,8 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
     # Search for optimal omega
     # MODIFIED RANGE: Change these values to adjust the search range
     omega_min = 0  # Minimum omega value to test
-    omega_max = 1   # Maximum omega value to test
-    num_points = 100   # Number of points to test in that range
+    omega_max = 1.8   # Maximum omega value to test
+    num_points = 200   # Number of points to test in that range
     
     omega_range = np.linspace(omega_min, omega_max, num_points)
     print(f"Searching for optimal omega in range: [{omega_min}, {omega_max}] with {num_points} points")
@@ -264,7 +264,7 @@ if __name__ == "__main__":
     print("Starting spectral radius analysis...")
     
     # Example parameters
-    nx, ny = 127, 127
+    nx, ny = 63, 63
     dx, dy = 1.0 / (nx - 1), 1.0 / (ny - 1)
     rho = 1.0
     d_u = np.ones((nx, ny))

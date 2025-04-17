@@ -89,17 +89,10 @@ class PyAMGSolver(PressureSolver):
         # Initial guess
         x0 = np.zeros_like(b)
         
-        # Fix reference pressure at (0,0)
-        b[0] = 0.0
     
         # Construct the coefficient matrix explicitly
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
         
-        # Fix reference pressure at (0,0) - use lil_matrix for efficient modification
-        A_lil = A.tolil()
-        A_lil[0, :] = 0
-        A_lil[0, 0] = 1
-        A = A_lil.tocsr()
         
         # Setup PyAMG solver
         ml = pyamg.smoothed_aggregation_solver(
@@ -116,7 +109,9 @@ class PyAMGSolver(PressureSolver):
     
         # Reshape to 2D
         p_prime = x.reshape((nx, ny), order='F')
-        
+
+        # Enforce boundary conditions
+        #self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
         return p_prime
     

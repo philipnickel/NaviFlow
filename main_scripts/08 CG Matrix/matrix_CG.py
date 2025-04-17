@@ -18,10 +18,10 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.matrix_cg import ConjugateGradientSolver
-from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
-
+from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residuals
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
@@ -30,12 +30,19 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 63, 63           # Grid size (smaller for quick testing)
+nx, ny = 2**5-1, 2**5-1           # Grid size (smaller for quick testing)
 reynolds = 100            # Reynolds number
-alpha_p = 0.3            # Even more conservative pressure relaxation
-alpha_u = 0.7             # Even more conservative velocity relaxation
-max_iterations = 100000    
-tolerance = 1e-4          # Convergence tolerance
+alpha_p = 0.01            # Even more conservative pressure relaxation
+alpha_u = 0.05             # Even more conservative velocity relaxation
+max_iterations = 500    
+tolerance = 1e-5          # Convergence tolerance
+h = 1/nx 
+disc_order = 1
+expected_disc_error = h**(disc_order)
+pressure_tolerance = expected_disc_error 
+
+
+
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -54,10 +61,10 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use basic CG solver for pressure correction
 pressure_solver = ConjugateGradientSolver(
-    tolerance=1e-5,        # Even tighter tolerance for pressure solver
+    tolerance=pressure_tolerance,        # Even tighter tolerance for pressure solver
     max_iterations=100000   # More iterations allowed
 )
-momentum_solver = StandardMomentumSolver()
+momentum_solver = PowerLawMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -97,7 +104,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Conjugate Gradient Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_cg_results.pdf'),
-    show=False
+    show=True
 )
 
 # 11. Visualize final residuals
@@ -109,3 +116,17 @@ plot_final_residuals(
     filename=os.path.join(results_dir, f'final_residuals_Re{reynolds}.pdf'),
     show=False
 )
+
+
+# 12. Visualize residual history
+plot_u_v_continuity_residuals(
+    algorithm.x_momentum_residuals, 
+    algorithm.y_momentum_residuals, 
+    algorithm.continuity_residuals,
+    title=f'Residual History (Re={reynolds})',
+    filename=os.path.join(results_dir, f'residual_history_Re{reynolds}.pdf'),
+    show=True
+)
+
+
+

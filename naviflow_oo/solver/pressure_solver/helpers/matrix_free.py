@@ -2,8 +2,7 @@
 Matrix-free implementation methods.
 """
 import numpy as np
-
-def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
+def compute_Ap_product_old(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
     """
     Compute matrix-vector product Ap without forming the matrix explicitly.
     
@@ -108,6 +107,109 @@ def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
     # Ensure result is flattened before returning
     result = result_2d.flatten('F')
     return result
+def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
+    """
+    Compute matrix-vector product Ap without forming the matrix explicitly.
+    This implementation follows the same coefficient calculation as get_coeff_mat
+    in coeff_matrix.py for consistency, but uses vectorized operations for efficiency.
+    
+    Parameters:
+    -----------
+    p_flat : ndarray
+        Flattened pressure array
+    imax, jmax : int
+        Grid dimensions
+    dx, dy : float
+        Cell sizes
+    rho : float
+        Fluid density
+    d_u, d_v : ndarray
+        Momentum equation coefficients
+    out : ndarray, optional
+        Output array for result (must be same shape as p_flat)
+        
+    Returns:
+    --------
+    result : ndarray
+        The result of the matrix-vector product Ap
+    """
+    # Reshape p_flat to 2D for easier manipulation
+    p = p_flat.reshape((imax, jmax), order='F')
+    
+    # Initialize result array
+    if out is None:
+        result = np.zeros_like(p_flat)
+    else:
+        # Use the provided output array
+        result = out
+        result.fill(0.0)
+        
+    result_2d = result.reshape((imax, jmax), order='F')
+    
+    # Create coefficient arrays
+    east = np.zeros((imax, jmax))
+    west = np.zeros((imax, jmax))
+    north = np.zeros((imax, jmax))
+    south = np.zeros((imax, jmax))
+    diag = np.zeros((imax, jmax))
+    
+    # East coefficients (aE) - For interior cells: i < imax-1
+    east[:-1, :] = rho * d_u[1:imax, :] * dy
+    
+    # West coefficients (aW) - For interior cells: i > 0 
+    west[1:, :] = rho * d_u[1:imax, :] * dy
+    
+    # North coefficients (aN) - For interior cells: j < jmax-1
+    north[:, :-1] = rho * d_v[:, 1:jmax] * dx
+    
+    # South coefficients (aS) - For interior cells: j > 0
+    south[:, 1:] = rho * d_v[:, 1:jmax] * dx
+    # Apply boundary conditions by modifying coefficients
+    
+    # West boundary (i=0): add east coefficient to diagonal
+    diag[0, :] += east[0, :]
+    east[0, :] = 0  # Zero out east coefficient at west boundary
+    
+    # East boundary (i=imax-1): add west coefficient to diagonal
+    diag[imax-1, :] += west[imax-1, :]
+    west[imax-1, :] = 0  # Zero out west coefficient at east boundary
+    
+    # South boundary (j=0): add north coefficient to diagonal
+    diag[:, 0] += north[:, 0]
+    north[:, 0] = 0  # Zero out north coefficient at south boundary
+    
+    # North boundary (j=jmax-1): add south coefficient to diagonal
+    diag[:, jmax-1] += south[:, jmax-1]
+    south[:, jmax-1] = 0  # Zero out south coefficient at north boundary
+    
+    # Diagonal coefficients (aP): sum of all contributions
+    diag += east + west + north + south
+    
+    # Compute the matrix-vector product using vectorized operations
+    
+    # Diagonal contribution: A[i,i] * p[i]
+    result_2d[:] = diag * p
+    
+    # Off-diagonal contributions using vectorized operations with careful boundary handling
+    
+    # East neighbor: -A[i,i+1] * p[i+1]
+    if imax > 1:
+        result_2d[:-1, :] -= east[:-1, :] * p[1:, :]
+    
+    # West neighbor: -A[i,i-1] * p[i-1]
+    if imax > 1:
+        result_2d[1:, :] -= west[1:, :] * p[:-1, :]
+    
+    # North neighbor: -A[i,i+imax] * p[j+1]
+    if jmax > 1:
+        result_2d[:, :-1] -= north[:, :-1] * p[:, 1:]
+    
+    # South neighbor: -A[i,i-imax] * p[j-1]
+    if jmax > 1:
+        result_2d[:, 1:] -= south[:, 1:] * p[:, :-1]
+    
+    # Flatten result and return
+    return result.reshape(p_flat.shape, order='F')
 
 
 def get_coeff_mat_matrix_free(imax, jmax, dx, dy, rho, d_u, d_v):

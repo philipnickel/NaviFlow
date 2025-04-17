@@ -196,9 +196,6 @@ class BaseAlgorithm(ABC):
                 # Top boundary (j=ny-1): Apply zero gradient
                 self.p[:, ny-1] = self.p[:, ny-2]
         
-        # Set reference pressure point to avoid floating pressure field
-        # By convention, we set the pressure at the bottom-left corner to zero
-        self.p[0, 0] = 0.0
     
     def save_profiling_data(self, filename=None, profile_dir='results/profiles'):
         """
