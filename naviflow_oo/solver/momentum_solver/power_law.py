@@ -12,6 +12,26 @@ class PowerLawMomentumSolver(MomentumSolver):
     Uses power-law scheme for convection-diffusion terms.
     """
     
+    def __init__(self):
+        """
+        Initialize the momentum solver.
+        """
+        # Initialize coefficient matrices for u momentum equation
+        self.u_a_e = None
+        self.u_a_w = None
+        self.u_a_n = None
+        self.u_a_s = None
+        self.u_a_p = None
+        self.u_source = None
+        
+        # Initialize coefficient matrices for v momentum equation
+        self.v_a_e = None
+        self.v_a_w = None
+        self.v_a_n = None
+        self.v_a_s = None
+        self.v_a_p = None
+        self.v_source = None
+    
     def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None):
         """
         Solve the u-momentum equation.
@@ -50,6 +70,14 @@ class PowerLawMomentumSolver(MomentumSolver):
         u_star = np.zeros((imax+1, jmax))
         d_u = np.zeros((imax+1, jmax))
         
+        # Initialize coefficient arrays for storage
+        self.u_a_e = np.zeros((imax+1, jmax))
+        self.u_a_w = np.zeros((imax+1, jmax))
+        self.u_a_n = np.zeros((imax+1, jmax))
+        self.u_a_s = np.zeros((imax+1, jmax))
+        self.u_a_p = np.zeros((imax+1, jmax))
+        self.u_source = np.zeros((imax+1, jmax))
+        
         De = mu * dy / dx   # convective coefficients
         Dw = mu * dy / dx
         Dn = mu * dx / dy
@@ -79,6 +107,14 @@ class PowerLawMomentumSolver(MomentumSolver):
         
         pressure_term = (p[i_grid-1, j_grid] - p[i_grid, j_grid]) * dy
         
+        # Store coefficients for residual calculation
+        self.u_a_e[i_grid, j_grid] = aE
+        self.u_a_w[i_grid, j_grid] = aW
+        self.u_a_n[i_grid, j_grid] = aN
+        self.u_a_s[i_grid, j_grid] = aS
+        self.u_a_p[i_grid, j_grid] = aP
+        self.u_source[i_grid, j_grid] = pressure_term
+        
         # Calculate u_star and d_u
         u_star[i_grid, j_grid] = alpha/aP * ((aE*u[i_grid+1, j_grid] + 
                                             aW*u[i_grid-1, j_grid] + 
@@ -103,6 +139,14 @@ class PowerLawMomentumSolver(MomentumSolver):
         aP_bottom = aE_bottom + aW_bottom + aN_bottom + aS_bottom + (Fe_bottom-Fw_bottom) + (Fn_bottom-Fs_bottom)
         d_u[i_bottom, j] = alpha * dy / aP_bottom
         
+        # Store coefficients for bottom boundary
+        self.u_a_e[i_bottom, j] = aE_bottom
+        self.u_a_w[i_bottom, j] = aW_bottom
+        self.u_a_n[i_bottom, j] = aN_bottom
+        self.u_a_s[i_bottom, j] = aS_bottom
+        self.u_a_p[i_bottom, j] = aP_bottom
+        self.u_source[i_bottom, j] = (p[i_bottom-1, j] - p[i_bottom, j]) * dy
+        
         # Top boundary (j=jmax-1) - vectorized
         j = jmax-1
         i_top = np.arange(1, imax)
@@ -117,6 +161,14 @@ class PowerLawMomentumSolver(MomentumSolver):
         aS_top = Ds * A(Fs_top, Ds) + np.maximum(Fs_top, 0)
         aP_top = aE_top + aW_top + aN_top + aS_top + (Fe_top-Fw_top) + (Fn_top-Fs_top)
         d_u[i_top, j] = alpha * dy / aP_top
+        
+        # Store coefficients for top boundary
+        self.u_a_e[i_top, j] = aE_top
+        self.u_a_w[i_top, j] = aW_top
+        self.u_a_n[i_top, j] = aN_top
+        self.u_a_s[i_top, j] = aS_top
+        self.u_a_p[i_top, j] = aP_top
+        self.u_source[i_top, j] = (p[i_top-1, j] - p[i_top, j]) * dy
         
         # Apply boundary conditions
         if boundary_conditions:
@@ -177,6 +229,14 @@ class PowerLawMomentumSolver(MomentumSolver):
         v_star = np.zeros((imax, jmax+1))
         d_v = np.zeros((imax, jmax+1))
         
+        # Initialize coefficient arrays for storage
+        self.v_a_e = np.zeros((imax, jmax+1))
+        self.v_a_w = np.zeros((imax, jmax+1))
+        self.v_a_n = np.zeros((imax, jmax+1))
+        self.v_a_s = np.zeros((imax, jmax+1))
+        self.v_a_p = np.zeros((imax, jmax+1))
+        self.v_source = np.zeros((imax, jmax+1))
+        
         De = mu * dy / dx   # convective coefficients
         Dw = mu * dy / dx
         Dn = mu * dx / dy
@@ -206,6 +266,14 @@ class PowerLawMomentumSolver(MomentumSolver):
         
         pressure_term = (p[i_grid, j_grid-1] - p[i_grid, j_grid]) * dx
         
+        # Store coefficients for residual calculation
+        self.v_a_e[i_grid, j_grid] = aE
+        self.v_a_w[i_grid, j_grid] = aW
+        self.v_a_n[i_grid, j_grid] = aN
+        self.v_a_s[i_grid, j_grid] = aS
+        self.v_a_p[i_grid, j_grid] = aP
+        self.v_source[i_grid, j_grid] = pressure_term
+        
         # Calculate v_star and d_v
         v_star[i_grid, j_grid] = alpha/aP * ((aE*v[i_grid+1, j_grid] + 
                                             aW*v[i_grid-1, j_grid] + 
@@ -230,6 +298,14 @@ class PowerLawMomentumSolver(MomentumSolver):
         aP_left = aE_left + aW_left + aN_left + aS_left + (Fe_left-Fw_left) + (Fn_left-Fs_left)
         d_v[i, j_left] = alpha * dx / aP_left
         
+        # Store coefficients for left boundary
+        self.v_a_e[i, j_left] = aE_left
+        self.v_a_w[i, j_left] = aW_left
+        self.v_a_n[i, j_left] = aN_left
+        self.v_a_s[i, j_left] = aS_left
+        self.v_a_p[i, j_left] = aP_left
+        self.v_source[i, j_left] = (p[i, j_left-1] - p[i, j_left]) * dx
+        
         # Right boundary (i=imax-1) - vectorized
         i = imax-1
         j_right = np.arange(1, jmax)
@@ -244,6 +320,14 @@ class PowerLawMomentumSolver(MomentumSolver):
         aS_right = Ds * A(Fs_right, Ds) + np.maximum(Fs_right, 0)
         aP_right = aE_right + aW_right + aN_right + aS_right + (Fe_right-Fw_right) + (Fn_right-Fs_right)
         d_v[i, j_right] = alpha * dx / aP_right
+        
+        # Store coefficients for right boundary
+        self.v_a_e[i, j_right] = aE_right
+        self.v_a_w[i, j_right] = aW_right
+        self.v_a_n[i, j_right] = aN_right
+        self.v_a_s[i, j_right] = aS_right
+        self.v_a_p[i, j_right] = aP_right
+        self.v_source[i, j_right] = (p[i, j_right-1] - p[i, j_right]) * dx
         
         # Apply boundary conditions
         if boundary_conditions:

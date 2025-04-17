@@ -51,11 +51,12 @@ class SimpleSolver(BaseAlgorithm):
         self.v_old = None  # Store old v values
         self.p_old = None  # Store old p values
         
-        # Coefficient storage for residual calculations
-        self.u_coeffs = None  # x-momentum coefficients
-        self.v_coeffs = None  # y-momentum coefficients
-        self.p_coeffs = None  # pressure equation coefficients
-        
+        # Coefficient storage for relaxed residual calculations
+        self.u_coeffs_relaxed = None # Relaxed x-momentum coefficients (a_p, a_nb, source)
+        self.v_coeffs_relaxed = None # Relaxed y-momentum coefficients (a_p, a_nb, source)
+        # NOTE: Assumes pressure_solver exposes coefficients and source term after solve
+        self.p_coeffs_info = None # Relaxed pressure correction coefficients (a_p, a_nb) and source (mdot)
+
         # Initialize residual histories
         self.x_momentum_residuals = []  # Track x-momentum residuals
         self.y_momentum_residuals = []  # Track y-momentum residuals
@@ -172,6 +173,139 @@ class SimpleSolver(BaseAlgorithm):
         # Return L2 norm of residuals
         return np.sqrt(sum_residual)
     
+    def calculate_relaxed_u_residual(self, u):
+        """
+        Compute L2 norm of the relaxed x-momentum residual.
+        Uses coefficients stored from the momentum solver step.
+        Residual = a_p*u - (sum(a_nb*u_nb) + source)
+        """
+        if self.u_coeffs_relaxed is None:
+            print("Warning: Relaxed U coefficients not available for residual calculation.")
+            # Fallback or initial calculation might be needed here
+            # For now, return a high value or calculate physical residual as fallback
+            return self.calculate_physical_u_residual(u, self.v, self.p) # Fallback
+
+        nx, ny = self.mesh.get_dimensions()
+        sum_squared_residual = 0.0
+        coeffs = self.u_coeffs_relaxed
+
+        # Ensure coeffs are available
+        a_e = coeffs.get('a_e')
+        a_w = coeffs.get('a_w')
+        a_n = coeffs.get('a_n')
+        a_s = coeffs.get('a_s')
+        a_p = coeffs.get('a_p')
+        source = coeffs.get('source')
+
+        if any(c is None for c in [a_e, a_w, a_n, a_s, a_p, source]):
+             raise ValueError("Relaxed U coefficients dictionary is missing expected keys.")
+
+
+        for j in range(1, ny - 1):
+            for i in range(1, nx - 1):
+                # Using stored relaxed coefficients
+                lhs = a_p[i, j] * u[i, j]
+                rhs = (
+                    a_e[i, j] * u[i+1, j] +
+                    a_w[i, j] * u[i-1, j] +
+                    a_n[i, j] * u[i, j+1] +
+                    a_s[i, j] * u[i, j-1] +
+                    source[i, j]
+                )
+                residual = lhs - rhs
+                sum_squared_residual += residual ** 2
+
+        return np.sqrt(sum_squared_residual)
+
+
+    def calculate_relaxed_v_residual(self, v):
+        """
+        Compute L2 norm of the relaxed y-momentum residual.
+        Uses coefficients stored from the momentum solver step.
+        Residual = a_p*v - (sum(a_nb*v_nb) + source)
+        """
+        if self.v_coeffs_relaxed is None:
+            print("Warning: Relaxed V coefficients not available for residual calculation.")
+            # Fallback or initial calculation might be needed here
+            return self.calculate_physical_v_residual(self.u, v, self.p) # Fallback
+
+        nx, ny = self.mesh.get_dimensions()
+        sum_squared_residual = 0.0
+        coeffs = self.v_coeffs_relaxed
+
+        # Ensure coeffs are available
+        a_e = coeffs.get('a_e')
+        a_w = coeffs.get('a_w')
+        a_n = coeffs.get('a_n')
+        a_s = coeffs.get('a_s')
+        a_p = coeffs.get('a_p')
+        source = coeffs.get('source')
+
+        if any(c is None for c in [a_e, a_w, a_n, a_s, a_p, source]):
+             raise ValueError("Relaxed V coefficients dictionary is missing expected keys.")
+
+
+        for j in range(1, ny - 1):
+            for i in range(1, nx - 1):
+                # Using stored relaxed coefficients
+                lhs = a_p[i, j] * v[i, j]
+                rhs = (
+                    a_e[i, j] * v[i+1, j] +
+                    a_w[i, j] * v[i-1, j] +
+                    a_n[i, j] * v[i, j+1] +
+                    a_s[i, j] * v[i, j-1] +
+                    source[i, j]
+                )
+                residual = lhs - rhs
+                sum_squared_residual += residual ** 2
+
+        return np.sqrt(sum_squared_residual)
+
+    def calculate_pressure_correction_residual(self, p_prime):
+        """
+        Calculate the L2 norm of the pressure correction equation residual.
+        Residual = A_p * pc - b_p
+        Requires coefficients (A_p) and source term (b_p, mass imbalance)
+        from the pressure_solver step.
+        """
+        if self.p_coeffs_info is None:
+            print("Warning: Pressure correction coefficients not available for residual calculation.")
+            # Fallback to continuity residual if coeffs aren't available
+            return self.calculate_continuity_residual(self.u, self.v) # Fallback
+
+        nx, ny = self.mesh.get_dimensions()
+        sum_squared_residual = 0.0
+        coeffs = self.p_coeffs_info
+
+        # Ensure coeffs and source are available
+        # NOTE: Assumes pressure_solver stores these after its solve method
+        #       The actual names ('p_a_e', 'p_source') might differ based on PressureSolver implementation.
+        a_e = coeffs.get('p_a_e')
+        a_w = coeffs.get('p_a_w')
+        a_n = coeffs.get('p_a_n')
+        a_s = coeffs.get('p_a_s')
+        a_p = coeffs.get('p_a_p') # Or a_p0 like in Rust? Needs clarification.
+        source = coeffs.get('p_source') # Mass imbalance (mdot)
+
+        if any(c is None for c in [a_e, a_w, a_n, a_s, a_p, source]):
+            raise ValueError("Pressure correction coefficients/source dictionary is missing expected keys.")
+
+        for j in range(1, ny - 1):
+            for i in range(1, nx - 1):
+                 # Calculate A_p * pc term
+                 ap_pc = (
+                    a_e[i, j] * p_prime[i+1, j] +
+                    a_w[i, j] * p_prime[i-1, j] +
+                    a_n[i, j] * p_prime[i, j+1] +
+                    a_s[i, j] * p_prime[i, j-1] +
+                    a_p[i, j] * p_prime[i, j]
+                 )
+                 # Calculate residual: A_p * pc - b_p
+                 residual = ap_pc - source[i, j]
+                 sum_squared_residual += residual ** 2
+
+        return np.sqrt(sum_squared_residual)
+
     def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
               track_infinity_norm=False, infinity_norm_interval=10, use_l2_norm=False):
         self.profiler.start()
@@ -185,7 +319,7 @@ class SimpleSolver(BaseAlgorithm):
 
         iteration = 1
         u_res = v_res = p_res = total_res = 1e6
-        print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u} with physical (α=1) residuals.")
+        print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u} with relaxed residuals.") # Updated print message
 
         try:
             while iteration <= max_iterations and max(u_res, v_res, p_res) > tolerance:
@@ -198,14 +332,56 @@ class SimpleSolver(BaseAlgorithm):
                     relaxation_factor=self.alpha_u,
                     boundary_conditions=self.bc_manager
                 )
+                # Store relaxed coefficients for U residual calculation
+                # NOTE: Assumes momentum_solver stores these attributes after solve_u_momentum
+                self.u_coeffs_relaxed = {
+                    'a_e': self.momentum_solver.u_a_e.copy(),
+                    'a_w': self.momentum_solver.u_a_w.copy(),
+                    'a_n': self.momentum_solver.u_a_n.copy(),
+                    'a_s': self.momentum_solver.u_a_s.copy(),
+                    'a_p': self.momentum_solver.u_a_p.copy(),
+                    'source': self.momentum_solver.u_source.copy()
+                }
+
 
                 v_star, d_v = self.momentum_solver.solve_v_momentum(
                     self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
                     boundary_conditions=self.bc_manager
                 )
+                # Store relaxed coefficients for V residual calculation
+                # NOTE: Assumes momentum_solver stores these attributes after solve_v_momentum
+                self.v_coeffs_relaxed = {
+                    'a_e': self.momentum_solver.v_a_e.copy(),
+                    'a_w': self.momentum_solver.v_a_w.copy(),
+                    'a_n': self.momentum_solver.v_a_n.copy(),
+                    'a_s': self.momentum_solver.v_a_s.copy(),
+                    'a_p': self.momentum_solver.v_a_p.copy(),
+                    'source': self.momentum_solver.v_source.copy()
+                }
 
                 p_prime = self.pressure_solver.solve(self.mesh, u_star, v_star, d_u, d_v, p_star)
+
+                # Store pressure correction coefficients/source for residual calculation
+                # !!! IMPORTANT !!!
+                # This assumes the pressure_solver instance now has attributes like
+                # p_a_e, p_a_w, ..., p_a_p, p_source available after calling solve().
+                # The specific attribute names might need adjustment based on the
+                # actual PressureSolver implementation.
+                # If these are not exposed, the PressureSolver class needs modification.
+                try:
+                    self.p_coeffs_info = {
+                        'p_a_e': self.pressure_solver.p_a_e.copy(),
+                        'p_a_w': self.pressure_solver.p_a_w.copy(),
+                        'p_a_n': self.pressure_solver.p_a_n.copy(),
+                        'p_a_s': self.pressure_solver.p_a_s.copy(),
+                        'p_a_p': self.pressure_solver.p_a_p.copy(), # Check if this should be a_p0
+                        'p_source': self.pressure_solver.p_source.copy() # This should be the mass imbalance term
+                    }
+                except AttributeError:
+                    print("Warning: Pressure solver did not expose coefficients/source. Cannot calculate pressure correction residual.")
+                    self.p_coeffs_info = None # Ensure fallback works
+
                 self.p = p_star + self.alpha_p * p_prime
                 self._enforce_pressure_boundary_conditions()
                 p_star = self.p.copy()
@@ -214,10 +390,11 @@ class SimpleSolver(BaseAlgorithm):
                     self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
                 )
 
-                # ✅ Use α = 1.0 to compute physical residuals
-                u_res = self.calculate_physical_u_residual(self.u, self.v, self.p)
-                v_res = self.calculate_physical_v_residual(self.u, self.v, self.p)
-                p_res = self.calculate_continuity_residual(self.u, self.v)
+                # Calculate residuals based on relaxed coefficients / pressure correction eq.
+                u_res = self.calculate_relaxed_u_residual(self.u)
+                v_res = self.calculate_relaxed_v_residual(self.v)
+                # Pass p_prime, the variable solved for in the pressure correction equation
+                p_res = self.calculate_pressure_correction_residual(p_prime)
 
                 self.x_momentum_residuals.append(u_res)
                 self.y_momentum_residuals.append(v_res)

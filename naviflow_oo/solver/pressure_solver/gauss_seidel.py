@@ -37,6 +37,14 @@ class GaussSeidelSolver(PressureSolver):
         self.inner_iterations_history = []
         self.total_inner_iterations = 0
         self.convergence_rates = []
+        
+        # Initialize coefficient matrices for pressure correction equation
+        self.p_a_e = None
+        self.p_a_w = None
+        self.p_a_n = None
+        self.p_a_s = None
+        self.p_a_p = None
+        self.p_source = None
     
     def solve(self, mesh=None, u_star=None, v_star=None, d_u=None, d_v=None, p_star=None, 
               p=None, b=None, nx=None, ny=None, dx=None, dy=None, rho=1.0, num_iterations=None, 
@@ -109,6 +117,16 @@ class GaussSeidelSolver(PressureSolver):
         
         # Pre-compute coefficient arrays
         aE, aW, aN, aS, aP = self._precompute_coefficients(nx, ny, dx, dy, rho, d_u, d_v)
+        
+        # Store coefficient arrays for residual calculation
+        self.p_a_e = aE.copy()
+        self.p_a_w = aW.copy()
+        self.p_a_n = aN.copy()
+        self.p_a_s = aS.copy()
+        self.p_a_p = aP.copy()
+        
+        # Store RHS (mass imbalance) for residual calculation
+        self.p_source = b_2d.copy()
         
         # Fix reference pressure at (0,0)
         p_2d[0, 0] = 0.0
