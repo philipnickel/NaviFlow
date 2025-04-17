@@ -12,7 +12,7 @@ from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
 from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_oo.postprocessing.visualization import plot_final_residuals, plot_u_v_continuity_residuals
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
@@ -46,7 +46,7 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # Use Gauss-Seidel solver for pressure correction
 pressure_solver = GaussSeidelSolver(
     tolerance=1e-3,  # Relaxed tolerance for inner iterations
-    max_iterations=1000,  # Fewer iterations per SIMPLE iteration
+    max_iterations=3,  # Fewer iterations per SIMPLE iteration
     omega=0.86, 
 )
 momentum_solver = PowerLawMomentumSolver()
@@ -102,3 +102,12 @@ plot_final_residuals(
     show=False
 )
 
+# 12. Visualize residual history
+plot_u_v_continuity_residuals(
+    algorithm.x_momentum_residuals, 
+    algorithm.y_momentum_residuals, 
+    algorithm.continuity_residuals,
+    title=f'Residual History (Re={reynolds})',
+    filename=os.path.join(results_dir, f'residual_history_Re{reynolds}.pdf'),
+    show=False
+)

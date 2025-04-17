@@ -21,11 +21,11 @@ from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residua
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**9-1, 2**9-1 # Grid size
-reynolds = 10000            # Reynolds number
-alpha_p = 0.1              # Pressure relaxation factor
-alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 25000     # Maximum number of iterations
+nx, ny = 2**7-1, 2**7-1 # Grid size
+reynolds = 100            # Reynolds number
+alpha_p = 1#0.1              # Pressure relaxation factor
+alpha_u = 1#0.8              # Velocity relaxation factor
+max_iterations = 5000     # Maximum number of iterations
 
 h = 1/nx 
 disc_order = 1
@@ -52,7 +52,7 @@ smoother = GaussSeidelSolver(omega=0.87) # somehow 1.3 is good
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=100,    # Maximum V-cycles
+    max_iterations=10,    # Maximum V-cycles
     tolerance=pressure_tolerance,         # Overall tolerance
     pre_smoothing=3,        # Pre-smoothing steps
     post_smoothing=4,       # Post-smoothing steps
