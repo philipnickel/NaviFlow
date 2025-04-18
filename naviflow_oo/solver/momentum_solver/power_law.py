@@ -185,10 +185,12 @@ class PowerLawMomentumSolver(MomentumSolver):
             u_star, _ = bc_manager.apply_velocity_boundary_conditions(u_star, v.copy(), imax, jmax)
         else:
             # Default: initialize all boundaries to zero (wall condition)
+            """
             u_star[0, :] = 0.0                      # left wall
             u_star[imax, :] = 0.0                   # right wall
             u_star[:, 0] = 0.0                      # bottom wall
             u_star[:, jmax-1] = 0.0                 # top wall
+            """
         
         return u_star, d_u
     

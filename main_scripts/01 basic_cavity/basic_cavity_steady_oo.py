@@ -24,7 +24,7 @@ nx, ny = 2**5-1, 2**5-1 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 1500     # Maximum number of iterations
+max_iterations = 300     # Maximum number of iterations
 tolerance = 1e-4
 
 
