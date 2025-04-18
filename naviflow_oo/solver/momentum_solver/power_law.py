@@ -12,7 +12,7 @@ class PowerLawMomentumSolver(MomentumSolver):
     Uses power-law scheme for convection-diffusion terms.
     """
     
-    def __init__(self):
+    def __init__(self, n_jacobi_sweeps=1):
         """
         Initialize the momentum solver.
         """
@@ -31,7 +31,8 @@ class PowerLawMomentumSolver(MomentumSolver):
         self.v_a_s = None
         self.v_a_p = None
         self.v_source = None
-    
+        self.n_jacobi_sweeps = n_jacobi_sweeps
+
     def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None):
         """
         Solve the u-momentum equation.
@@ -116,12 +117,19 @@ class PowerLawMomentumSolver(MomentumSolver):
         self.u_source[i_grid, j_grid] = pressure_term
         
         # Calculate u_star and d_u
-        u_star[i_grid, j_grid] = alpha/aP * ((aE*u[i_grid+1, j_grid] + 
-                                            aW*u[i_grid-1, j_grid] + 
-                                            aN*u[i_grid, j_grid+1] + 
-                                            aS*u[i_grid, j_grid-1]) + 
-                                            pressure_term) + (1-alpha)*u[i_grid, j_grid]
-        
+        u_star_unrelaxed = u.copy()
+
+        for _ in range(self.n_jacobi_sweeps):
+            u_old = u_star_unrelaxed.copy()
+            u_star_unrelaxed[i_grid, j_grid] = (
+                (aE * u_old[i_grid + 1, j_grid] +
+                aW * u_old[i_grid - 1, j_grid] +
+                aN * u_old[i_grid, j_grid + 1] +
+                aS * u_old[i_grid, j_grid - 1] + pressure_term) / aP
+            )
+
+    
+        u_star[i_grid, j_grid] = alpha * u_star_unrelaxed[i_grid, j_grid] + (1-alpha)*u[i_grid, j_grid]
         d_u[i_grid, j_grid] = alpha * dy / aP
         
         # Bottom boundary (j=0) - can also be vectorized
@@ -276,13 +284,17 @@ class PowerLawMomentumSolver(MomentumSolver):
         self.v_a_p[i_grid, j_grid] = aP
         self.v_source[i_grid, j_grid] = pressure_term
         
-        # Calculate v_star and d_v
-        v_star[i_grid, j_grid] = alpha/aP * ((aE*v[i_grid+1, j_grid] + 
-                                            aW*v[i_grid-1, j_grid] + 
-                                            aN*v[i_grid, j_grid+1] + 
-                                            aS*v[i_grid, j_grid-1]) + 
-                                            pressure_term) + (1-alpha)*v[i_grid, j_grid]
-        
+        v_star_unrelaxed = v.copy()
+        for _ in range(self.n_jacobi_sweeps):
+            v_old = v_star_unrelaxed.copy()
+            v_star_unrelaxed[i_grid, j_grid] = (
+                (aE * v_old[i_grid + 1, j_grid] +
+                aW * v_old[i_grid - 1, j_grid] +
+                aN * v_old[i_grid, j_grid + 1] +
+                aS * v_old[i_grid, j_grid - 1] + pressure_term) / aP
+            )
+
+        v_star[i_grid, j_grid] = alpha * v_star_unrelaxed[i_grid, j_grid] + (1-alpha)*v[i_grid, j_grid]
         d_v[i_grid, j_grid] = alpha * dx / aP
         
         # Left boundary (i=0) - vectorized
