@@ -9,6 +9,7 @@ from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
 from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error, calculate_l2_norm_error
 from ...postprocessing.visualization import plot_final_residuals, plot_live_residuals
+from ..pressure_solver.helpers.rhs_construction import get_rhs
 
 class SimpleSolver(BaseAlgorithm):
     """
@@ -51,11 +52,11 @@ class SimpleSolver(BaseAlgorithm):
         self.v_old = None  # Store old v values
         self.p_old = None  # Store old p values
         
-        # Coefficient storage for relaxed residual calculations
+        # Coefficient storage for relaxed momentum residual calculations
         self.u_coeffs_relaxed = None # Relaxed x-momentum coefficients (a_p, a_nb, source)
         self.v_coeffs_relaxed = None # Relaxed y-momentum coefficients (a_p, a_nb, source)
-        # NOTE: Assumes pressure_solver exposes coefficients and source term after solve
-        self.p_coeffs_info = None # Relaxed pressure correction coefficients (a_p, a_nb) and source (mdot)
+        # NOTE: p_coeffs_info removed, pressure coeffs calculated on-the-fly for residual
+        # self.p_coeffs_info = None 
 
         # Initialize residual histories
         self.x_momentum_residuals = []  # Track x-momentum residuals
@@ -261,47 +262,75 @@ class SimpleSolver(BaseAlgorithm):
 
         return np.sqrt(sum_squared_residual)
 
-    def calculate_pressure_correction_residual(self, p_prime):
+    def calculate_pressure_correction_residual(self):
         """
-        Calculate the L2 norm of the pressure correction equation residual.
-        Residual = A_p * pc - b_p
-        Requires coefficients (A_p) and source term (b_p, mass imbalance)
-        from the pressure_solver step.
+        Calculate the L2 norm of the pressure correction equation residual (A*pc - b).
+        Coefficients (A) and source term (b) are computed on-the-fly using 
+        stored intermediate fields (u*, v*, d_u, d_v) and the current p_prime.
         """
-        if self.p_coeffs_info is None:
-            print("Warning: Pressure correction coefficients not available for residual calculation.")
-            # Fallback to continuity residual if coeffs aren't available
-            return self.calculate_continuity_residual(self.u, self.v) # Fallback
-
         nx, ny = self.mesh.get_dimensions()
+        dx, dy = self.mesh.get_cell_sizes()
+        rho = self.fluid.get_density()
+        
+        # Retrieve stored fields needed for calculation
+        u_star = self._tmp_u_star
+        v_star = self._tmp_v_star
+        d_u = self._tmp_d_u
+        d_v = self._tmp_d_v
+        p_prime = self._tmp_p_prime
+
+        # --- Calculate Pressure Coefficients (A) --- 
+        # Adapted from GaussSeidelSolver._precompute_coefficients
+        aE = np.zeros((nx, ny))
+        aW = np.zeros((nx, ny))
+        aN = np.zeros((nx, ny))
+        aS = np.zeros((nx, ny))
+        aP = np.zeros((nx, ny))
+
+        # Off-diagonal coefficients for interior cells
+        aE[:-1, :] = rho * d_u[1:nx, :] * dy
+        aW[1:, :] = rho * d_u[1:nx, :] * dy
+        aN[:, :-1] = rho * d_v[:, 1:ny] * dx
+        aS[:, 1:] = rho * d_v[:, 1:ny] * dx
+        
+        # Apply zero-gradient boundary conditions implicitly by adding to diagonal
+        # West boundary (i=0)
+        aP[0, :] += aE[0, :]
+        # East boundary (i=nx-1)
+        aP[nx-1, :] += aW[nx-1, :]
+        # South boundary (j=0)
+        aP[:, 0] += aN[:, 0]
+        # North boundary (j=ny-1)
+        aP[:, ny-1] += aS[:, ny-1]
+        
+        # Diagonal term is sum of all coefficients (including boundary adjustments)
+        aP += aE + aW + aN + aS
+        
+        # --- Calculate Source Term (b = mdot) --- 
+        source_b = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
+        # Reshape the 1D source term to 2D for easier indexing
+        source_b_2d = source_b.reshape((nx, ny), order='F')
+
+        # --- Calculate Residual Norm ||A*pc - b||_2 --- 
         sum_squared_residual = 0.0
-        coeffs = self.p_coeffs_info
-
-        # Ensure coeffs and source are available
-        # NOTE: Assumes pressure_solver stores these after its solve method
-        #       The actual names ('p_a_e', 'p_source') might differ based on PressureSolver implementation.
-        a_e = coeffs.get('p_a_e')
-        a_w = coeffs.get('p_a_w')
-        a_n = coeffs.get('p_a_n')
-        a_s = coeffs.get('p_a_s')
-        a_p = coeffs.get('p_a_p') # Or a_p0 like in Rust? Needs clarification.
-        source = coeffs.get('p_source') # Mass imbalance (mdot)
-
-        if any(c is None for c in [a_e, a_w, a_n, a_s, a_p, source]):
-            raise ValueError("Pressure correction coefficients/source dictionary is missing expected keys.")
-
         for j in range(1, ny - 1):
             for i in range(1, nx - 1):
-                 # Calculate A_p * pc term
+                 # Calculate A_p * pc term using calculated coefficients
                  ap_pc = (
-                    a_e[i, j] * p_prime[i+1, j] +
-                    a_w[i, j] * p_prime[i-1, j] +
-                    a_n[i, j] * p_prime[i, j+1] +
-                    a_s[i, j] * p_prime[i, j-1] +
-                    a_p[i, j] * p_prime[i, j]
+                    aE[i, j] * p_prime[i+1, j] +
+                    aW[i, j] * p_prime[i-1, j] +
+                    aN[i, j] * p_prime[i, j+1] +
+                    aS[i, j] * p_prime[i, j-1] +
+                    aP[i, j] * p_prime[i, j]
                  )
-                 # Calculate residual: A_p * pc - b_p
-                 residual = ap_pc - source[i, j]
+                 # Calculate residual: A*pc - b
+                 # Note: The sign convention might differ from solver implementation depending on
+                 # how RHS is defined (e.g., mdot or -mdot). get_rhs returns -mdot.
+                 # The residual here is A*p - b, where b = get_rhs = -mdot.
+                 # In Rust, source_p is mdot, and residual is A*p - source_p.
+                 # Let's match Rust: calculate A*p - mdot = A*p + b
+                 # Use the reshaped 2D source term
+                 residual = ap_pc + source_b_2d[i, j]
                  sum_squared_residual += residual ** 2
 
         return np.sqrt(sum_squared_residual)
@@ -318,11 +347,15 @@ class SimpleSolver(BaseAlgorithm):
         self.infinity_norm_history = []
 
         iteration = 1
-        u_res = v_res = p_res = total_res = 1e6
-        print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u} with relaxed residuals.") # Updated print message
+        # Initialize absolute residuals for the first iteration check and convergence
+        u_res_abs = v_res_abs = p_res_abs = 1e6 
+        # Use absolute residuals for the loop condition check and reporting
+        total_res_check = max(u_res_abs, v_res_abs, p_res_abs) 
+        
+        print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u} with absolute relaxed residuals.") # Updated print message
 
         try:
-            while iteration <= max_iterations and max(u_res, v_res, p_res) > tolerance:
+            while iteration <= max_iterations and total_res_check > tolerance:
                 self.u_old = self.u.copy()
                 self.v_old = self.v.copy()
                 self.p_old = self.p.copy()
@@ -362,25 +395,12 @@ class SimpleSolver(BaseAlgorithm):
 
                 p_prime = self.pressure_solver.solve(self.mesh, u_star, v_star, d_u, d_v, p_star)
 
-                # Store pressure correction coefficients/source for residual calculation
-                # !!! IMPORTANT !!!
-                # This assumes the pressure_solver instance now has attributes like
-                # p_a_e, p_a_w, ..., p_a_p, p_source available after calling solve().
-                # The specific attribute names might need adjustment based on the
-                # actual PressureSolver implementation.
-                # If these are not exposed, the PressureSolver class needs modification.
-                try:
-                    self.p_coeffs_info = {
-                        'p_a_e': self.pressure_solver.p_a_e.copy(),
-                        'p_a_w': self.pressure_solver.p_a_w.copy(),
-                        'p_a_n': self.pressure_solver.p_a_n.copy(),
-                        'p_a_s': self.pressure_solver.p_a_s.copy(),
-                        'p_a_p': self.pressure_solver.p_a_p.copy(), # Check if this should be a_p0
-                        'p_source': self.pressure_solver.p_source.copy() # This should be the mass imbalance term
-                    }
-                except AttributeError:
-                    print("Warning: Pressure solver did not expose coefficients/source. Cannot calculate pressure correction residual.")
-                    self.p_coeffs_info = None # Ensure fallback works
+                # Store intermediate fields needed for pressure residual calculation
+                self._tmp_u_star = u_star
+                self._tmp_v_star = v_star
+                self._tmp_d_u = d_u
+                self._tmp_d_v = d_v
+                self._tmp_p_prime = p_prime # Store current p_prime
 
                 self.p = p_star + self.alpha_p * p_prime
                 self._enforce_pressure_boundary_conditions()
@@ -390,22 +410,27 @@ class SimpleSolver(BaseAlgorithm):
                     self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
                 )
 
-                # Calculate residuals based on relaxed coefficients / pressure correction eq.
-                u_res = self.calculate_relaxed_u_residual(self.u)
-                v_res = self.calculate_relaxed_v_residual(self.v)
+                # Calculate absolute residuals based on relaxed coefficients / pressure correction eq.
+                u_res_abs = self.calculate_relaxed_u_residual(self.u)
+                v_res_abs = self.calculate_relaxed_v_residual(self.v)
                 # Pass p_prime, the variable solved for in the pressure correction equation
-                p_res = self.calculate_pressure_correction_residual(p_prime)
+                p_res_abs = self.calculate_pressure_correction_residual() # No args needed now
 
-                self.x_momentum_residuals.append(u_res)
-                self.y_momentum_residuals.append(v_res)
-                self.continuity_residuals.append(p_res)
+                # Store absolute residuals
+                self.x_momentum_residuals.append(u_res_abs)
+                self.y_momentum_residuals.append(v_res_abs)
+                self.continuity_residuals.append(p_res_abs) # Continuity residual is represented by pressure correction
 
-                total_res = max(u_res, v_res, p_res)
-                self.residual_history.append(total_res)
-                self.momentum_residual_history.append(max(u_res, v_res))
-                self.pressure_residual_history.append(p_res)
+                # Total absolute residual for convergence check and history
+                total_res_abs = max(u_res_abs, v_res_abs, p_res_abs) 
+                self.residual_history.append(total_res_abs)
+                self.momentum_residual_history.append(max(u_res_abs, v_res_abs))
+                self.pressure_residual_history.append(p_res_abs) # Store absolute pressure residual
 
-                if track_infinity_norm and (iteration % infinity_norm_interval == 0 or total_res < tolerance):
+                # Update the value used for the loop condition check
+                total_res_check = total_res_abs
+
+                if track_infinity_norm and (iteration % infinity_norm_interval == 0 or total_res_check < tolerance):
                     try:
                         inf_err = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
                         l2_err = calculate_l2_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
@@ -414,18 +439,22 @@ class SimpleSolver(BaseAlgorithm):
                     except Exception as e:
                         print(f"Error calc failed: {e}")
 
-                print(f"[{iteration}] Residuals -> u: {u_res:.3e}, v: {v_res:.3e}, continuity: {p_res:.3e}")
+                # Print absolute residuals
+                print(f"[{iteration}] Absolute Residuals -> u: {u_res_abs:.3e}, v: {v_res_abs:.3e}, continuity: {p_res_abs:.3e}")
                 iteration += 1
 
         except KeyboardInterrupt:
             print("Interrupted by user.")
 
+        # Ensure total_res_check holds the last calculated absolute residual for final reporting
+        final_residual_to_report = total_res_check
+
         self.profiler.set_iterations(iteration - 1)
         self.profiler.set_convergence_info(
             tolerance=tolerance,
-            final_residual=total_res,
-            residual_history=self.residual_history,
-            converged=(total_res < tolerance)
+            final_residual=final_residual_to_report, # Store the final absolute residual
+            residual_history=self.residual_history, # Already contains absolute residuals
+            converged=(final_residual_to_report < tolerance)
         )
 
         if hasattr(self.pressure_solver, 'get_solver_info'):
