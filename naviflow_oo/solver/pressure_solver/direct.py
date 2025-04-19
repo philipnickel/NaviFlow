@@ -29,6 +29,14 @@ class DirectPressureSolver(PressureSolver):
         self.mesh = None
         self.bc_manager = None
         self.p = None
+
+        # Initialize coefficient matrices for pressure correction equation
+        self.p_a_e = None
+        self.p_a_w = None
+        self.p_a_n = None
+        self.p_a_s = None
+        self.p_a_p = None
+        self.p_source = None
     
     def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
         """

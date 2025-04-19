@@ -10,7 +10,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
-from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals, plot_u_v_continuity_residuals
 # Create results directory
@@ -25,7 +25,7 @@ nx, ny = 63, 63          # Grid size
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.8            # Velocity relaxation factor
-max_iterations = 500     # Maximum number of iterations
+max_iterations = 200     # Maximum number of iterations
 tolerance = 1e-20         # Convergence tolerance
 
 # 2. Create mesh
@@ -49,7 +49,7 @@ pressure_solver = GaussSeidelSolver(
     max_iterations=300,  # Fewer iterations per SIMPLE iteration
     omega=0.86, 
 )
-momentum_solver = PowerLawMomentumSolver()
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=20)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm

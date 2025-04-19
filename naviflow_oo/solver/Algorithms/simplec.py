@@ -134,6 +134,8 @@ class SimplecSolver(BaseAlgorithm):
                 d_v=d_v_simplec,  # Use SIMPLEC modified coefficient
                 p_star=p_star
             )
+
+            self._enforce_pressure_boundary_conditions()
             
             # Apply pressure correction smoothing
             p_prime_smooth = np.zeros_like(p_prime)

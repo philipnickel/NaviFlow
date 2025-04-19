@@ -110,6 +110,13 @@ class MultiGridSolver(PressureSolver):
         self.presmooth_diagnostics = {}
         self.current_iteration = 0
         self.rho = 1.0 # Assume default, can be updated later if needed
+           # Initialize coefficient matrices for pressure correction equation
+        self.p_a_e = None
+        self.p_a_w = None
+        self.p_a_n = None
+        self.p_a_s = None
+        self.p_a_p = None
+        self.p_source = None
 
     def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
         """

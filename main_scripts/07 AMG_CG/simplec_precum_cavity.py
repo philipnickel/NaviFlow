@@ -18,7 +18,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simplec import SimplecSolver
 from naviflow_oo.solver.pressure_solver.preconditioned_cg_solver import PreconditionedCGSolver
-from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
@@ -28,11 +28,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 31, 31           # Grid size (smaller for quick testing)
+nx, ny = 2**6-1, 2**6-1           # Grid size (smaller for quick testing)
 reynolds = 100           # Reynolds number
-alpha_p = 0.3             # Pressure relaxation factor
-alpha_u = 0.7             # Velocity relaxation factor
-max_iterations = 100000     
+alpha_p = 0.1             # Pressure relaxation factor
+alpha_u = 0.8             # Velocity relaxation factor
+max_iterations = 300     
 tolerance = 1e-4          # Convergence tolerance
 
 # 2. Create mesh
@@ -59,7 +59,7 @@ pressure_solver = PreconditionedCGSolver(
     postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
     cycle_type='V'
 )
-momentum_solver = StandardMomentumSolver()
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -99,7 +99,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Preconditioned CG Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'SIMPLEC_cavity_Re{reynolds}_preconditioned_cg_results.pdf'),
-    show=False
+    show=True
 )
 
 # 11. Visualize final residuals

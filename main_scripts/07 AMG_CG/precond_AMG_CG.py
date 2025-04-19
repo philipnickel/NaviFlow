@@ -18,8 +18,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.preconditioned_cg_solver import PreconditionedCGSolver
-from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
-from naviflow_oo.solver.momentum_solver.tvd import TVDMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals, plot_u_v_continuity_residuals
 # Create results directory
@@ -30,12 +29,12 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 2**7-1, 2**7-1 # Grid size
-reynolds = 1000             # Reynolds number
+nx, ny = 2**6-1, 2**6-1 # Grid size
+reynolds = 100             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 5000# Maximum number of iterations
-tolerance = 1e-7
+max_iterations = 300     # Maximum number of iterations
+tolerance = 1e-20         # Convergence tolerance
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
@@ -59,15 +58,14 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Preconditioned CG solver for pressure correction
 pressure_solver = PreconditionedCGSolver(
-    tolerance=1e-2,#pressure_tolerance,        # Even tighter tolerance for pressure solver
+    tolerance=pressure_tolerance,        # Even tighter tolerance for pressure solver
     max_iterations=10000,   # More iterations allowed
     smoother='gauss_seidel',
     presmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 1}),
     postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 1}),
     cycle_type='V'         # Use V-cycle for better stability
 )
-momentum_solver = PowerLawMomentumSolver()
-#momentum_solver = TVDMomentumSolver()
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -89,7 +87,11 @@ algorithm.set_boundary_condition('right', 'wall')
 
 # 7. Solve the problem
 print("Starting simulation with SIMPLE algorithm and Preconditioned CG solver...")
-result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, 
+                        track_infinity_norm=True, infinity_norm_interval=5, 
+                        save_profile=True, profile_dir=results_dir, 
+                        use_l2_norm=True
+                        )  # Plot every iteration
 
 # End timing
 end_time = time.time()

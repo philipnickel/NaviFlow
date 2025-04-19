@@ -144,12 +144,12 @@ class SimplerSolver(BaseAlgorithm):
             p_prime = self.pressure_solver.solve(
                 self.mesh, u_star, v_star, d_u, d_v, p_star
             )
-            
+
+            self._enforce_pressure_boundary_conditions()
             # Update pressure with relaxation
             self.p = p_star + self.alpha_p * p_prime
             
             # Apply pressure boundary conditions
-            self._enforce_pressure_boundary_conditions()
             
             # Calculate pressure residual
             pressure_res = np.max(np.abs(self.p - p_old))

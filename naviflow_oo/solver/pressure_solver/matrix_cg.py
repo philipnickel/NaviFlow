@@ -5,7 +5,7 @@ This solver uses the conjugate gradient method to solve the pressure correction 
 """
 
 import numpy as np
-from scipy.sparse.linalg import cg, LinearOperator
+from scipy.sparse.linalg import cg, LinearOperator, spilu
 
 from .base_pressure_solver import PressureSolver
 from .helpers.rhs_construction import get_rhs
@@ -18,7 +18,7 @@ class ConjugateGradientSolver(PressureSolver):
     This solver uses the conjugate gradient method to solve the pressure correction equation.
     """
     
-    def __init__(self, tolerance=1e-7, max_iterations=1000):
+    def __init__(self, tolerance=1e-7, max_iterations=1000, use_preconditioner=False):
         """
         Initialize the conjugate gradient solver.
         
@@ -28,8 +28,11 @@ class ConjugateGradientSolver(PressureSolver):
             Convergence tolerance for the conjugate gradient method
         max_iterations : int, optional
             Maximum number of iterations for the conjugate gradient method
+        use_preconditioner : bool, optional
+            Whether to use ILU preconditioning for faster convergence
         """
         super().__init__(tolerance=tolerance, max_iterations=max_iterations)
+        self.use_preconditioner = use_preconditioner
         self.residual_history = []
         self.inner_iterations = []
     
@@ -66,18 +69,10 @@ class ConjugateGradientSolver(PressureSolver):
         # Initial guess
         x0 = np.zeros_like(b)
         
-        # Fix reference pressure at (0,0)
-        b[0] = 0.0
-        
         # Construct the coefficient matrix explicitly
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
         
-        # Fix reference pressure at (0,0) - use lil_matrix for efficient modification
-        # 
-        A_lil = A.tolil()
-        A_lil[0, :] = 0
-        A_lil[0, 0] = 1
-        A = A_lil.tocsr()
+    
         #Create a callback function to track convergence
         def callback(xk):
             # Compute residual: ||Ax - b||
@@ -86,11 +81,18 @@ class ConjugateGradientSolver(PressureSolver):
             self.residual_history.append(res_norm)
             return False  # Continue iteration
         
-        # Use conjugate gradient without preconditioner
+        # Use preconditioner if requested
+        M = None
+        if self.use_preconditioner:
+            ilu = spilu(A.tocsc())
+            M = LinearOperator(A.shape, ilu.solve)
+        
+        # Use conjugate gradient
         p_prime_flat, info = cg(
             A,
             b,
             x0=x0,
+            M=M,
             atol=self.tolerance,
             maxiter=self.max_iterations,
             callback=callback
@@ -126,9 +128,10 @@ class ConjugateGradientSolver(PressureSolver):
         }
         
         # Add solver-specific information
+        preconditioner_type = 'ilu' if self.use_preconditioner else 'none'
         info['solver_specific'] = {
             'method': 'conjugate_gradient',
-            'preconditioner': 'none'
+            'preconditioner': preconditioner_type
         }
         
         return info 

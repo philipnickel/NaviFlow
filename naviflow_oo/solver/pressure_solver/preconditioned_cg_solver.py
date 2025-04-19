@@ -94,15 +94,8 @@ class PreconditionedCGSolver(PressureSolver):
         # Setup PyAMG solver as preconditioner
         ml = pyamg.smoothed_aggregation_solver(
             A,
-            B=None,
-            strength='evolution',  # More robust strength measure
-            aggregate='standard',
-            smooth=('jacobi', {'omega': 4.0/3.0}),
-            presmoother=('gauss_seidel', {'sweep': 'forward'}),
-            postsmoother=('gauss_seidel', {'sweep': 'backward'}),
-            max_levels=10,
-            max_coarse=10,
-            keep=False
+            presmoother=self.presmoother,
+            postsmoother=self.postsmoother
         )
         
         # Create a preconditioner function using PyAMG's multigrid cycle
@@ -139,8 +132,6 @@ class PreconditionedCGSolver(PressureSolver):
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
-        # Enforce boundary conditions
-        self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
         return p_prime
     

@@ -3,7 +3,7 @@ from scipy import sparse
 from scipy.sparse.linalg import svds
 
 
-def get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v):
+def get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v, pin_pressure=True):
     """
     Construct the coefficient matrix for the pressure correction equation.
     
@@ -17,6 +17,8 @@ def get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v):
         Fluid density
     d_u, d_v : ndarray
         Momentum equation coefficients
+    pin_pressure : bool, optional
+        Whether to pin pressure at a point to avoid singularity (default: True)
         
     Returns:
     --------
@@ -106,8 +108,17 @@ def get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v):
     
     # Create sparse matrix
     A = sparse.coo_matrix((data, (rows, cols)), shape=(n_cells, n_cells))
+    A = A.tocsr()
     
-    return A.tocsr()
+    # Pin pressure at a reference point (bottom-left corner) to avoid singularity
+    if pin_pressure:
+
+        # Fix pressure at bottom-left (i=0, j=0)
+        pin_index = 0
+        A[pin_index, :] = 0
+        A[pin_index, pin_index] = 1
+    
+    return A
 
 
 def get_coeff_mat0(imax, jmax, dx, dy, rho, d_u, d_v):
@@ -167,4 +178,11 @@ def get_coeff_mat0(imax, jmax, dx, dy, rho, d_u, d_v):
     A = sparse.coo_matrix((values, (row_indices, col_indices)), shape=(imax*jmax, imax*jmax))
     
     # Convert to CSR format for efficient matrix operations
-    return A.tocsr()
+    A_csr = A.tocsr()
+    
+    # Pin pressure at bottom-left corner (0,0)
+    ref_idx = 0
+    A_csr.data[A_csr.indptr[ref_idx]:A_csr.indptr[ref_idx+1]] = 0
+    A_csr[ref_idx, ref_idx] = 1.0
+    
+    return A_csr

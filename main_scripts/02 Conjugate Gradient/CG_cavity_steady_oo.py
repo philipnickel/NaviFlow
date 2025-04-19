@@ -10,7 +10,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.matrix_free_cg import MatrixFreeCGSolver
-from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residuals
@@ -47,8 +47,20 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
 # Use matrix-free conjugate gradient solver instead of direct solver
-pressure_solver = MatrixFreeCGSolver(tolerance=pressure_tolerance, max_iterations=10000)
-momentum_solver = PowerLawMomentumSolver()
+pressure_solver = MatrixFreeCGSolver(
+    tolerance=pressure_tolerance,
+    max_iterations=100000,
+    use_preconditioner=True,
+    preconditioner='multigrid',
+    mg_pre_smoothing=1,
+    mg_post_smoothing=1,
+    mg_cycle_type='v',
+    mg_cycle_type_buildup='v',
+    mg_restriction_method='restrict_inject',
+    mg_interpolation_method='interpolate_cubic',
+    smoother_relaxation=0.87
+)
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm

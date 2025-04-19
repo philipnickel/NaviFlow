@@ -107,7 +107,7 @@ def compute_Ap_product_old(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
     # Ensure result is flattened before returning
     result = result_2d.flatten('F')
     return result
-def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
+def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None, pin_pressure=True):
     """
     Compute matrix-vector product Ap without forming the matrix explicitly.
     This implementation follows the same coefficient calculation as get_coeff_mat
@@ -127,6 +127,8 @@ def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
         Momentum equation coefficients
     out : ndarray, optional
         Output array for result (must be same shape as p_flat)
+    pin_pressure : bool, optional
+        Whether to pin pressure at bottom-left corner (default: True)
         
     Returns:
     --------
@@ -185,35 +187,91 @@ def compute_Ap_product(p_flat, imax, jmax, dx, dy, rho, d_u, d_v, out=None):
     # Diagonal coefficients (aP): sum of all contributions
     diag += east + west + north + south
     
-    # Compute the matrix-vector product using vectorized operations
-    
-    # Diagonal contribution: A[i,i] * p[i]
-    result_2d[:] = diag * p
-    
-    # Off-diagonal contributions using vectorized operations with careful boundary handling
-    
-    # East neighbor: -A[i,i+1] * p[i+1]
-    if imax > 1:
-        result_2d[:-1, :] -= east[:-1, :] * p[1:, :]
-    
-    # West neighbor: -A[i,i-1] * p[i-1]
-    if imax > 1:
-        result_2d[1:, :] -= west[1:, :] * p[:-1, :]
-    
-    # North neighbor: -A[i,i+imax] * p[j+1]
-    if jmax > 1:
-        result_2d[:, :-1] -= north[:, :-1] * p[:, 1:]
-    
-    # South neighbor: -A[i,i-imax] * p[j-1]
-    if jmax > 1:
-        result_2d[:, 1:] -= south[:, 1:] * p[:, :-1]
+    if pin_pressure:
+        # Create a mask for all cells except the reference pressure point (0,0)
+        mask = np.ones((imax, jmax), dtype=bool)
+        mask[0, 0] = False
+        
+        # Pin pressure at the reference point (bottom-left corner)
+        result_2d[0, 0] = p[0, 0]  # Identity operation for pinned node
+        
+        # For all other cells, compute the standard matrix-vector product
+        # Diagonal contribution: A[i,i] * p[i]
+        result_2d[mask] = diag[mask] * p[mask]
+        
+        # Off-diagonal contributions using vectorized operations with careful boundary handling
+        
+        # East neighbor: -A[i,i+1] * p[i+1]
+        if imax > 1:
+            east_contrib = east[:-1, :] * p[1:, :]
+            east_mask = mask[:-1, :]
+            result_2d[:-1, :][east_mask] -= east_contrib[east_mask]
+        
+        # West neighbor: -A[i,i-1] * p[i-1]
+        if imax > 1:
+            west_contrib = west[1:, :] * p[:-1, :]
+            west_mask = mask[1:, :]
+            result_2d[1:, :][west_mask] -= west_contrib[west_mask]
+        
+        # North neighbor: -A[i,i+imax] * p[j+1]
+        if jmax > 1:
+            north_contrib = north[:, :-1] * p[:, 1:]
+            north_mask = mask[:, :-1]
+            result_2d[:, :-1][north_mask] -= north_contrib[north_mask]
+        
+        # South neighbor: -A[i,i-imax] * p[j-1]
+        if jmax > 1:
+            south_contrib = south[:, 1:] * p[:, :-1]
+            south_mask = mask[:, 1:]
+            result_2d[:, 1:][south_mask] -= south_contrib[south_mask]
+    else:
+        # Compute regular matrix-vector product without pinning
+        # Diagonal contribution: A[i,i] * p[i]
+        result_2d[:] = diag * p
+        
+        # Off-diagonal contributions using vectorized operations with careful boundary handling
+        
+        # East neighbor: -A[i,i+1] * p[i+1]
+        if imax > 1:
+            result_2d[:-1, :] -= east[:-1, :] * p[1:, :]
+        
+        # West neighbor: -A[i,i-1] * p[i-1]
+        if imax > 1:
+            result_2d[1:, :] -= west[1:, :] * p[:-1, :]
+        
+        # North neighbor: -A[i,i+imax] * p[j+1]
+        if jmax > 1:
+            result_2d[:, :-1] -= north[:, :-1] * p[:, 1:]
+        
+        # South neighbor: -A[i,i-imax] * p[j-1]
+        if jmax > 1:
+            result_2d[:, 1:] -= south[:, 1:] * p[:, :-1]
     
     # Flatten result and return
     return result.reshape(p_flat.shape, order='F')
 
 
-def get_coeff_mat_matrix_free(imax, jmax, dx, dy, rho, d_u, d_v):
-    """Instead of forming coefficient matrix, return parameters needed for matrix-free operations."""
+def get_coeff_mat_matrix_free(imax, jmax, dx, dy, rho, d_u, d_v, pin_pressure=True):
+    """Instead of forming coefficient matrix, return parameters needed for matrix-free operations.
+    
+    Parameters:
+    -----------
+    imax, jmax : int
+        Grid dimensions
+    dx, dy : float
+        Grid spacing
+    rho : float
+        Fluid density
+    d_u, d_v : ndarray
+        Momentum equation coefficients
+    pin_pressure : bool, optional
+        Whether to pin pressure at a point to avoid singularity (default: True)
+        
+    Returns:
+    --------
+    dict
+        Dictionary with parameters needed for matrix-vector product
+    """
     # Return a dictionary with parameters needed for matrix-vector product
     return {
         'imax': imax,
@@ -222,6 +280,7 @@ def get_coeff_mat_matrix_free(imax, jmax, dx, dy, rho, d_u, d_v):
         'dy': dy,
         'rho': rho,
         'd_u': d_u,
-        'd_v': d_v
+        'd_v': d_v,
+        'pin_pressure': pin_pressure
     }
  

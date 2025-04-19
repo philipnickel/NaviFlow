@@ -21,18 +21,18 @@ from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residua
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**5-1, 2**5-1 # Grid size
-reynolds = 100            # Reynolds number
+nx, ny = 2**9-1, 2**9-1 # Grid size
+reynolds = 10000            # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 200     # Maximum number of iterations
+max_iterations = 100     # Maximum number of iterations
 
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
 #tolerance = expected_disc_error * 1e-3
 tolerance = 1e-5
-pressure_tolerance = expected_disc_error 
+pressure_tolerance = expected_disc_error
 print(f"Tolerance: {tolerance}")
 print(f"Pressure tolerance: {pressure_tolerance}")
 
@@ -52,13 +52,13 @@ smoother = GaussSeidelSolver(omega=0.87) # somehow 1.3 is good
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
-    max_iterations=10,    # Maximum V-cycles
+    max_iterations=100,    # Maximum V-cycles
     tolerance=pressure_tolerance,         # Overall tolerance
-    pre_smoothing=3,        # Pre-smoothing steps
+    pre_smoothing=2,        # Pre-smoothing steps
     post_smoothing=4,       # Post-smoothing steps
     cycle_type='fmg',         # Use W-cycles
-    cycle_type_buildup='v',
-    cycle_type_final='v',
+    cycle_type_buildup='w',
+    cycle_type_final='w',
     max_cycles_buildup=1,
     restriction_method='restrict_inject',  # Use direct injection restriction
     #restriction_method='restrict_full_weighting',  # Use linear interpolation
@@ -66,7 +66,7 @@ multigrid_solver = MultiGridSolver(
     interpolation_method='interpolate_cubic',  # Use cubic interpolation
     coarsest_grid_size= 7,    # Size of the coarsest grid
 )
-momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=20)
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
 velocity_updater = StandardVelocityUpdater()
 
 # Create algorithm

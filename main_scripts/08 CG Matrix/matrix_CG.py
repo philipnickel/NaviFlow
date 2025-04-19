@@ -18,7 +18,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.matrix_cg import ConjugateGradientSolver
-from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residuals
@@ -30,11 +30,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 2**5-1, 2**5-1           # Grid size (smaller for quick testing)
+nx, ny = 2**6-1, 2**6-1           # Grid size (smaller for quick testing)
 reynolds = 100            # Reynolds number
-alpha_p = 0.01            # Even more conservative pressure relaxation
-alpha_u = 0.05             # Even more conservative velocity relaxation
-max_iterations = 500    
+alpha_p = 0.1            # Even more conservative pressure relaxation
+alpha_u = 0.8             # Even more conservative velocity relaxation
+max_iterations = 300    
 tolerance = 1e-5          # Convergence tolerance
 h = 1/nx 
 disc_order = 1
@@ -62,9 +62,10 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # Use basic CG solver for pressure correction
 pressure_solver = ConjugateGradientSolver(
     tolerance=pressure_tolerance,        # Even tighter tolerance for pressure solver
-    max_iterations=100000   # More iterations allowed
+    max_iterations=100000,   # More iterations allowed
+    use_preconditioner=True
 )
-momentum_solver = PowerLawMomentumSolver()
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm

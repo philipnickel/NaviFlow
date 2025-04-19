@@ -18,7 +18,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.pyamg_solver import PyAMGSolver
-from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residuals
@@ -29,11 +29,11 @@ os.makedirs(results_dir, exist_ok=True)
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**8-1, 2**8-1 # Grid size
+nx, ny = 2**5-1, 2**5-1 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 500     # Maximum number of iterations
+max_iterations = 200     # Maximum number of iterations
 tolerance = 1e-5
 
 h = 1/nx 
@@ -67,7 +67,7 @@ pressure_solver = PyAMGSolver(
     postsmoother=('gauss_seidel', {'sweep': 'symmetric', 'iterations': 2}),
     cycle_type='V'
 )
-momentum_solver = PowerLawMomentumSolver()
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=20)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
