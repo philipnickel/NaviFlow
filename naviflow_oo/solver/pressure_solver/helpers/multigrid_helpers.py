@@ -4,6 +4,192 @@ Helper functions for the multigrid solver.
 
 import numpy as np
 
+def restrict(fine_grid: np.ndarray) -> np.ndarray:
+    """
+    Reduces a fine grid to a coarse grid by taking every other point.
+    Uses direct injection at odd indices (1, 3, 5, ...) for consistent
+    behavior with Fortran ordering.
+    
+    Parameters:
+        fine_grid (np.ndarray): The input fine grid to be coarsened
+        
+    Returns:
+        np.ndarray: The coarsened grid
+    """
+    coarse_grid = fine_grid[1::2, 1::2]
+    return coarse_grid
+
+def restrict2(fine_grid: np.ndarray) -> np.ndarray:
+    """
+    Reduces a fine grid to a coarse grid using full weighting.
+    
+    Full weighting restriction uses a weighted average of neighboring points:
+    - Corner points get weight 1/16
+    - Edge points get weight 1/8  
+    - Center point gets weight 1/4
+    
+    Parameters:
+        fine_grid (np.ndarray): The input fine grid to be coarsened
+        
+    Returns:
+        np.ndarray: The coarsened grid with full weighting applied
+    """
+    # Get dimensions of fine grid
+    nf = fine_grid.shape[0]
+    # Size of coarse grid 
+    nc = (nf - 1) // 2
+    
+    # Extract points using array slicing
+    # Center points
+    centers = fine_grid[1:-1:2, 1:-1:2]
+    
+    # Edge points (north, south, east, west)
+    north = fine_grid[1:-1:2, 2::2]
+    south = fine_grid[1:-1:2, :-2:2]
+    east = fine_grid[2::2, 1:-1:2]
+    west = fine_grid[:-2:2, 1:-1:2]
+    
+    # Corner points (northeast, northwest, southeast, southwest)
+    ne = fine_grid[2::2, 2::2]
+    nw = fine_grid[:-2:2, 2::2]
+    se = fine_grid[2::2, :-2:2]
+    sw = fine_grid[:-2:2, :-2:2]
+    
+    # Combine with appropriate weights
+    coarse_grid = (
+        centers / 4.0 +                    # Center weight 1/4
+        (north + south + east + west) / 8.0 +  # Edge weights 1/8
+        (ne + nw + se + sw) / 16.0            # Corner weights 1/16
+    )
+    
+    return coarse_grid
+
+
+
+
+def interpolate2(coarse_grid, m):
+    """
+    Interpolates a coarse grid to a fine grid using bilinear interpolation.
+    Maintains Fortran ordering consistency.
+    
+    Parameters:
+        coarse_grid (np.ndarray): The input coarse grid to be interpolated
+        m (int): Size of the target fine grid
+        
+    Returns:
+        np.ndarray: The interpolated fine grid
+    """
+    # Reshape to 2D if needed, using Fortran ordering
+    if coarse_grid.ndim == 1:
+        mc = int(np.sqrt(coarse_grid.size))
+        coarse_grid = coarse_grid.reshape((mc, mc), order='F')
+    else:
+        # If already 2D, get the coarse grid dimensions
+        mc = coarse_grid.shape[0]
+    
+    # Create fine grid
+    fine_grid = np.zeros((m, m))
+    
+    # Handle edge cases for small grids
+    if m <= 3:
+        # Direct injection for coincident points
+        i_coarse = np.arange(mc)
+        j_coarse = np.arange(mc)
+        I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+        
+        # Calculate fine grid indices
+        I_fine = 2 * I_coarse + 1
+        J_fine = 2 * J_coarse + 1
+        
+        # Filter valid indices
+        mask = np.logical_and(I_fine < m, J_fine < m)
+        fine_grid[I_fine[mask], J_fine[mask]] = coarse_grid[I_coarse[mask], J_coarse[mask]]
+        
+        # Return with proper ordering if input was 1D
+        if coarse_grid.ndim == 1:
+            return fine_grid.flatten(order='F')
+        return fine_grid
+    
+    # Direct injection for coincident points
+    i_coarse = np.arange(mc)
+    j_coarse = np.arange(mc)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    # Calculate fine grid indices
+    I_fine = 2 * I_coarse + 1
+    J_fine = 2 * J_coarse + 1
+    
+    # Filter valid indices
+    mask = np.logical_and(I_fine < m, J_fine < m)
+    fine_grid[I_fine[mask], J_fine[mask]] = coarse_grid[I_coarse[mask], J_coarse[mask]]
+    
+    # Horizontal interpolation (odd rows, even columns)
+    i_coarse = np.arange(mc)
+    j_coarse = np.arange(mc-1)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    I_fine = 2 * I_coarse + 1
+    J_fine = 2 * J_coarse + 2
+    
+    mask = np.logical_and(I_fine < m, J_fine < m)
+    fine_grid[I_fine[mask], J_fine[mask]] = 0.5 * (
+        coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+        coarse_grid[I_coarse[mask], J_coarse[mask]+1]
+    )
+    
+    # Vertical interpolation (even rows, odd columns)
+    i_coarse = np.arange(mc-1)
+    j_coarse = np.arange(mc)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    I_fine = 2 * I_coarse + 2
+    J_fine = 2 * J_coarse + 1
+    
+    mask = np.logical_and(I_fine < m, J_fine < m)
+    fine_grid[I_fine[mask], J_fine[mask]] = 0.5 * (
+        coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+        coarse_grid[I_coarse[mask]+1, J_coarse[mask]]
+    )
+    
+    # Diagonal interpolation (even rows, even columns)
+    i_coarse = np.arange(mc-1)
+    j_coarse = np.arange(mc-1)
+    I_coarse, J_coarse = np.meshgrid(i_coarse, j_coarse, indexing='ij')
+    
+    I_fine = 2 * I_coarse + 2
+    J_fine = 2 * J_coarse + 2
+    
+    mask = np.logical_and(I_fine < m, J_fine < m)
+    fine_grid[I_fine[mask], J_fine[mask]] = 0.25 * (
+        coarse_grid[I_coarse[mask], J_coarse[mask]] + 
+        coarse_grid[I_coarse[mask]+1, J_coarse[mask]] +
+        coarse_grid[I_coarse[mask], J_coarse[mask]+1] +
+        coarse_grid[I_coarse[mask]+1, J_coarse[mask]+1]
+    )
+    
+    # Handle boundary values
+    # Left boundary
+    fine_grid[1:-1, 0] = fine_grid[1:-1, 1]
+    # Right boundary
+    fine_grid[1:-1, -1] = fine_grid[1:-1, -2]
+    # Bottom boundary
+    fine_grid[0, 1:-1] = fine_grid[1, 1:-1]
+    # Top boundary
+    fine_grid[-1, 1:-1] = fine_grid[-2, 1:-1]
+    # Corners
+    fine_grid[0, 0] = fine_grid[1, 1]
+    fine_grid[0, -1] = fine_grid[1, -2]
+    fine_grid[-1, 0] = fine_grid[-2, 1]
+    fine_grid[-1, -1] = fine_grid[-2, -2]
+    
+    # If input was 1D, return 1D with consistent ordering
+    if coarse_grid.ndim == 1:
+        return fine_grid.flatten(order='F')
+    
+    return fine_grid
+
+
+
 def restrict_coefficients(d_u, d_v, nx_fine, ny_fine, nx_coarse, ny_coarse, dx_fine, dy_fine):
     """
     Properly restrict coefficients from fine to coarse grid using harmonic averaging.
@@ -136,177 +322,63 @@ def restrict_coefficients(d_u, d_v, nx_fine, ny_fine, nx_coarse, ny_coarse, dx_f
     
     return d_u_coarse, d_v_coarse
 
-def restrict(fine_grid, out=None):
+def interpolate(coarse_grid: np.ndarray, m: int) -> np.ndarray:
     """
-    Full weighting restriction from fine to coarse grid.
-    Standard 9-point stencil with weights:
-    1/16 * [1 2 1]
-           [2 4 2]
-           [1 2 1]
-    """
-    # Calculate size of coarse grid
-    coarse_shape = ((fine_grid.shape[0] - 1) // 2, (fine_grid.shape[1] - 1) // 2)
-    
-    # Create output array if needed
-    if out is None:
-        coarse_grid = np.zeros(coarse_shape)
-    else:
-        coarse_grid = out
-        coarse_grid.fill(0.0)
-    
-    # Apply full weighting using slicing with consistent indices
-    # Center points (weight 4/16)
-    coarse_grid += 4 * fine_grid[1::2, 1::2][:coarse_shape[0], :coarse_shape[1]]
-    
-    # Edge points (weight 2/16)
-    coarse_grid += 2 * fine_grid[0::2, 1::2][:coarse_shape[0], :coarse_shape[1]]  # Top
-    coarse_grid += 2 * fine_grid[2::2, 1::2][:coarse_shape[0], :coarse_shape[1]]  # Bottom
-    coarse_grid += 2 * fine_grid[1::2, 0::2][:coarse_shape[0], :coarse_shape[1]]  # Left
-    coarse_grid += 2 * fine_grid[1::2, 2::2][:coarse_shape[0], :coarse_shape[1]]  # Right
-    
-    # Corner points (weight 1/16)
-    coarse_grid += fine_grid[0::2, 0::2][:coarse_shape[0], :coarse_shape[1]]  # Top-left
-    coarse_grid += fine_grid[0::2, 2::2][:coarse_shape[0], :coarse_shape[1]]  # Top-right
-    coarse_grid += fine_grid[2::2, 0::2][:coarse_shape[0], :coarse_shape[1]]  # Bottom-left
-    coarse_grid += fine_grid[2::2, 2::2][:coarse_shape[0], :coarse_shape[1]]  # Bottom-right
-    
-    # Apply scaling
-    coarse_grid /= 16.0
-    
-    return coarse_grid
-
-def interpolate(coarse_grid, m, out=None):
-    """
-    Fully vectorized bilinear interpolation from coarse to fine grid.
-    Handles both 1D and 2D input arrays.
+    Performs cubic interpolation from coarse to fine grid.
+    This provides higher-order accuracy than bilinear interpolation.
     
     Parameters:
-    -----------
-    coarse_grid : ndarray
-        The coarse grid values to interpolate from (1D or 2D)
-    m : int
-        Size of the fine grid (both dimensions will be m x m)
-    out : ndarray, optional
-        Output array to store results (created if not provided)
+        coarse_grid (np.ndarray): The input coarse grid to be interpolated
+        m (int): Size of the target fine grid
         
     Returns:
-    --------
-    fine_grid : ndarray
-        The interpolated fine grid (m x m)
+        np.ndarray: The interpolated fine grid with cubic interpolation
     """
-    # Ensure coarse_grid is 2D
+    # Reshape to 2D if needed
     if coarse_grid.ndim == 1:
-        # If 1D, reshape to 2D square grid, assuming it's a flattened square grid
         mc = int(np.sqrt(coarse_grid.size))
-        coarse_grid_2d = coarse_grid.reshape((mc, mc), order='F')
+        coarse_grid = coarse_grid.reshape((mc, mc))
     else:
-        coarse_grid_2d = coarse_grid
-        
-    # Get dimensions of coarse grid
-    mc, nc = coarse_grid_2d.shape
+        mc = coarse_grid.shape[0]
     
-    # Create output array if needed (use m x m as requested by caller)
-    if out is None:
-        fine_grid = np.zeros((m, m))
+    # For cubic interpolation, we'll use a 2D interpolation approach
+    # First, create coordinate grids
+    x_coarse = np.linspace(0, 1, mc)
+    y_coarse = np.linspace(0, 1, mc)
+    x_fine = np.linspace(0, 1, m)
+    y_fine = np.linspace(0, 1, m)
+    
+    # Use numpy's vectorized approach to build interpolation arrays
+    from scipy import interpolate as sp_interp
+    
+    # Create 2D cubic spline interpolation
+    # For cubic splines, we need at least 4 points in each dimension
+    if mc >= 4:
+        # Full cubic spline interpolation
+        interp_func = sp_interp.RectBivariateSpline(x_coarse, y_coarse, coarse_grid)
+        fine_grid = interp_func(x_fine, y_fine)
     else:
-        fine_grid = out
-        fine_grid.fill(0.0)
-    
-    # Calculate fine grid size that would result from coarse grid
-    # The interpolated region will be (2*mc-1) x (2*nc-1), but
-    # we'll fill it into the requested m x m grid
-    mf = min(m, 2 * mc - 1)
-    nf = min(m, 2 * nc - 1)
-    
-    # VECTORIZED IMPLEMENTATION
-    
-    # 1. Direct injection for coincident points (even-even indices)
-    i_coarse = np.arange(mc)
-    j_coarse = np.arange(nc)
-    
-    # Map to fine grid (multiply by 2)
-    i_fine = 2 * i_coarse
-    j_fine = 2 * j_coarse
-    
-    # Filter to ensure within bounds
-    valid_i = i_fine < mf
-    valid_j = j_fine < nf
-    
-    if np.any(valid_i) and np.any(valid_j):
-        # Create meshgrid for valid indices
-        I_coarse, J_coarse = np.meshgrid(i_coarse[valid_i], j_coarse[valid_j], indexing='ij')
-        I_fine, J_fine = np.meshgrid(i_fine[valid_i], j_fine[valid_j], indexing='ij')
-        
-        # Direct injection (even-even)
-        fine_grid[I_fine, J_fine] = coarse_grid_2d[I_coarse, J_coarse]
-    
-    # 2. Horizontal interpolation (even-odd indices)
-    if nc > 1:  # Only if we have at least 2 columns
-        j_coarse_h = np.arange(nc-1)  # One less for horizontal interpolation
-        j_fine_h = 2 * j_coarse_h + 1  # Odd j indices
-        
-        # Filter to ensure within bounds
-        valid_j_h = j_fine_h < nf
-        
-        if np.any(valid_i) and np.any(valid_j_h):
-            # Create meshgrid for valid indices
-            I_coarse_h, J_coarse_h = np.meshgrid(i_coarse[valid_i], j_coarse_h[valid_j_h], indexing='ij')
-            I_fine_h, J_fine_h = np.meshgrid(i_fine[valid_i], j_fine_h[valid_j_h], indexing='ij')
+        # Fall back to quadratic or linear for small grids
+        if mc == 3:
+            # Quadratic interpolation
+            kind = 'quadratic'
+        else:
+            # Linear interpolation for very small grids
+            kind = 'linear'
             
-            # Horizontal interpolation: average between left and right points
-            fine_grid[I_fine_h, J_fine_h] = 0.5 * (
-                coarse_grid_2d[I_coarse_h, J_coarse_h] + 
-                coarse_grid_2d[I_coarse_h, J_coarse_h + 1]
-            )
-    
-    # 3. Vertical interpolation (odd-even indices)
-    if mc > 1:  # Only if we have at least 2 rows
-        i_coarse_v = np.arange(mc-1)  # One less for vertical interpolation
-        i_fine_v = 2 * i_coarse_v + 1  # Odd i indices
+        # Use regular grid interpolator for small grids
+        coords_coarse = np.array(np.meshgrid(x_coarse, y_coarse, indexing='ij')).T.reshape(-1, 2)
+        values = coarse_grid.flatten()
+        interp_func = sp_interp.RegularGridInterpolator((x_coarse, y_coarse), coarse_grid, 
+                                                       method=kind, bounds_error=False, 
+                                                       fill_value=None)
         
-        # Filter to ensure within bounds
-        valid_i_v = i_fine_v < mf
+        # Create fine grid coordinates
+        XX, YY = np.meshgrid(x_fine, y_fine, indexing='ij')
+        points = np.vstack([XX.ravel(), YY.ravel()]).T
         
-        if np.any(valid_i_v) and np.any(valid_j):
-            # Create meshgrid for valid indices
-            I_coarse_v, J_coarse_v = np.meshgrid(i_coarse_v[valid_i_v], j_coarse[valid_j], indexing='ij')
-            I_fine_v, J_fine_v = np.meshgrid(i_fine_v[valid_i_v], j_fine[valid_j], indexing='ij')
-            
-            # Vertical interpolation: average between top and bottom points
-            fine_grid[I_fine_v, J_fine_v] = 0.5 * (
-                coarse_grid_2d[I_coarse_v, J_coarse_v] + 
-                coarse_grid_2d[I_coarse_v + 1, J_coarse_v]
-            )
-    
-    # 4. Diagonal interpolation (odd-odd indices)
-    if mc > 1 and nc > 1:  # Only if we have at least 2 rows and 2 columns
-        i_coarse_v = np.arange(mc-1)  # One less for vertical interpolation
-        i_fine_v = 2 * i_coarse_v + 1  # Odd i indices
-        j_coarse_h = np.arange(nc-1)  # One less for horizontal interpolation
-        j_fine_h = 2 * j_coarse_h + 1  # Odd j indices
-        
-        # Filter to ensure within bounds
-        valid_i_v = i_fine_v < mf
-        valid_j_h = j_fine_h < nf
-        
-        if np.any(valid_i_v) and np.any(valid_j_h):
-            # Create meshgrid for valid indices
-            I_coarse_d, J_coarse_d = np.meshgrid(i_coarse_v[valid_i_v], j_coarse_h[valid_j_h], indexing='ij')
-            I_fine_d, J_fine_d = np.meshgrid(i_fine_v[valid_i_v], j_fine_h[valid_j_h], indexing='ij')
-            
-            # Diagonal interpolation: average between all four corners
-            fine_grid[I_fine_d, J_fine_d] = 0.25 * (
-                coarse_grid_2d[I_coarse_d, J_coarse_d] + 
-                coarse_grid_2d[I_coarse_d, J_coarse_d + 1] + 
-                coarse_grid_2d[I_coarse_d + 1, J_coarse_d] + 
-                coarse_grid_2d[I_coarse_d + 1, J_coarse_d + 1]
-            )
+        # Interpolate and reshape
+        fine_values = interp_func(points)
+        fine_grid = fine_values.reshape((m, m))
     
     return fine_grid
-
-# Remove the unused interpolate2 function to save memory
-"""
-def interpolate2(coarse_grid: np.ndarray, m: int) -> np.ndarray:
-    # This function is unused and has been removed to save memory
-    pass
-"""

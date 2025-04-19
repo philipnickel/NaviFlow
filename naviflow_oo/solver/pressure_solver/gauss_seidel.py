@@ -175,7 +175,7 @@ class GaussSeidelSolver(PressureSolver):
         aP = aE + aW + aN + aS
         
         # Fix reference pressure at (0,0)
-        aP[0, 0] = 1.0
+        aP[0, 0] = 0.0
         aE[0, 0] = aW[0, 0] = aN[0, 0] = aS[0, 0] = 0.0
         
         # Avoid division by zero
