@@ -14,18 +14,18 @@ from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
 from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
-from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residuals
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**7-1, 2**7-1 # Grid size
+nx, ny = 2**5-1, 2**5-1 # Grid size
 reynolds = 100            # Reynolds number
-alpha_p = 1#0.1              # Pressure relaxation factor
-alpha_u = 1#0.8              # Velocity relaxation factor
-max_iterations = 5000     # Maximum number of iterations
+alpha_p = 0.1              # Pressure relaxation factor
+alpha_u = 0.8              # Velocity relaxation factor
+max_iterations = 200     # Maximum number of iterations
 
 h = 1/nx 
 disc_order = 1
@@ -66,7 +66,7 @@ multigrid_solver = MultiGridSolver(
     interpolation_method='interpolate_cubic',  # Use cubic interpolation
     coarsest_grid_size= 7,    # Size of the coarsest grid
 )
-momentum_solver = PowerLawMomentumSolver()
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=20)
 velocity_updater = StandardVelocityUpdater()
 
 # Create algorithm

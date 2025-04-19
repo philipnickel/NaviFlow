@@ -419,24 +419,9 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
                 imax = u.shape[0] - 1 if u.shape[0] > nx else u.shape[0]
                 jmax = v.shape[1] - 1 if v.shape[1] > ny else v.shape[1]
                 
-                # Set center indices
-                j_center = jmax // 2  # Center index for y-direction
-                i_center = imax // 2  # Center index for x-direction
-                
-                # Extract centerline data from simulation
-                u_centerline = np.zeros(jmax)
-                for j in range(jmax):
-                    if u.shape[0] > nx:  # Staggered grid
-                        u_centerline[j] = 0.5 * (u[i_center, j] + u[i_center+1, j])
-                    else:
-                        u_centerline[j] = u[i_center, j]
-                
-                v_centerline = np.zeros(imax)
-                for i in range(imax):
-                    if v.shape[1] > ny:  # Staggered grid
-                        v_centerline[i] = 0.5 * (v[i, j_center] + v[i, j_center+1])
-                    else:
-                        v_centerline[i] = v[i, j_center]
+                # Extract centerline data from simulation using the same approach as in validation
+                u_centerline = u[nx//2, :]  # u along vertical centerline
+                v_centerline = v[:, ny//2]  # v along horizontal centerline
                 
                 # Normalize coordinates for comparison
                 x_normalized = np.linspace(0, 1, imax)
