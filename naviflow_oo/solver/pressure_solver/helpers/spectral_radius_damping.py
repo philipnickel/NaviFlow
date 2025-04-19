@@ -3,24 +3,20 @@ Helper module for finding optimal damping parameter in Jacobi iteration using sp
 """
 
 import numpy as np
-from scipy.sparse.linalg import eigsh
 import os
 import sys
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import scienceplots
 
 # Add the parent directory to the Python path when running directly
 if __name__ == "__main__": 
     sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))))
     from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
     from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
-    from naviflow_oo.solver.pressure_solver.helpers.matrix_free import compute_Ap_product
-    from naviflow_oo.solver.pressure_solver.helpers.coeff_matrix import get_coeff_mat
 else:
     from ..jacobi import JacobiSolver
     from ..gauss_seidel import GaussSeidelSolver
-    from ..helpers.matrix_free import compute_Ap_product
-    from ..helpers.coeff_matrix import get_coeff_mat
 
 
 def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_iterations=20, num_random_vectors=5):
@@ -67,7 +63,6 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
         random_vectors.append(x)
     
     # Search for optimal omega
-    # MODIFIED RANGE: Change these values to adjust the search range
     omega_min = 0  # Minimum omega value to test
     omega_max = 1.8   # Maximum omega value to test
     num_points = 200   # Number of points to test in that range
@@ -105,8 +100,8 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
             # This is equivalent to M*x where M is the iteration matrix
             Mx = p_2d.flatten('F')
             
-            # Compute the spectral radius as the norm of Mx
-            eig = np.linalg.norm(Mx)
+            # Compute the spectral radius as the norm of Mx normalized by the norm of x
+            eig = np.linalg.norm(Mx) / np.linalg.norm(x)
             
             # Update max_eig if this vector gives a larger eigenvalue
             max_eig = max(max_eig, eig)
@@ -119,20 +114,27 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
             min_spectral_radius = max_eig
             optimal_omega = omega
     
-    # Plot the results
-    plt.figure(figsize=(10, 6))
+    # Plot the results using standard matplotlib
+    plt.figure(figsize=(12, 8))
     plt.plot(omega_range, spectral_radii, 'b-', label='Spectral Radius')
     plt.plot(optimal_omega, min_spectral_radius, 'ro', label='Optimal Point')
-    plt.xlabel('Omega (ω)')
+    plt.xlabel('Omega ($\\omega$)')
     plt.ylabel('Spectral Radius')
     plt.title('Spectral Radius vs Omega (Matrix-Free)')
     plt.grid(True)
     plt.legend()
     
+    # Set y-axis limits with some padding
+    y_min = min(spectral_radii) * 0.95
+    y_max = max(spectral_radii) * 1.05
+    plt.ylim(y_min, y_max)
+    
+    plt.tight_layout(pad=2.0)  # Add more padding around the plot
+    
     # Save the plot
     current_dir = os.path.dirname(os.path.abspath(__file__))
     plot_path = os.path.join(current_dir, 'spectral_radius_minimization_matrix_free.pdf')
-    plt.savefig(plot_path)
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight', pad_inches=0.2)
     print(f"\nPlot saved to: {plot_path}")
     
     # Display the plot
@@ -140,6 +142,7 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
     plt.close()
     
     return optimal_omega, min_spectral_radius
+
 
 def find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_iterations=20, num_random_vectors=5):
     """
@@ -185,10 +188,9 @@ def find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_ite
         random_vectors.append(x)
     
     # Search for optimal omega
-    # MODIFIED RANGE: Change these values to adjust the search range
     omega_min = 0.75  # Minimum omega value to test
     omega_max = 0.8  # Maximum omega value to test
-    num_points = 100000   # Number of points to test in that range
+    num_points = 1000  # Number of points to test in that range
     
     omega_range = np.linspace(omega_min, omega_max, num_points)
     print(f"Searching for optimal omega in range: [{omega_min}, {omega_max}] with {num_points} points")
@@ -223,8 +225,8 @@ def find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_ite
             # This is equivalent to M*x where M is the iteration matrix
             Mx = p_2d.flatten('F')
             
-            # Compute the spectral radius as the norm of Mx
-            eig = np.linalg.norm(Mx)
+            # Compute the spectral radius as the norm of Mx normalized by the norm of x
+            eig = np.linalg.norm(Mx) / np.linalg.norm(x)
             
             # Update max_eig if this vector gives a larger eigenvalue
             max_eig = max(max_eig, eig)
@@ -237,20 +239,27 @@ def find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_ite
             min_spectral_radius = max_eig
             optimal_omega = omega
     
-    # Plot the results
-    plt.figure(figsize=(10, 6))
+    # Plot the results using standard matplotlib
+    plt.figure(figsize=(12, 8))
     plt.plot(omega_range, spectral_radii, 'b-', label='Spectral Radius')
     plt.plot(optimal_omega, min_spectral_radius, 'ro', label='Optimal Point')
-    plt.xlabel('Omega (ω)')
+    plt.xlabel('Omega ($\\omega$)')
     plt.ylabel('Spectral Radius')
     plt.title('Spectral Radius vs Omega (Jacobi)')
     plt.grid(True)
     plt.legend()
     
+    # Set y-axis limits with some padding
+    y_min = min(spectral_radii) * 0.95
+    y_max = max(spectral_radii) * 1.05
+    plt.ylim(y_min, y_max)
+    
+    plt.tight_layout(pad=2.0)  # Add more padding around the plot
+    
     # Save the plot
     current_dir = os.path.dirname(os.path.abspath(__file__))
     plot_path = os.path.join(current_dir, 'spectral_radius_minimization_jacobi.pdf')
-    plt.savefig(plot_path)
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight', pad_inches=0.2)
     print(f"\nPlot saved to: {plot_path}")
     
     # Display the plot
@@ -258,6 +267,7 @@ def find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_ite
     plt.close()
     
     return optimal_omega, min_spectral_radius
+
 
 # Example usage:
 if __name__ == "__main__":
