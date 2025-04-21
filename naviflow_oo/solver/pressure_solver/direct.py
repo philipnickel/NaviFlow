@@ -87,20 +87,21 @@ class DirectPressureSolver(PressureSolver):
         
         # Calculate residual for tracking using the explicit matrix A
         Ax = A.dot(p_prime_flat) # Use explicit matrix-vector product
-        r = rhs - Ax
+        r = rhs - Ax # This is the residual field (1D)
         r_norm = np.linalg.norm(r, 2)
         b_norm = np.linalg.norm(rhs, 2)
         res_norm = r_norm / b_norm if b_norm > 0 else r_norm
         self.residual_history.append(res_norm) # Store normalized residual
         
-        # Reshape to 2D
+        # Reshape solution and residual to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
+        r_field = r.reshape((nx, ny), order='F') # Reshape residual field
         
         # Enforce pressure boundary conditions
         #self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
-        # Return both the solution and the calculated residual norm
-        return p_prime, res_norm
+        # Return the solution, residual norm, and residual field
+        return p_prime, res_norm, r_field
         
     def get_solver_info(self):
         """

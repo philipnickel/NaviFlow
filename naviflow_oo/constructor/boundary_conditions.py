@@ -179,22 +179,42 @@ class BoundaryConditionManager:
         """
         # Initialize all boundaries to zero (wall condition)
         u[0, :] = 0.0                      # left wall
-        u[nx, :] = 0.0                     # right wall
-        u[:, 0] = 0.0                      # bottom wall
-        u[:, ny-1] = 0.0                   # top wall
+        # Right u wall: Check shape before indexing nx
+        if u.shape[0] == nx + 1:
+            u[nx, :] = 0.0
+        elif u.shape[0] == nx and nx > 0: # Check nx > 0 to avoid index -1
+             u[nx - 1, :] = 0.0
         
+        u[:, 0] = 0.0                      # bottom wall
+        # Top u wall: Check shape before indexing ny-1
+        if u.shape[1] > ny - 1 and ny > 0: # Check ny > 0 to avoid index -1
+             u[:, ny - 1] = 0.0
+
         v[0, :] = 0.0                      # left wall
-        v[nx-1, :] = 0.0                   # right wall
+        # Right v wall: Check shape before indexing nx-1
+        if v.shape[0] > nx - 1 and nx > 0: # Check nx > 0 to avoid index -1
+             v[nx - 1, :] = 0.0
+
         v[:, 0] = 0.0                      # bottom wall
-        v[:, ny] = 0.0                     # top wall
+        # Top v wall: Check shape before indexing ny
+        if v.shape[1] == ny + 1:
+            v[:, ny] = 0.0
+        elif v.shape[1] == ny and ny > 0: # Check ny > 0 to avoid index -1
+            v[:, ny - 1] = 0.0
         
         # Apply specific boundary conditions
         for location, conditions in self.conditions.items():
             for bc_type, values in conditions.items():
                 if bc_type == 'velocity':
                     if location == 'top':
-                        u[:, ny-1] = values.get('u', 0.0)  # top wall
-                        v[:, ny] = values.get('v', 0.0)    # top wall
+                        # Top u velocity: Check shape before indexing ny-1
+                        if u.shape[1] > ny - 1 and ny > 0:
+                            u[:, ny - 1] = values.get('u', 0.0)
+                        # Top v velocity: Check shape before indexing ny
+                        if v.shape[1] == ny + 1:
+                            v[:, ny] = values.get('v', 0.0)
+                        elif v.shape[1] == ny and ny > 0:
+                            v[:, ny - 1] = values.get('v', 0.0)
                     elif location == 'bottom':
                         u[:, 0] = values.get('u', 0.0)     # bottom wall
                         v[:, 0] = values.get('v', 0.0)     # bottom wall
@@ -202,13 +222,25 @@ class BoundaryConditionManager:
                         u[0, :] = values.get('u', 0.0)     # left wall
                         v[0, :] = values.get('v', 0.0)     # left wall
                     elif location == 'right':
-                        u[nx, :] = values.get('u', 0.0)    # right wall
-                        v[nx-1, :] = values.get('v', 0.0)  # right wall
+                         # Right u velocity: Check shape before indexing nx
+                        if u.shape[0] == nx + 1:
+                             u[nx, :] = values.get('u', 0.0)
+                        elif u.shape[0] == nx and nx > 0:
+                             u[nx - 1, :] = values.get('u', 0.0)
+                         # Right v velocity: Check shape before indexing nx-1
+                        if v.shape[0] > nx - 1 and nx > 0:
+                             v[nx - 1, :] = values.get('v', 0.0)
                 elif bc_type == 'wall':
                     # Wall boundary condition (zero velocity)
                     if location == 'top':
-                        u[:, ny-1] = 0.0
-                        v[:, ny] = 0.0
+                        # Top u wall: Check shape before indexing ny-1
+                        if u.shape[1] > ny - 1 and ny > 0:
+                            u[:, ny - 1] = 0.0
+                        # Top v wall: Check shape before indexing ny
+                        if v.shape[1] == ny + 1:
+                             v[:, ny] = 0.0
+                        elif v.shape[1] == ny and ny > 0:
+                             v[:, ny - 1] = 0.0
                     elif location == 'bottom':
                         u[:, 0] = 0.0
                         v[:, 0] = 0.0
@@ -216,8 +248,14 @@ class BoundaryConditionManager:
                         u[0, :] = 0.0
                         v[0, :] = 0.0
                     elif location == 'right':
-                        u[nx, :] = 0.0
-                        v[nx-1, :] = 0.0
+                         # Right u wall: Check shape before indexing nx
+                        if u.shape[0] == nx + 1:
+                             u[nx, :] = 0.0
+                        elif u.shape[0] == nx and nx > 0:
+                             u[nx - 1, :] = 0.0
+                         # Right v wall: Check shape before indexing nx-1
+                        if v.shape[0] > nx - 1 and nx > 0:
+                             v[nx - 1, :] = 0.0
         
         return u, v
     

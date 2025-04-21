@@ -208,9 +208,24 @@ class CGMatrixMomentumSolver(MomentumSolver):
         # Calculate residual BEFORE relaxation: r = b - Ax
         Ax_unrelaxed = self.u_matrix @ u_flat # Use the solved u_flat
         r = self.u_rhs - Ax_unrelaxed
-        r_norm = np.linalg.norm(r) # Default L2 norm
-        b_norm = np.linalg.norm(self.u_rhs)
-        u_residual = r_norm / b_norm if b_norm > 1e-12 else r_norm # Avoid division by zero
+        # Reshape the flat residual vector back to 2D
+        r_field_full = r.reshape((imax+1, jmax))
+        
+        # Create a zero field for the residual, matching u's shape
+        u_residual_field = np.zeros_like(u)
+        
+        # Copy interior residuals from r_field_full to u_residual_field
+        # Note: Using the same interior range [1:imax, 1:jmax-1] as used for relaxation
+        i_range_int = np.arange(1, imax)
+        j_range_int = np.arange(1, jmax-1)
+        i_grid_int, j_grid_int = np.meshgrid(i_range_int, j_range_int, indexing='ij')
+        u_residual_field[i_grid_int, j_grid_int] = r_field_full[i_grid_int, j_grid_int]
+        
+        # Calculate the L2 norm of the *interior* residuals for reporting/convergence check
+        # (We still need a scalar value for convergence checks)
+        r_norm_interior = np.linalg.norm(u_residual_field[i_grid_int, j_grid_int]) 
+        b_norm_interior = np.linalg.norm(self.u_source_unrelaxed[i_grid_int, j_grid_int]) # Use corresponding interior RHS norm
+        u_residual_norm = r_norm_interior / b_norm_interior if b_norm_interior > 1e-12 else r_norm_interior
         
         # Apply relaxation to the internal cells
         # Note: Using u (previous iteration velocity) for the (1-alpha) part
@@ -239,9 +254,8 @@ class CGMatrixMomentumSolver(MomentumSolver):
             # Re-apply BCs after relaxation and potential modification
             u_star, _ = bc_manager.apply_velocity_boundary_conditions(u_star, v.copy(), imax, jmax)
 
-        # Residual calculation moved before relaxation
-        # Return the calculated residual
-        return u_star, d_u, u_residual
+        # Return the residual FIELD and the scalar NORM
+        return u_star, d_u, u_residual_norm, u_residual_field
 
     def solve_v_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None):
         nx, ny = mesh.get_dimensions()

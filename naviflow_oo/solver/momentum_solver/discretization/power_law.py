@@ -123,6 +123,18 @@ class PowerLawDiscretization:
         a_p[i_top, j] = a_e[i_top, j] + a_w[i_top, j] + a_n[i_top, j] + a_s[i_top, j] + (Fe_top-Fw_top) + (Fn_top-Fs_top)
         source[i_top, j] = (p[i_top-1, j] - p[i_top, j]) * dy
         
+        # Modified treatment for top boundary (Dirichlet for u)
+        # Assume u[i_top, ny] is the known boundary value (implicitly set by apply_bc before call)
+        # However, power_law.py doesn't have direct access to BC manager, let's assume the caller handles it.
+        # A robust implementation would modify coefficients based on BC type.
+        # For now, let's apply a common Dirichlet approach: Large a_p, source = a_p * u_boundary
+        # This forces u[i_top, ny-1] towards the boundary value.
+        # Let's stick to the standard finite volume deferred correction approach for now, which is implicitly
+        # handled by the BoundaryConditionManager setting the values. The coefficient calculation looks standard.
+        # Revert a_p and source calculation for top boundary to standard form
+        a_p[i_top, j] = a_e[i_top, j] + a_w[i_top, j] + a_n[i_top, j] + a_s[i_top, j] + (Fe_top-Fw_top) + (Fn_top-Fs_top)
+        source[i_top, j] = (p[i_top-1, j] - p[i_top, j]) * dy
+        
         # Return coefficients in a dictionary
         return {
             'a_e': a_e,

@@ -53,9 +53,14 @@ class SimpleSolver(BaseAlgorithm):
         self.p_old = None  # Store old p values
 
         # Initialize residual histories
-        self.x_momentum_residuals = []  # Track x-momentum residuals
-        self.y_momentum_residuals = []  # Track y-momentum residuals
-        self.continuity_residuals = []  # Track continuity residuals
+        self.x_momentum_residuals = []  # Track x-momentum residuals (norms)
+        self.y_momentum_residuals = []  # Track y-momentum residuals (norms)
+        self.continuity_residuals = []  # Track continuity residuals (norms)
+        
+        # Variables to store final residual fields
+        self._final_u_residual_field = None
+        self._final_v_residual_field = None
+        self._final_p_residual_field = None
         
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
@@ -85,14 +90,14 @@ class SimpleSolver(BaseAlgorithm):
                 self.v_old = self.v.copy()
                 self.p_old = self.p.copy()
 
-                # Solve momentum equations with true algebraic residuals
-                u_star, d_u, u_res_abs = self.momentum_solver.solve_u_momentum(
+                # Solve momentum equations, get norm and field
+                u_star, d_u, u_res_abs, u_res_field = self.momentum_solver.solve_u_momentum(
                     self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
                     boundary_conditions=self.bc_manager
                 )
 
-                v_star, d_v, v_res_abs = self.momentum_solver.solve_v_momentum(
+                v_star, d_v, v_res_abs, v_res_field = self.momentum_solver.solve_v_momentum(
                     self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
                     boundary_conditions=self.bc_manager
@@ -104,8 +109,8 @@ class SimpleSolver(BaseAlgorithm):
                 self._tmp_d_u = d_u
                 self._tmp_d_v = d_v
 
-                # Solve pressure correction equation and get residual directly
-                p_prime, p_res_abs = self.pressure_solver.solve(self.mesh, u_star, v_star, d_u, d_v, p_star)
+                # Solve pressure correction equation, get norm and field
+                p_prime, p_res_abs, p_res_field = self.pressure_solver.solve(self.mesh, u_star, v_star, d_u, d_v, p_star)
                 
                 # Update pressure with relaxation
                 self.p = p_star + self.alpha_p * p_prime
@@ -147,6 +152,11 @@ class SimpleSolver(BaseAlgorithm):
         except KeyboardInterrupt:
             print("Interrupted by user.")
 
+        # After the loop, store the residual fields from the last completed iteration
+        self._final_u_residual_field = u_res_field
+        self._final_v_residual_field = v_res_field
+        self._final_p_residual_field = p_res_field
+
         # Ensure total_res_check holds the last calculated absolute residual for final reporting
         final_residual_to_report = total_res_check
 
@@ -176,7 +186,11 @@ class SimpleSolver(BaseAlgorithm):
             momentum_residuals=self.momentum_residual_history,
             pressure_residuals=self.pressure_residual_history,
             divergence=self.calculate_divergence(),
-            reynolds=self.fluid.get_reynolds_number()
+            reynolds=self.fluid.get_reynolds_number(),
+            # Pass final residual fields
+            u_residual_field=self._final_u_residual_field,
+            v_residual_field=self._final_v_residual_field,
+            p_residual_field=self._final_p_residual_field
         )
 
         if save_profile:

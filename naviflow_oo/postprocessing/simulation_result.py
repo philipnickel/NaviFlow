@@ -13,7 +13,8 @@ class SimulationResult:
     Store and analyze simulation results.
     """
     def __init__(self, u, v, p, mesh, iterations=0, residuals=None, divergence=None, reynolds=None,
-                 momentum_residuals=None, pressure_residuals=None):
+                 momentum_residuals=None, pressure_residuals=None,
+                 u_residual_field=None, v_residual_field=None, p_residual_field=None):
         """
         Initialize the simulation result.
         
@@ -37,6 +38,12 @@ class SimulationResult:
             Momentum convergence history
         pressure_residuals : list, optional
             Pressure convergence history
+        u_residual_field : ndarray, optional
+            Final algebraic u-momentum residual field
+        v_residual_field : ndarray, optional
+            Final algebraic v-momentum residual field
+        p_residual_field : ndarray, optional
+            Final algebraic pressure residual field
         """
         self.u = u
         self.v = v
@@ -50,6 +57,10 @@ class SimulationResult:
         self.reynolds = reynolds
         self.infinity_norm_error = None
         self.l2_norm_error = None
+        # Store the final residual fields
+        self.u_residual_field = u_residual_field
+        self.v_residual_field = v_residual_field
+        self.p_residual_field = p_residual_field
     
     def plot_velocity_field(self, title=None, filename=None, show=True):
         """

@@ -488,20 +488,19 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
         
     return fig
 
-def plot_final_residuals(u, v, p, u_old, v_old, p_old, mesh, title=None, filename=None, show=True, output_dir=None):
+def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, mesh, title=None, filename=None, show=True, output_dir=None):
     """
-    Plot final residuals for pressure, momentum, and total fields.
+    Plot final algebraic residuals for pressure, u-momentum, and v-momentum fields on their native grids.
+    Shows both log scale (top row) and linear scale (bottom row).
     
     Parameters:
     -----------
-    u, v : ndarray
-        Current velocity fields
-    p : ndarray
-        Current pressure field
-    u_old, v_old : ndarray
-        Previous velocity fields
-    p_old : ndarray
-        Previous pressure field
+    u_residual_field : ndarray
+        Final algebraic u-momentum residual field (staggered grid)
+    v_residual_field : ndarray
+        Final algebraic v-momentum residual field (staggered grid)
+    p_residual_field : ndarray
+        Final algebraic pressure residual field (cell-centered)
     mesh : StructuredMesh
         The computational mesh
     title : str, optional
@@ -513,92 +512,122 @@ def plot_final_residuals(u, v, p, u_old, v_old, p_old, mesh, title=None, filenam
     output_dir : str, optional
         Directory where to save the output. If None, uses 'results' in the calling script's directory.
     """
-    # Calculate the final residual fields
-    final_p_residual = np.abs(p - p_old)  # Final pressure residual
-    final_u_residual = np.abs(u - u_old)  # Final u-velocity residual
-    final_v_residual = np.abs(v - v_old)  # Final v-velocity residual
+    if u_residual_field is None or v_residual_field is None or p_residual_field is None:
+        print("Warning: One or more final residual fields are missing. Skipping plot_final_residuals.")
+        return None
+        
+    final_p_residual = np.abs(p_residual_field)
+    final_u_residual = np.abs(u_residual_field)
+    final_v_residual = np.abs(v_residual_field)
     
-    # Get mesh dimensions
     nx, ny = mesh.get_dimensions()
+    dx, dy = mesh.get_cell_sizes()
     
-    # Create cell-centered final u-velocity residual
-    u_res_centered = np.zeros_like(p)
-    for i in range(nx):
-        for j in range(ny):
-            if i < nx-1:
-                u_res_centered[i,j] = 0.5 * (final_u_residual[i,j] + final_u_residual[i+1,j])
+    # Create a figure with 2x3 subplots
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10)) # Adjusted figsize for 2 rows
+    
+    # Internal helper function to plot a field on its native grid
+    def plot_residual_field_native(ax, data, field_title, plot_log=True):
+        label = f'Log10 |Residual|' if plot_log else '|Residual|'
+        # Ensure plot_data uses absolute value before log
+        plot_data = np.log10(np.abs(data) + 1e-12) if plot_log else np.abs(data)
+
+        M, N = data.shape
+        nx, ny = mesh.get_dimensions() # Get mesh dimensions here
+        dx, dy = mesh.get_cell_sizes()
+
+        # Determine correct CENTER coordinates based on field type for pcolormesh shading='nearest'
+        x_coords, y_coords = None, None
+        valid_plot = True
+        if field_title == "Pressure Residual":
+            # Data is M x N = nx x ny
+            # Need centers X:(nx), Y:(ny)
+            if M == nx and N == ny:
+                x_coords = np.linspace(dx/2, mesh.length - dx/2, nx)
+                y_coords = np.linspace(dy/2, mesh.height - dy/2, ny)
             else:
-                u_res_centered[i,j] = final_u_residual[i,j]
-    
-    # Create cell-centered final v-velocity residual
-    v_res_centered = np.zeros_like(p)
-    for i in range(nx):
-        for j in range(ny):
-            if j < ny-1:
-                v_res_centered[i,j] = 0.5 * (final_v_residual[i,j] + final_v_residual[i,j+1])
+                 print(f"Warning: Pressure residual shape mismatch. Expected ({nx}, {ny}), got ({M}, {N})")
+                 valid_plot = False
+        elif field_title == "U-Momentum Residual":
+            # Data is M x N = (nx+1) x ny
+            # Need centers X:(nx+1), Y:(ny)
+            if M == nx + 1 and N == ny:
+                x_coords = np.linspace(0, mesh.length, nx + 1) # u-face x-locations are 0, dx, ..., L
+                y_coords = np.linspace(dy/2, mesh.height - dy/2, ny) # u-face y-locations are cell centers
             else:
-                v_res_centered[i,j] = final_v_residual[i,j]
-    
-    # Combined final momentum residual
-    final_momentum_res_field = np.sqrt(u_res_centered**2 + v_res_centered**2)
-    final_total_res_field = final_momentum_res_field + final_p_residual
-    
-    # Calculate relative errors
-    rel_p_residual = final_p_residual / (np.abs(p) + 1e-10)
-    
-    # Create cell-centered velocity magnitude for relative momentum residual
-    u_mag = np.zeros_like(p)
-    v_mag = np.zeros_like(p)
-    for i in range(nx):
-        for j in range(ny):
-            if i < nx-1:
-                u_mag[i,j] = 0.5 * (u[i,j] + u[i+1,j])
+                 print(f"Warning: U-Momentum residual shape mismatch. Expected ({nx+1}, {ny}), got ({M}, {N})")
+                 valid_plot = False
+        elif field_title == "V-Momentum Residual":
+            # Data is M x N = nx x (ny+1)
+            # Need centers X:(nx), Y:(ny+1)
+            if M == nx and N == ny + 1:
+                x_coords = np.linspace(dx/2, mesh.length - dx/2, nx) # v-face x-locations are cell centers
+                y_coords = np.linspace(0, mesh.height, ny + 1) # v-face y-locations are 0, dy, ..., H
             else:
-                u_mag[i,j] = u[i,j]
-            if j < ny-1:
-                v_mag[i,j] = 0.5 * (v[i,j] + v[i,j+1])
+                 print(f"Warning: V-Momentum residual shape mismatch. Expected ({nx}, {ny+1}), got ({M}, {N})")
+                 valid_plot = False
+        else:
+            print(f"Error: Unknown field_title: {field_title}")
+            valid_plot = False
+
+        # Plot using pcolormesh if coordinates and data are valid
+        if valid_plot and x_coords is not None and y_coords is not None:
+            # Explicitly handle potential NaN/inf in plot_data if taking log
+            if plot_log:
+                plot_data = np.nan_to_num(plot_data, nan=-12.0, posinf=0, neginf=-12.0)
+            
+            vmin = np.min(plot_data) if np.isfinite(np.min(plot_data)) else -12
+            vmax = np.max(plot_data) if np.isfinite(np.max(plot_data)) else 0
+            if vmin == vmax:
+                vmin -= 1
+                vmax += 1
+                
+            # Use shading='nearest' - expects coordinates to be centers matching data dimensions
+            # Note: pcolormesh needs X, Y coordinates defining the grid, and C matching dimensions.
+            # If X, Y have same shape as C, shading='nearest'/'gouraud' can be used.
+            # We need to create meshgrid from the center coordinates.
+            X, Y = np.meshgrid(x_coords, y_coords, indexing='ij')
+            
+            # Check if meshgrid dimensions match data dimensions
+            if X.shape == data.shape:
+                # Use shading='nearest'. Data needs transposing for correct orientation if meshgrid is ij indexed.
+                img = ax.pcolormesh(X, Y, plot_data, cmap='coolwarm', shading='nearest', vmin=vmin, vmax=vmax)
+                plt.colorbar(img, ax=ax, label=label)
+                ax.set_title(f"{field_title}\n{label}")
+                ax.set_aspect('equal', adjustable='box')
+                ax.set_xlabel('x')
+                ax.set_ylabel('y')
+                # Set limits slightly outside the centers for visibility
+                ax.set_xlim(0, mesh.length)
+                ax.set_ylim(0, mesh.height)
             else:
-                v_mag[i,j] = v[i,j]
+                ax.text(0.5, 0.5, f"Meshgrid/Data mismatch for {field_title}\nData: {data.shape}\nMeshgrid: {X.shape}", 
+                         ha='center', va='center', transform=ax.transAxes)
+                ax.set_title(field_title)
+        else:
+            ax.text(0.5, 0.5, f"Plotting failed for {field_title}", 
+                     ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(field_title)
+
+    # Call the plotting function for each residual type, for both log and linear scales
     
-    rel_momentum_residual = final_momentum_res_field / (np.sqrt(u_mag**2 + v_mag**2) + 1e-10)
-    rel_total_residual = final_total_res_field / (np.sqrt(u_mag**2 + v_mag**2 + p**2) + 1e-10)
+    # --- Top Row (Log Scale) ---
+    plot_residual_field_native(axes[0, 0], final_p_residual, "Pressure Residual", plot_log=True)
+    plot_residual_field_native(axes[0, 1], final_u_residual, "U-Momentum Residual", plot_log=True)
+    plot_residual_field_native(axes[0, 2], final_v_residual, "V-Momentum Residual", plot_log=True)
     
-    # Create a figure with 3x4 subplots (3 fields, 4 error types each)
-    fig = plt.figure(figsize=(20, 15))
-    
-    # Function to create subplot with error field
-    def plot_error_field(ax, data, title, is_log=False, is_relative=False):
-        if is_log:
-            data = np.log10(data + 1e-10)
-        img = ax.matshow(data, cmap='coolwarm')
-        plt.colorbar(img, ax=ax, label=f"{'Log10 ' if is_log else ''}{'Relative' if is_relative else 'Absolute'} Error")
-        ax.set_title(f"{title}\n{'Log10 ' if is_log else ''}{'Relative' if is_relative else 'Absolute'} Error")
-    
-    # Pressure error plots
-    plot_error_field(plt.subplot(3, 4, 1), final_p_residual, "Pressure", is_log=False, is_relative=False)
-    plot_error_field(plt.subplot(3, 4, 2), final_p_residual, "Pressure", is_log=True, is_relative=False)
-    plot_error_field(plt.subplot(3, 4, 3), rel_p_residual, "Pressure", is_log=False, is_relative=True)
-    plot_error_field(plt.subplot(3, 4, 4), rel_p_residual, "Pressure", is_log=True, is_relative=True)
-    
-    # Momentum error plots
-    plot_error_field(plt.subplot(3, 4, 5), final_momentum_res_field, "Momentum", is_log=False, is_relative=False)
-    plot_error_field(plt.subplot(3, 4, 6), final_momentum_res_field, "Momentum", is_log=True, is_relative=False)
-    plot_error_field(plt.subplot(3, 4, 7), rel_momentum_residual, "Momentum", is_log=False, is_relative=True)
-    plot_error_field(plt.subplot(3, 4, 8), rel_momentum_residual, "Momentum", is_log=True, is_relative=True)
-    
-    # Total error plots
-    plot_error_field(plt.subplot(3, 4, 9), final_total_res_field, "Total", is_log=False, is_relative=False)
-    plot_error_field(plt.subplot(3, 4, 10), final_total_res_field, "Total", is_log=True, is_relative=False)
-    plot_error_field(plt.subplot(3, 4, 11), rel_total_residual, "Total", is_log=False, is_relative=True)
-    plot_error_field(plt.subplot(3, 4, 12), rel_total_residual, "Total", is_log=True, is_relative=True)
+    # --- Bottom Row (Linear Scale) ---
+    plot_residual_field_native(axes[1, 0], final_p_residual, "Pressure Residual", plot_log=False)
+    plot_residual_field_native(axes[1, 1], final_u_residual, "U-Momentum Residual", plot_log=False)
+    plot_residual_field_native(axes[1, 2], final_v_residual, "V-Momentum Residual", plot_log=False)
     
     if title:
         fig.suptitle(title, fontsize=16)
+        fig.subplots_adjust(top=0.92) # Adjust top spacing for suptitle
     
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust layout rect to prevent suptitle overlap
     
     if filename:
-        # Ensure output directory exists and get full path
         full_path = _ensure_output_directory(filename, output_dir)
         plt.savefig(full_path, dpi=300, bbox_inches='tight')
         print(f"Final residuals plot saved to {full_path}")
@@ -805,4 +834,3 @@ def animate_velocity_field(u_list, v_list, x, y, title=None, filename=None, inte
     """
     # Implementation would go here
     pass
-
