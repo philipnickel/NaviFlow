@@ -72,6 +72,7 @@ class DirectPressureSolver(PressureSolver):
         rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
         
         # Get coefficient matrix with boundary conditions already integrated
+        # Although we use spsolve, we need A for the residual calculation later if not using compute_Ap_product
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
         
         # Fix reference pressure at (0,0) - first index in flattened system
@@ -84,9 +85,13 @@ class DirectPressureSolver(PressureSolver):
         # Solve the system
         p_prime_flat = spsolve(A, rhs)
         
-        # Calculate residual for tracking
-        residual = np.linalg.norm(A.dot(p_prime_flat) - rhs)
-        self.residual_history.append(residual)
+        # Calculate residual for tracking using the explicit matrix A
+        Ax = A.dot(p_prime_flat) # Use explicit matrix-vector product
+        r = rhs - Ax
+        r_norm = np.linalg.norm(r, 2)
+        b_norm = np.linalg.norm(rhs, 2)
+        res_norm = r_norm / b_norm if b_norm > 0 else r_norm
+        self.residual_history.append(res_norm) # Store normalized residual
         
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
@@ -94,7 +99,8 @@ class DirectPressureSolver(PressureSolver):
         # Enforce pressure boundary conditions
         #self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
-        return p_prime
+        # Return both the solution and the calculated residual norm
+        return p_prime, res_norm
         
     def get_solver_info(self):
         """

@@ -30,11 +30,11 @@ os.makedirs(results_dir, exist_ok=True)
 start_time = time.time()
 
 # 1. Set up simulation parameters
-nx, ny = 2**6-1, 2**6-1           # Grid size (smaller for quick testing)
+nx, ny = 2**7-1, 2**7-1           # Grid size (smaller for quick testing)
 reynolds = 100            # Reynolds number
 alpha_p = 0.1            # Even more conservative pressure relaxation
 alpha_u = 0.8             # Even more conservative velocity relaxation
-max_iterations = 300    
+max_iterations = 600    
 tolerance = 1e-5          # Convergence tolerance
 h = 1/nx 
 disc_order = 1

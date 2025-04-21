@@ -10,7 +10,7 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
-from naviflow_oo.solver.momentum_solver.power_law import StandardMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Create results directory
@@ -25,8 +25,14 @@ nx, ny = 63, 63          # Grid size
 reynolds = 100           # Reynolds number
 alpha_p = 0.3            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.7            # Velocity relaxation factor
-max_iterations = 10000     # Maximum number of iterations
+max_iterations = 600     # Maximum number of iterations
 tolerance = 1e-4         # Convergence tolerance
+
+h = 1/nx 
+disc_order = 1
+expected_disc_error = h**(disc_order)
+pressure_tolerance = expected_disc_error 
+print(f"Pressure tolerance: {pressure_tolerance}")
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -45,11 +51,11 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Jacobi solver for pressure correction
 pressure_solver = JacobiSolver(
-    tolerance=1e-5,  # Relaxed tolerance for inner iterations
+    tolerance=pressure_tolerance,  # Relaxed tolerance for inner iterations
     max_iterations=500000,  # Fewer iterations per SIMPLE iteration
     omega=0.8,  # Weighted Jacobi for better convergence
 )
-momentum_solver = StandardMomentumSolver()
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm

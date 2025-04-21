@@ -25,8 +25,14 @@ nx, ny = 63, 63          # Grid size
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.8            # Velocity relaxation factor
-max_iterations = 200     # Maximum number of iterations
+max_iterations = 1000     # Maximum number of iterations
 tolerance = 1e-20         # Convergence tolerance
+h = 1/nx 
+disc_order = 1
+expected_disc_error = h**(disc_order)
+pressure_tolerance = expected_disc_error 
+print(f"Pressure tolerance: {pressure_tolerance}")
+
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -45,11 +51,11 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 # Use Gauss-Seidel solver for pressure correction
 pressure_solver = GaussSeidelSolver(
-    tolerance=1e-3,  # Relaxed tolerance for inner iterations
+    tolerance=pressure_tolerance,  # Relaxed tolerance for inner iterations
     max_iterations=300,  # Fewer iterations per SIMPLE iteration
     omega=0.86, 
 )
-momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=20)
+momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
