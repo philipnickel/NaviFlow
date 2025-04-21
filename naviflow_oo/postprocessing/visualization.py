@@ -523,11 +523,32 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
     nx, ny = mesh.get_dimensions()
     dx, dy = mesh.get_cell_sizes()
     
+    # --- Slice data and coordinates to get interior points only ---
+    # Pressure residuals (cell centers: 1 to nx-2, 1 to ny-2)
+    p_res_interior = final_p_residual[1:nx-1, 1:ny-1]
+    x_p_interior = np.linspace(dx/2, mesh.length - dx/2, nx)[1:nx-1] # Interior cell centers
+    y_p_interior = np.linspace(dy/2, mesh.height - dy/2, ny)[1:ny-1] # Interior cell centers
+
+    # U-momentum residuals (u-faces: i=1 to nx-1, cell centers j=1 to ny-2)
+    # Note: u_residual_field has shape (nx+1, ny)
+    u_res_interior = final_u_residual[1:nx, 1:ny-1] 
+    # Coordinates for u-faces (x) and corresponding cell centers (y)
+    x_u_interior = np.linspace(dx, mesh.length - dx, nx-1) # Interior u-face x-locations 
+    y_u_interior = np.linspace(dy*1.5, mesh.height - dy*1.5, ny-2) # y-centers for rows 1 to ny-2
+
+    # V-momentum residuals (cell centers i=1 to nx-2, v-faces j=1 to ny-1)
+    # Note: v_residual_field has shape (nx, ny+1)
+    v_res_interior = final_v_residual[1:nx-1, 1:ny]
+    # Coordinates for cell centers (x) and corresponding v-faces (y)
+    x_v_interior = np.linspace(dx*1.5, mesh.length - dx*1.5, nx-2) # x-centers for cols 1 to nx-2
+    y_v_interior = np.linspace(dy, mesh.height - dy, ny-1) # Interior v-face y-locations
+    # --- End slicing ---
+
     # Create a figure with 2x3 subplots
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10)) # Adjusted figsize for 2 rows
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     
     # Internal helper function to plot a field on its native grid
-    def plot_residual_field_native(ax, data, field_title, plot_log=True):
+    def plot_residual_field_native(ax, data, x_coords, y_coords, field_title, plot_log=True):
         label = f'Log10 |Residual|' if plot_log else '|Residual|'
         # Ensure plot_data uses absolute value before log
         plot_data = np.log10(np.abs(data) + 1e-12) if plot_log else np.abs(data)
@@ -535,43 +556,17 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
         M, N = data.shape
         nx, ny = mesh.get_dimensions() # Get mesh dimensions here
         dx, dy = mesh.get_cell_sizes()
-
-        # Determine correct CENTER coordinates based on field type for pcolormesh shading='nearest'
-        x_coords, y_coords = None, None
+        
         valid_plot = True
-        if field_title == "Pressure Residual":
-            # Data is M x N = nx x ny
-            # Need centers X:(nx), Y:(ny)
-            if M == nx and N == ny:
-                x_coords = np.linspace(dx/2, mesh.length - dx/2, nx)
-                y_coords = np.linspace(dy/2, mesh.height - dy/2, ny)
-            else:
-                 print(f"Warning: Pressure residual shape mismatch. Expected ({nx}, {ny}), got ({M}, {N})")
-                 valid_plot = False
-        elif field_title == "U-Momentum Residual":
-            # Data is M x N = (nx+1) x ny
-            # Need centers X:(nx+1), Y:(ny)
-            if M == nx + 1 and N == ny:
-                x_coords = np.linspace(0, mesh.length, nx + 1) # u-face x-locations are 0, dx, ..., L
-                y_coords = np.linspace(dy/2, mesh.height - dy/2, ny) # u-face y-locations are cell centers
-            else:
-                 print(f"Warning: U-Momentum residual shape mismatch. Expected ({nx+1}, {ny}), got ({M}, {N})")
-                 valid_plot = False
-        elif field_title == "V-Momentum Residual":
-            # Data is M x N = nx x (ny+1)
-            # Need centers X:(nx), Y:(ny+1)
-            if M == nx and N == ny + 1:
-                x_coords = np.linspace(dx/2, mesh.length - dx/2, nx) # v-face x-locations are cell centers
-                y_coords = np.linspace(0, mesh.height, ny + 1) # v-face y-locations are 0, dy, ..., H
-            else:
-                 print(f"Warning: V-Momentum residual shape mismatch. Expected ({nx}, {ny+1}), got ({M}, {N})")
-                 valid_plot = False
-        else:
-            print(f"Error: Unknown field_title: {field_title}")
+        if not (x_coords.size == M and y_coords.size == N):
+            print(f"Warning: Coordinate/Data mismatch for {field_title}.")
+            print(f"  Data shape: ({M}, {N})")
+            print(f"  X coords shape: {x_coords.shape}")
+            print(f"  Y coords shape: {y_coords.shape}")
             valid_plot = False
 
         # Plot using pcolormesh if coordinates and data are valid
-        if valid_plot and x_coords is not None and y_coords is not None:
+        if valid_plot:
             # Explicitly handle potential NaN/inf in plot_data if taking log
             if plot_log:
                 plot_data = np.nan_to_num(plot_data, nan=-12.0, posinf=0, neginf=-12.0)
@@ -583,9 +578,6 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
                 vmax += 1
                 
             # Use shading='nearest' - expects coordinates to be centers matching data dimensions
-            # Note: pcolormesh needs X, Y coordinates defining the grid, and C matching dimensions.
-            # If X, Y have same shape as C, shading='nearest'/'gouraud' can be used.
-            # We need to create meshgrid from the center coordinates.
             X, Y = np.meshgrid(x_coords, y_coords, indexing='ij')
             
             # Check if meshgrid dimensions match data dimensions
@@ -595,11 +587,12 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
                 plt.colorbar(img, ax=ax, label=label)
                 ax.set_title(f"{field_title}\n{label}")
                 ax.set_aspect('equal', adjustable='box')
-                ax.set_xlabel('x')
-                ax.set_ylabel('y')
+                ax.set_xlabel('x (Interior)')
+                ax.set_ylabel('y (Interior)')
                 # Set limits slightly outside the centers for visibility
-                ax.set_xlim(0, mesh.length)
-                ax.set_ylim(0, mesh.height)
+                # Adjust limits to only show interior region
+                ax.set_xlim(dx, mesh.length - dx)
+                ax.set_ylim(dy, mesh.height - dy)
             else:
                 ax.text(0.5, 0.5, f"Meshgrid/Data mismatch for {field_title}\nData: {data.shape}\nMeshgrid: {X.shape}", 
                          ha='center', va='center', transform=ax.transAxes)
@@ -610,19 +603,20 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
             ax.set_title(field_title)
 
     # Call the plotting function for each residual type, for both log and linear scales
+    # Pass the INTERIOR data and coordinates
     
     # --- Top Row (Log Scale) ---
-    plot_residual_field_native(axes[0, 0], final_p_residual, "Pressure Residual", plot_log=True)
-    plot_residual_field_native(axes[0, 1], final_u_residual, "U-Momentum Residual", plot_log=True)
-    plot_residual_field_native(axes[0, 2], final_v_residual, "V-Momentum Residual", plot_log=True)
+    plot_residual_field_native(axes[0, 0], p_res_interior, x_p_interior, y_p_interior, "Pressure Residual", plot_log=True)
+    plot_residual_field_native(axes[0, 1], u_res_interior, x_u_interior, y_u_interior, "U-Momentum Residual", plot_log=True)
+    plot_residual_field_native(axes[0, 2], v_res_interior, x_v_interior, y_v_interior, "V-Momentum Residual", plot_log=True)
     
     # --- Bottom Row (Linear Scale) ---
-    plot_residual_field_native(axes[1, 0], final_p_residual, "Pressure Residual", plot_log=False)
-    plot_residual_field_native(axes[1, 1], final_u_residual, "U-Momentum Residual", plot_log=False)
-    plot_residual_field_native(axes[1, 2], final_v_residual, "V-Momentum Residual", plot_log=False)
+    plot_residual_field_native(axes[1, 0], p_res_interior, x_p_interior, y_p_interior, "Pressure Residual", plot_log=False)
+    plot_residual_field_native(axes[1, 1], u_res_interior, x_u_interior, y_u_interior, "U-Momentum Residual", plot_log=False)
+    plot_residual_field_native(axes[1, 2], v_res_interior, x_v_interior, y_v_interior, "V-Momentum Residual", plot_log=False)
     
     if title:
-        fig.suptitle(title, fontsize=16)
+        fig.suptitle(title + " (Interior Points)", fontsize=16)
         fig.subplots_adjust(top=0.92) # Adjust top spacing for suptitle
     
     plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust layout rect to prevent suptitle overlap

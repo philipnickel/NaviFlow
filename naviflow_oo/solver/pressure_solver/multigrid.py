@@ -144,6 +144,10 @@ class MultiGridSolver(PressureSolver):
         --------
         p_prime : ndarray
             Pressure correction field.
+        p_res_abs : float
+            Absolute residual of the final solution.
+        p_res_field : ndarray
+            Residual field of the final solution.
         """
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
@@ -244,9 +248,38 @@ class MultiGridSolver(PressureSolver):
         # Reshape to 2D with Fortran ordering
         p_prime = x.reshape((nx, ny), order='F')
         
-    
+        # --- Calculate final residual and norm --- 
+        Ax_final = compute_Ap_product(x, nx, ny, dx, dy, self.rho, d_u, d_v)
+        r_final = b - Ax_final
+        r_final_field = r_final.reshape((nx, ny), order='F')
+
+        # Mask boundaries in residual and RHS fields to calculate norm
+        r_final_field_masked = r_final_field.copy()
+        b_field_masked = b.reshape((nx, ny), order='F').copy()
+
+        r_final_field_masked[0, :] = 0.0
+        r_final_field_masked[nx-1, :] = 0.0
+        r_final_field_masked[:, 0] = 0.0
+        r_final_field_masked[:, ny-1] = 0.0
+
+        b_field_masked[0, :] = 0.0
+        b_field_masked[nx-1, :] = 0.0
+        b_field_masked[:, 0] = 0.0
+        b_field_masked[:, ny-1] = 0.0
+
+        r_norm = np.linalg.norm(r_final_field_masked)
+        b_norm = np.linalg.norm(b_field_masked)
+        p_res_abs = r_norm / (b_norm + 1e-15) if (b_norm + 1e-15) > 0 else r_norm
         
-        return p_prime
+        # Zero out boundaries in the RETURNED residual field
+        p_res_field = r_final_field
+        p_res_field[0, :] = 0.0
+        p_res_field[nx-1, :] = 0.0
+        p_res_field[:, 0] = 0.0
+        p_res_field[:, ny-1] = 0.0
+        # ------------------------------------------
+        
+        return p_prime, p_res_abs, p_res_field
     
     def _solve_residual_direct(self, mesh, residual, d_u, d_v, rho=1.0):
         """

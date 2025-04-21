@@ -15,13 +15,15 @@ from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
 from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
 from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
+from naviflow_oo.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrixMomentumSolver
+from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residuals
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**7-1, 2**7-1 # Grid size
+nx, ny = 2**6-1, 2**6-1 # Grid size
 reynolds = 100            # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
@@ -66,7 +68,10 @@ multigrid_solver = MultiGridSolver(
     interpolation_method='interpolate_cubic',  # Use cubic interpolation
     coarsest_grid_size= 7,    # Size of the coarsest grid
 )
-momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=10)
+
+#momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=5)
+momentum_solver = AMGMomentumSolver(tolerance=1e-3, max_iterations=10000)
+
 velocity_updater = StandardVelocityUpdater()
 
 # Create algorithm
@@ -118,12 +123,13 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 result.plot_combined_results(
     title=f'Multigrid with Gauss-Seidel Smoother Cavity Flow Results (Re={reynolds})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_multigrid_gauss_seidel_results.pdf'),
-    show=True
+    show=False
 )
 # 11. Visualize final residuals
 plot_final_residuals(
-    result.u, result.v, result.p,
-    algorithm.u_old, algorithm.v_old, algorithm.p_old,
+    result.u_residual_field, 
+    result.v_residual_field, 
+    result.p_residual_field,
     mesh,
     title=f'Final Residuals (Re={reynolds})',
     filename=os.path.join(results_dir, f'final_residuals_Re_GS{reynolds}.pdf'),

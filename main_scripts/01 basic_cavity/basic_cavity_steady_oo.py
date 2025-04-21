@@ -14,7 +14,7 @@ from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.direct import DirectPressureSolver
 from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrixMomentumSolver
-from naviflow_oo.solver.momentum_solver.CG_matrix_solver import CGMatrixMomentumSolver
+from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals, plot_u_v_continuity_residuals
 
@@ -25,8 +25,8 @@ nx, ny = 2**6-1, 2**6-1 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 200     # Maximum number of iterations
-tolerance = 1e-4
+max_iterations = 1000     # Maximum number of iterations
+tolerance = 1e-10
 
 
 # 2. Create mesh
@@ -47,8 +47,10 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 pressure_solver = DirectPressureSolver()
 
 #momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
-momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=5) 
-#momentum_solver = CGMatrixMomentumSolver(tolerance=1e-1, max_iterations=1000) 
+#momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=50)
+#momentum_solver = CGMatrixMomentumSolver(tolerance=1e-1, max_iterations=1000)
+# Use the new AMG solver
+momentum_solver = AMGMomentumSolver(tolerance=1e-3, max_iterations=10000)
 
 velocity_updater = StandardVelocityUpdater()
 
@@ -106,11 +108,12 @@ result.plot_combined_results(
 
 # 11. Visualize final residuals
 plot_final_residuals(
-    result.u, result.v, result.p,
-    algorithm.u_old, algorithm.v_old, algorithm.p_old,
+    result.u_residual_field, 
+    result.v_residual_field, 
+    result.p_residual_field,
     mesh,
-    title=f'Final Residuals (Re={reynolds})',
-    filename=os.path.join(results_dir, f'final_residuals_Re{reynolds}.pdf'),
+    title=f'Final Algebraic Residual Fields (Re={reynolds})',
+    filename=os.path.join(results_dir, f'final_algebraic_residual_fields_Re{reynolds}.pdf'),
     show=False
 )
 
