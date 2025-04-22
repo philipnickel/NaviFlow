@@ -38,7 +38,7 @@ class DirectPressureSolver(PressureSolver):
         self.p_a_p = None
         self.p_source = None
     
-    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
+    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star, return_dict=True):
         """
         Solve the pressure correction equation using a direct method.
         
@@ -52,11 +52,17 @@ class DirectPressureSolver(PressureSolver):
             Momentum equation coefficients
         p_star : ndarray
             Current pressure field
+        return_dict : bool, optional
+            If True, returns a dictionary with complete residual information (default)
+            If False, returns separate residual values (deprecated)
             
         Returns:
         --------
         p_prime : ndarray
             Pressure correction field
+        residual_info : dict or (float, ndarray)
+            Either a dictionary with complete residual information (if return_dict=True)
+            or a tuple with (residual_norm, residual_field) for backward compatibility
         """
         
         # Store the mesh for use in boundary conditions
@@ -88,20 +94,48 @@ class DirectPressureSolver(PressureSolver):
         # Calculate residual for tracking using the explicit matrix A
         Ax = A.dot(p_prime_flat) # Use explicit matrix-vector product
         r = rhs - Ax # This is the residual field (1D)
-        r_norm = np.linalg.norm(r, 2)
-        b_norm = np.linalg.norm(rhs, 2)
+        
+        # Reshape residual and RHS to 2D for interior point extraction
+        r_field_full = r.reshape((nx, ny), order='F')  # Reshape residual field 
+        rhs_field_full = rhs.reshape((nx, ny), order='F')  # Reshape RHS field
+        
+        # Extract interior points only (1:nx-1, 1:ny-1) for pressure
+        r_interior = r_field_full[1:nx-1, 1:ny-1].flatten()
+        rhs_interior = rhs_field_full[1:nx-1, 1:ny-1].flatten()
+        
+        # Calculate L2 norm on interior points only
+        r_norm = np.linalg.norm(r_interior, 2)
+        b_norm = np.linalg.norm(rhs_interior, 2)
         res_norm = r_norm / b_norm if b_norm > 0 else r_norm
         self.residual_history.append(res_norm) # Store normalized residual
         
-        # Reshape solution and residual to 2D
+        # Reshape solution to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
-        r_field = r.reshape((nx, ny), order='F') # Reshape residual field
+        
+        # Also calculate absolute L2 norm of interior points
+        p_abs = np.linalg.norm(r_field_full[1:nx-1, 1:ny-1], ord=2)
+        
+        # Create a residual information dictionary
+        residual_info = {
+            'norm': res_norm,         # Normalized/relative (r/b)
+            'abs': p_abs,             # Absolute L2 norm
+            'field': r_field_full     # Full residual field
+        }
         
         # Enforce pressure boundary conditions
         #self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
-        # Return the solution, residual norm, and residual field
-        return p_prime, res_norm, r_field
+        # Return the solution and residual info
+        if return_dict:
+            return p_prime, residual_info
+        else:
+            import warnings
+            warnings.warn(
+                "Non-dictionary return format is deprecated. Use return_dict=True for future compatibility.",
+                DeprecationWarning, stacklevel=2
+            )
+            # For backward compatibility, return p_prime, residual_norm, and residual_field
+            return p_prime, residual_info['norm'], residual_info['field']
         
     def get_solver_info(self):
         """

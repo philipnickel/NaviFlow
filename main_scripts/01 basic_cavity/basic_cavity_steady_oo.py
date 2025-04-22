@@ -21,12 +21,12 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals, plot_
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**6-1, 2**6-1 # Grid size
+nx, ny = 2**5-1, 2**5-1 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 1000     # Maximum number of iterations
-tolerance = 1e-10
+max_iterations = 300     # Maximum number of iterations
+tolerance = 1e-20
 
 
 # 2. Create mesh
@@ -47,10 +47,10 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 pressure_solver = DirectPressureSolver()
 
 #momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
-#momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=50)
+#momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=1)
 #momentum_solver = CGMatrixMomentumSolver(tolerance=1e-1, max_iterations=1000)
 # Use the new AMG solver
-momentum_solver = AMGMomentumSolver(tolerance=1e-3, max_iterations=10000)
+momentum_solver = AMGMomentumSolver(tolerance=1e-2, max_iterations=10000)
 
 velocity_updater = StandardVelocityUpdater()
 
@@ -114,17 +114,28 @@ plot_final_residuals(
     mesh,
     title=f'Final Algebraic Residual Fields (Re={reynolds})',
     filename=os.path.join(results_dir, f'final_algebraic_residual_fields_Re{reynolds}.pdf'),
-    show=False
+    show=False,
+    u_abs_unrelaxed_history=result.get_history('u_abs_unrelaxed'),
+    v_abs_unrelaxed_history=result.get_history('v_abs_unrelaxed'),
+    p_abs_history=result.get_history('p_abs'),
+    history_filename=os.path.join(results_dir, f'unrelaxed_abs_residual_history_Re{reynolds}.pdf')
 )
 
 # 12. Visualize residual history
 plot_u_v_continuity_residuals(
-    algorithm.x_momentum_residuals, 
-    algorithm.y_momentum_residuals, 
-    algorithm.continuity_residuals,
+    result.get_history('u_momentum_relaxed'),
+    result.get_history('v_momentum_relaxed'),
+    result.get_history('u_momentum_unrelaxed'),
+    result.get_history('v_momentum_unrelaxed'),
+    result.get_history('continuity'),
     title=f'Residual History (Re={reynolds})',
     filename=os.path.join(results_dir, f'residual_history_Re{reynolds}.pdf'),
-    show=False
+    show=False,
+    u_abs_relaxed=result.get_history('u_abs_relaxed'),
+    v_abs_relaxed=result.get_history('v_abs_relaxed'),
+    u_abs_unrelaxed=result.get_history('u_abs_unrelaxed'),
+    v_abs_unrelaxed=result.get_history('v_abs_unrelaxed'),
+    p_abs_residuals=result.get_history('p_abs')
 )
 
 

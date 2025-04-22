@@ -61,6 +61,37 @@ class SimulationResult:
         self.u_residual_field = u_residual_field
         self.v_residual_field = v_residual_field
         self.p_residual_field = p_residual_field
+        # Dictionary to store custom history data
+        self._custom_histories = {}
+    
+    def add_history(self, name, data):
+        """
+        Add a custom history data series to this simulation result.
+        
+        Parameters:
+        -----------
+        name : str
+            Name of the history data (e.g., 'u_momentum_relaxed')
+        data : list or ndarray
+            The history data to store
+        """
+        self._custom_histories[name] = data
+    
+    def get_history(self, name):
+        """
+        Get a custom history data series by name.
+        
+        Parameters:
+        -----------
+        name : str
+            Name of the history data to retrieve
+            
+        Returns:
+        --------
+        list or ndarray
+            The requested history data, or None if not found
+        """
+        return self._custom_histories.get(name, None)
     
     def plot_velocity_field(self, title=None, filename=None, show=True):
         """

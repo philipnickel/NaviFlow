@@ -488,10 +488,14 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
         
     return fig
 
-def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, mesh, title=None, filename=None, show=True, output_dir=None):
+def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, mesh, title=None, filename=None, show=True, output_dir=None,
+                      u_abs_unrelaxed_history=None, v_abs_unrelaxed_history=None, p_abs_history=None, history_filename=None):
     """
-    Plot final algebraic residuals for pressure, u-momentum, and v-momentum fields on their native grids.
-    Shows both log scale (top row) and linear scale (bottom row).
+    Plot final absolute algebraic residuals for pressure, u-momentum, and v-momentum fields on their native grids.
+    Shows both linear scale (top row) and logarithmic scale (bottom row).
+    
+    If residual history arrays are provided, also generates a separate plot showing the history of
+    unrelaxed absolute residuals over iterations and relative residual norm defined as ||r_n||/||r_0||.
     
     Parameters:
     -----------
@@ -511,6 +515,14 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
         Whether to display the plot
     output_dir : str, optional
         Directory where to save the output. If None, uses 'results' in the calling script's directory.
+    u_abs_unrelaxed_history : list, optional
+        History of absolute unrelaxed u-velocity residuals
+    v_abs_unrelaxed_history : list, optional
+        History of absolute unrelaxed v-velocity residuals
+    p_abs_history : list, optional
+        History of absolute pressure/continuity residuals
+    history_filename : str, optional
+        If provided, saves the residual history plot to this filename
     """
     if u_residual_field is None or v_residual_field is None or p_residual_field is None:
         print("Warning: One or more final residual fields are missing. Skipping plot_final_residuals.")
@@ -544,14 +556,18 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
     y_v_interior = np.linspace(dy, mesh.height - dy, ny-1) # Interior v-face y-locations
     # --- End slicing ---
 
-    # Create a figure with 2x3 subplots
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    # Create a figure with 2x3 subplots (linear scale top row, log scale bottom row)
+    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
     
     # Internal helper function to plot a field on its native grid
-    def plot_residual_field_native(ax, data, x_coords, y_coords, field_title, plot_log=True):
-        label = f'Log10 |Residual|' if plot_log else '|Residual|'
-        # Ensure plot_data uses absolute value before log
-        plot_data = np.log10(np.abs(data) + 1e-12) if plot_log else np.abs(data)
+    def plot_residual_field_native(ax, data, x_coords, y_coords, field_title, log_scale=False):
+        label = '|Residual|' if not log_scale else 'log10(|Residual|)'
+        plot_data = np.abs(data)
+        
+        # Apply log transformation if log_scale is True
+        if log_scale:
+            # Add small value to avoid log(0)
+            plot_data = np.log10(plot_data + 1e-20)
 
         M, N = data.shape
         nx, ny = mesh.get_dimensions() # Get mesh dimensions here
@@ -566,16 +582,12 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
             valid_plot = False
 
         # Plot using pcolormesh if coordinates and data are valid
-        if valid_plot:
-            # Explicitly handle potential NaN/inf in plot_data if taking log
-            if plot_log:
-                plot_data = np.nan_to_num(plot_data, nan=-12.0, posinf=0, neginf=-12.0)
-            
-            vmin = np.min(plot_data) if np.isfinite(np.min(plot_data)) else -12
-            vmax = np.max(plot_data) if np.isfinite(np.max(plot_data)) else 0
+        if valid_plot:            
+            vmin = np.min(plot_data) if np.isfinite(np.min(plot_data)) else 0
+            vmax = np.max(plot_data) if np.isfinite(np.max(plot_data)) else 1
             if vmin == vmax:
-                vmin -= 1
-                vmax += 1
+                vmin = 0
+                vmax = vmin + 1e-6 if vmin > 0 else 1e-6
                 
             # Use shading='nearest' - expects coordinates to be centers matching data dimensions
             X, Y = np.meshgrid(x_coords, y_coords, indexing='ij')
@@ -585,7 +597,12 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
                 # Use shading='nearest'. Data needs transposing for correct orientation if meshgrid is ij indexed.
                 img = ax.pcolormesh(X, Y, plot_data, cmap='coolwarm', shading='nearest', vmin=vmin, vmax=vmax)
                 plt.colorbar(img, ax=ax, label=label)
-                ax.set_title(f"{field_title}\n{label}")
+                
+                # Calculate and display L2 norm
+                data_l2 = np.linalg.norm(np.abs(data), ord=2)
+                scale_type = "Log10 " if log_scale else ""
+                ax.set_title(f"{field_title}\n{scale_type}Absolute Residual (L2: {data_l2:.2e})")
+                
                 ax.set_aspect('equal', adjustable='box')
                 ax.set_xlabel('x (Interior)')
                 ax.set_ylabel('y (Interior)')
@@ -602,24 +619,29 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
                      ha='center', va='center', transform=ax.transAxes)
             ax.set_title(field_title)
 
-    # Call the plotting function for each residual type, for both log and linear scales
-    # Pass the INTERIOR data and coordinates
+    # Call the plotting function for absolute residuals (top row)
+    plot_residual_field_native(axes[0, 0], p_res_interior, x_p_interior, y_p_interior, "Pressure Residual")
+    plot_residual_field_native(axes[0, 1], u_res_interior, x_u_interior, y_u_interior, "U-Momentum Residual")
+    plot_residual_field_native(axes[0, 2], v_res_interior, x_v_interior, y_v_interior, "V-Momentum Residual")
     
-    # --- Top Row (Log Scale) ---
-    plot_residual_field_native(axes[0, 0], p_res_interior, x_p_interior, y_p_interior, "Pressure Residual", plot_log=True)
-    plot_residual_field_native(axes[0, 1], u_res_interior, x_u_interior, y_u_interior, "U-Momentum Residual", plot_log=True)
-    plot_residual_field_native(axes[0, 2], v_res_interior, x_v_interior, y_v_interior, "V-Momentum Residual", plot_log=True)
-    
-    # --- Bottom Row (Linear Scale) ---
-    plot_residual_field_native(axes[1, 0], p_res_interior, x_p_interior, y_p_interior, "Pressure Residual", plot_log=False)
-    plot_residual_field_native(axes[1, 1], u_res_interior, x_u_interior, y_u_interior, "U-Momentum Residual", plot_log=False)
-    plot_residual_field_native(axes[1, 2], v_res_interior, x_v_interior, y_v_interior, "V-Momentum Residual", plot_log=False)
+    # Call the plotting function for log of absolute residuals (bottom row)
+    plot_residual_field_native(axes[1, 0], p_res_interior, x_p_interior, y_p_interior, "Pressure Residual", log_scale=True)
+    plot_residual_field_native(axes[1, 1], u_res_interior, x_u_interior, y_u_interior, "U-Momentum Residual", log_scale=True)
+    plot_residual_field_native(axes[1, 2], v_res_interior, x_v_interior, y_v_interior, "V-Momentum Residual", log_scale=True)
     
     if title:
-        fig.suptitle(title + " (Interior Points)", fontsize=16)
-        fig.subplots_adjust(top=0.92) # Adjust top spacing for suptitle
+        fig.suptitle(title + " (Absolute Residuals, Interior Points)", fontsize=16)
+        fig.subplots_adjust(top=0.92, hspace=0.3) # Adjust top spacing for suptitle and between rows
     
-    plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust layout rect to prevent suptitle overlap
+    # Set row labels
+    axes[0, 0].annotate('Linear Scale', xy=(0, 0.5), xytext=(-axes[0, 0].yaxis.labelpad - 15, 0),
+                       xycoords='axes fraction', textcoords='offset points',
+                       ha='right', va='center', rotation=90, fontsize=12, fontweight='bold')
+    axes[1, 0].annotate('Log10 Scale', xy=(0, 0.5), xytext=(-axes[1, 0].yaxis.labelpad - 15, 0),
+                       xycoords='axes fraction', textcoords='offset points',
+                       ha='right', va='center', rotation=90, fontsize=12, fontweight='bold')
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.92]) # Adjust layout rect to prevent suptitle overlap
     
     if filename:
         full_path = _ensure_output_directory(filename, output_dir)
@@ -631,113 +653,88 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
     else:
         plt.close()
     
+    # Create and save residual history plot if history data is provided
+    if u_abs_unrelaxed_history is not None and v_abs_unrelaxed_history is not None and p_abs_history is not None and history_filename is not None:
+        # Plot residual history (both absolute and relative)
+        plt.figure(figsize=(14, 10))
+        
+        # First subplot: absolute unrelaxed residual history
+        plt.subplot(2, 1, 1)
+        plt.semilogy(range(len(u_abs_unrelaxed_history)), u_abs_unrelaxed_history, 'r-', label='u-momentum')
+        plt.semilogy(range(len(v_abs_unrelaxed_history)), v_abs_unrelaxed_history, 'g-', label='v-momentum')
+        plt.semilogy(range(len(p_abs_history)), p_abs_history, 'b-', label='pressure')
+        plt.grid(True)
+        plt.title('Absolute Unrelaxed Residual History')
+        plt.xlabel('Iteration')
+        plt.ylabel('Residual Norm')
+        plt.legend()
+        
+        # Second subplot: relative unrelaxed residual history
+        plt.subplot(2, 1, 2)
+        
+        # Calculate relative residuals, checking for zero initial residuals to prevent division by zero
+        u_rel_residuals = [r / u_abs_unrelaxed_history[0] if u_abs_unrelaxed_history[0] != 0 else 0 for r in u_abs_unrelaxed_history]
+        v_rel_residuals = [r / v_abs_unrelaxed_history[0] if v_abs_unrelaxed_history[0] != 0 else 0 for r in v_abs_unrelaxed_history]
+        p_rel_residuals = [r / p_abs_history[0] if p_abs_history[0] != 0 else 0 for r in p_abs_history]
+        
+        plt.semilogy(range(len(u_rel_residuals)), u_rel_residuals, 'r-', label='u-momentum')
+        plt.semilogy(range(len(v_rel_residuals)), v_rel_residuals, 'g-', label='v-momentum')
+        plt.semilogy(range(len(p_rel_residuals)), p_rel_residuals, 'b-', label='pressure')
+        plt.grid(True)
+        plt.title('Relative Unrelaxed Residual History $\\|r_n\\|/\\|r_0\\|$')
+        plt.xlabel('Iteration')
+        plt.ylabel('Relative Residual Norm')
+        plt.legend()
+        
+        # Add overall title if provided
+        if title:
+            reynolds_match = None
+            if isinstance(title, str):
+                import re
+                reynolds_match = re.search(r'Re\s*=\s*(\d+)', title)
+            
+            if reynolds_match:
+                reynolds = reynolds_match.group(1)
+                plt.suptitle(f'Residual History (Re={reynolds})', fontsize=16)
+            else:
+                plt.suptitle('Residual History', fontsize=16)
+                
+        # Adjust spacing between subplots
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        
+        # Save the plot
+        hist_full_path = _ensure_output_directory(history_filename, output_dir)
+        plt.savefig(hist_full_path, dpi=300, bbox_inches='tight')
+        print(f"Unrelaxed residual history plot saved to {hist_full_path}")
+        
+        if not show:
+            plt.close()
+    
     return fig
 
-def plot_live_residuals(residual_history, momentum_residuals=None, pressure_residuals=None, 
-                       title=None, show=True, clear_figure=True):
+def plot_u_v_continuity_residuals(u_residuals_relaxed, v_residuals_relaxed, 
+                                 u_residuals_unrelaxed, v_residuals_unrelaxed,
+                                 continuity_residuals, title=None, filename=None, 
+                                 show=True, figsize=(12, 8), output_dir=None,
+                                 u_abs_relaxed=None, v_abs_relaxed=None,
+                                 u_abs_unrelaxed=None, v_abs_unrelaxed=None,
+                                 p_abs_residuals=None):
     """
-    Plot residuals in real-time during simulation with autoscaling and stop button.
+    Plot u-velocity, v-velocity (relaxed and unrelaxed), and continuity residuals 
+    using logarithmic y-axis. Can plot both normalized (relative) and absolute residuals.
     
     Parameters:
     -----------
-    residual_history : list
-        History of total residuals
-    momentum_residuals : list, optional
-        History of momentum residuals
-    pressure_residuals : list, optional
-        History of pressure residuals
-    title : str, optional
-        Plot title
-    show : bool, optional
-        Whether to display the plot
-    clear_figure : bool, optional
-        Whether to clear the figure before plotting
-        
-    Returns:
-    --------
-    tuple
-        (matplotlib.figure.Figure, bool) - The figure and whether to stop the simulation
-    """
-    if clear_figure:
-        plt.clf()
-    
-    # Create figure if it doesn't exist
-    if not plt.get_fignums():
-        # Get screen size and create full screen figure
-        screen_width, screen_height = plt.rcParams['figure.figsize']
-        fig = plt.figure(figsize=(screen_width, screen_height))
-        # Add stop button
-        ax_stop = plt.axes([0.8, 0.01, 0.1, 0.04])
-        stop_button = plt.Button(ax_stop, 'Stop')
-        stop_button.on_clicked(lambda x: plt.close())
-    else:
-        fig = plt.gcf()
-    
-    # Function to handle window resize
-    def on_resize(event):
-        if event.inaxes is None:
-            return
-        # Get the current figure size
-        fig_width, fig_height = fig.get_size_inches()
-        # Update the figure size to match the window
-        fig.set_size_inches(fig_width, fig_height, forward=True)
-        # Redraw the figure
-        fig.canvas.draw_idle()
-    
-    # Connect the resize event
-    fig.canvas.mpl_connect('resize_event', on_resize)
-    
-    # Plot total residuals
-    iterations = range(1, len(residual_history) + 1)
-    plt.semilogy(iterations, residual_history, 'b-', linewidth=2, label='Total')
-    
-    # Plot component residuals if available
-    if momentum_residuals and len(momentum_residuals) == len(residual_history):
-        plt.semilogy(iterations, momentum_residuals, 'r--', linewidth=1.5, label='Momentum')
-        
-    if pressure_residuals and len(pressure_residuals) == len(residual_history):
-        plt.semilogy(iterations, pressure_residuals, 'g-.', linewidth=1.5, label='Pressure')
-    
-    # Autoscale the axes
-    plt.autoscale(enable=True, axis='both', tight=True)
-    
-    plt.grid(True, which="both", ls="--")
-    plt.xlabel('Iteration')
-    plt.ylabel('Residual')
-    
-    if title:
-        plt.title(title)
-    else:
-        plt.title('Residual History')
-    
-    # Simplify legend to only show the three main types
-    plt.legend(loc='upper right')
-    
-    # Adjust subplot parameters to fill the window
-    plt.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.1)
-    plt.tight_layout(pad=0.1)
-    
-    if show:
-        plt.pause(0.001)  # Small pause to allow the plot to update
-    
-    # Check if the figure is still open
-    should_stop = not plt.fignum_exists(fig.number)
-    
-    return fig, should_stop
-
-def plot_u_v_continuity_residuals(u_residuals, v_residuals, continuity_residuals, title=None, filename=None, 
-                                 show=True, figsize=(10, 6), output_dir=None):
-    """
-    Plot u-velocity, v-velocity, and continuity residuals using logarithmic y-axis.
-    
-    Parameters:
-    -----------
-    u_residuals : list
-        History of u-velocity (x-momentum) residuals
-    v_residuals : list
-        History of v-velocity (y-momentum) residuals
+    u_residuals_relaxed : list
+        History of normalized relaxed u-velocity (x-momentum) residuals
+    v_residuals_relaxed : list
+        History of normalized relaxed v-velocity (y-momentum) residuals
+    u_residuals_unrelaxed : list
+        History of normalized unrelaxed u-velocity (x-momentum) residuals
+    v_residuals_unrelaxed : list
+        History of normalized unrelaxed v-velocity (y-momentum) residuals
     continuity_residuals : list
-        History of continuity residuals
+        History of normalized continuity residuals
     title : str, optional
         Plot title
     filename : str, optional
@@ -748,32 +745,92 @@ def plot_u_v_continuity_residuals(u_residuals, v_residuals, continuity_residuals
         Figure size (width, height) in inches
     output_dir : str, optional
         Directory where to save the output. If None, uses 'results' in the calling script's directory.
+    u_abs_relaxed : list, optional
+        History of absolute relaxed u-velocity residuals
+    v_abs_relaxed : list, optional
+        History of absolute relaxed v-velocity residuals
+    u_abs_unrelaxed : list, optional
+        History of absolute unrelaxed u-velocity residuals
+    v_abs_unrelaxed : list, optional
+        History of absolute unrelaxed v-velocity residuals
+    p_abs_residuals : list, optional
+        History of absolute pressure/continuity residuals
         
     Returns:
     --------
     matplotlib.figure.Figure
         The generated figure
     """
-    if not u_residuals or not v_residuals or not continuity_residuals:
-        raise ValueError("Residual data is missing")
+    # Check if all required residual lists are provided and non-empty
+    required_residuals = [u_residuals_relaxed, v_residuals_relaxed, 
+                          u_residuals_unrelaxed, v_residuals_unrelaxed, 
+                          continuity_residuals]
+    if not all(required_residuals) or not all(len(res) > 0 for res in required_residuals):
+        print("Warning: One or more required residual histories are missing or empty. Skipping residual plot.")
+        return None # Or raise ValueError("Residual data is missing or empty")
         
-    plt.figure(figsize=figsize)
+    # Check if absolute residuals are provided
+    has_absolute = all([u_abs_relaxed, v_abs_relaxed, u_abs_unrelaxed, v_abs_unrelaxed, p_abs_residuals])
     
-    # Plot all three residual types
-    iterations = range(1, len(u_residuals) + 1)
-    plt.semilogy(iterations, u_residuals, color=plt.cm.coolwarm(0.9), linewidth=2, label='u-velocity Residual')
-    plt.semilogy(iterations, v_residuals, color=plt.cm.coolwarm(0.7), linewidth=2, label='v-velocity Residual') 
-    plt.semilogy(iterations, continuity_residuals, color=plt.cm.coolwarm(0.1), linewidth=2, label='Continuity Residual', linestyle='--')
-    plt.grid(True, which="both", ls="--")
-    plt.xlabel('Iteration')
-    plt.ylabel('Residual')
-    
-    if title:
-        plt.title(title)
+    # Create figure with two subplots if we have absolute residuals
+    if has_absolute:
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
+        fig.suptitle(title if title else 'Residual History')
+        
+        # Add a note explaining that relaxed absolute residuals are approximate
+        fig.text(0.01, 0.01, "Note: Relaxed absolute residuals are approximate (0.95× unrelaxed)", 
+                 fontsize=8, style='italic', ha='left')
     else:
-        plt.title('Residual History')
+        fig, ax1 = plt.subplots(figsize=figsize)
+        if title:
+            ax1.set_title(title)
+        else:
+            ax1.set_title('Residual History')
     
-    plt.legend()
+    # Use the length of the unrelaxed u residuals as the reference for iterations
+    iterations = range(1, len(u_residuals_unrelaxed) + 1)
+    
+    # Plot normalized residuals on first subplot
+    ax1.semilogy(iterations, u_residuals_relaxed, color=plt.cm.coolwarm(0.9), linewidth=1.5, linestyle='--', label='u-vel Relaxed (Rel)')
+    ax1.semilogy(iterations, v_residuals_relaxed, color=plt.cm.coolwarm(0.7), linewidth=1.5, linestyle='--', label='v-vel Relaxed (Rel)')
+    ax1.semilogy(iterations, u_residuals_unrelaxed, color=plt.cm.coolwarm(0.9), linewidth=2, label='u-vel Unrelaxed (Rel)')
+    ax1.semilogy(iterations, v_residuals_unrelaxed, color=plt.cm.coolwarm(0.7), linewidth=2, label='v-vel Unrelaxed (Rel)')
+    ax1.semilogy(iterations, continuity_residuals, color=plt.cm.coolwarm(0.1), linewidth=2, linestyle=':', label='Continuity (Rel)')
+    
+    ax1.grid(True, which="both", ls="--")
+    ax1.set_ylabel('Relative Residual Norm')
+    ax1.legend(loc='upper right')
+    
+    # Plot absolute residuals on second subplot if available
+    if has_absolute:
+        # Add markers to relaxed lines for better visibility
+        marker_interval = max(1, len(iterations)//15)
+        
+        ax2.semilogy(iterations, u_abs_relaxed, color=plt.cm.coolwarm(0.9), linewidth=1.5, 
+                    linestyle='--', marker='o', markersize=4, markevery=marker_interval,
+                    label='u-vel Relaxed (Abs)')
+        ax2.semilogy(iterations, v_abs_relaxed, color=plt.cm.coolwarm(0.7), linewidth=1.5, 
+                    linestyle='--', marker='s', markersize=4, markevery=marker_interval,
+                    label='v-vel Relaxed (Abs)')
+
+        
+        # Unrelaxed lines without markers
+        ax2.semilogy(iterations, u_abs_unrelaxed, color=plt.cm.coolwarm(0.9), linewidth=2, 
+                    label='u-vel Unrelaxed (Abs)')
+        ax2.semilogy(iterations, v_abs_unrelaxed, color=plt.cm.coolwarm(0.7), linewidth=2, 
+                    label='v-vel Unrelaxed (Abs)')
+        
+        # Continuity residual
+        ax2.semilogy(iterations, p_abs_residuals, color=plt.cm.coolwarm(0.1), linewidth=2, 
+                    linestyle=':', label='Continuity (Abs)')
+        
+        ax2.grid(True, which="both", ls="--")
+        ax2.set_xlabel('Iteration')
+        ax2.set_ylabel('Absolute Residual Norm (L2)')
+        ax2.legend(loc='upper right')
+    else:
+        ax1.set_xlabel('Iteration')
+    
     plt.tight_layout()
     
     if filename:
@@ -788,43 +845,3 @@ def plot_u_v_continuity_residuals(u_residuals, v_residuals, continuity_residuals
         plt.close()
         
     return plt.gcf()
-
-def animate_velocity_field(u_list, v_list, x, y, title=None, filename=None, interval=200,
-                           cmap='viridis', show=True, figsize=(8, 6), colorbar=True, levels=50):
-    """
-    Create an animation of the velocity field over time.
-    
-    Parameters:
-    -----------
-    u_list : list of ndarray
-        List of x-velocity components at different times
-    v_list : list of ndarray
-        List of y-velocity components at different times
-    x : ndarray
-        x-coordinates
-    y : ndarray
-        y-coordinates
-    title : str, optional
-        Plot title
-    filename : str, optional
-        If provided, saves the animation to this filename
-    interval : int, optional
-        Delay between frames in milliseconds
-    cmap : str, optional
-        Colormap to use
-    show : bool, optional
-        Whether to display the animation
-    figsize : tuple, optional
-        Figure size (width, height) in inches
-    colorbar : bool, optional
-        Whether to show the colorbar
-    levels : int, optional
-        Number of contour levels
-        
-    Returns:
-    --------
-    matplotlib.animation.FuncAnimation
-        The generated animation
-    """
-    # Implementation would go here
-    pass

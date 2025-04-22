@@ -144,7 +144,99 @@ class AMGMomentumSolver(MomentumSolver):
 
         return matrix_csr, rhs, idx_map
 
-    def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None):
+    # Helper function to calculate unrelaxed residual
+    # Note: This needs access to `self` to call `_build_sparse_matrix`
+    def _calculate_unrelaxed_residual(self, u_star, a_e, a_w, a_n, a_s, a_p_unrelaxed, source_unrelaxed, nx, ny, is_u):
+        """Calculates the unrelaxed residual norm and field."""
+        if is_u:
+            imax, jmax = nx + 1, ny
+            shape = (imax, jmax)
+        else:
+            imax, jmax = nx, ny + 1
+            shape = (imax, jmax)
+
+        # Build the unrelaxed system to calculate residual: r_unrelaxed = b_unrelaxed - A_unrelaxed * x
+        matrix_unrelaxed, rhs_unrelaxed_flat, _ = self._build_sparse_matrix(
+             a_e, a_w, a_n, a_s, a_p_unrelaxed, source_unrelaxed, nx, ny, is_u=is_u
+        )
+        Ax_unrelaxed = matrix_unrelaxed @ u_star.flatten()
+        r_unrelaxed_flat = rhs_unrelaxed_flat - Ax_unrelaxed
+        r_unrelaxed_field = r_unrelaxed_flat.reshape(shape)
+
+        # Masking and normalization (using unrelaxed source field as the base)
+        # Use slicing to extract interior points ONLY
+        if is_u:
+            # Extract interior points for u (from 1:nx, 1:ny-1)
+            r_unrelaxed_interior = r_unrelaxed_field[1:nx, 1:ny-1]
+            b_unrelaxed_interior = source_unrelaxed[1:nx, 1:ny-1]
+        else:
+            # Extract interior points for v (from 1:nx-1, 1:ny)
+            r_unrelaxed_interior = r_unrelaxed_field[1:nx-1, 1:ny]
+            b_unrelaxed_interior = source_unrelaxed[1:nx-1, 1:ny]
+
+        # Calculate L2 norm of interior points only
+        r_unrelaxed_norm_val = np.linalg.norm(r_unrelaxed_interior)
+        b_unrelaxed_norm_val = np.linalg.norm(b_unrelaxed_interior)
+
+        # Calculate normalized residual norm
+        residual_norm_unrelaxed = r_unrelaxed_norm_val / (b_unrelaxed_norm_val + 1e-15) if (b_unrelaxed_norm_val + 1e-15) > 0 else r_unrelaxed_norm_val
+        
+        # --- Zero out boundaries in the RETURNED field ---
+        # This matches the previous behavior for the relaxed residual field
+        r_unrelaxed_field_final = r_unrelaxed_field.copy()
+        if is_u:
+            r_unrelaxed_field_final[0, :] = 0.0
+            r_unrelaxed_field_final[1, :] = 0.0 # Adjacent
+            if nx > 1:
+                 r_unrelaxed_field_final[nx-1, :] = 0.0 # Adjacent
+            r_unrelaxed_field_final[nx, :] = 0.0
+            # Zero top/bottom boundaries as well in the returned field
+            r_unrelaxed_field_final[:, 0] = 0.0
+            r_unrelaxed_field_final[:, ny-1] = 0.0
+        else: # is_v
+            r_unrelaxed_field_final[0, :] = 0.0
+            r_unrelaxed_field_final[nx-1, :] = 0.0
+            r_unrelaxed_field_final[:, 0] = 0.0
+            r_unrelaxed_field_final[:, 1] = 0.0 # Adjacent
+            if ny > 1:
+                 r_unrelaxed_field_final[:, ny-1] = 0.0 # Adjacent
+            r_unrelaxed_field_final[:, ny] = 0.0
+
+        return residual_norm_unrelaxed, r_unrelaxed_field_final
+
+    def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
+        """
+        Solve the u-momentum equation using Algebraic Multigrid.
+        
+        Parameters:
+        -----------
+        mesh : StructuredMesh
+            The computational mesh
+        fluid : FluidProperties
+            Fluid properties
+        u, v : ndarray
+            Current velocity fields
+        p : ndarray
+            Current pressure field
+        relaxation_factor : float, optional
+            Relaxation factor for under-relaxation
+        boundary_conditions : dict or BoundaryConditionManager, optional
+            Boundary conditions
+        return_dict : bool, optional
+            If True, returns residual information in a dictionary format (default).
+            If False, returns separate residual values (deprecated).
+            
+        Returns:
+        --------
+        u_star : ndarray
+            Intermediate u-velocity field
+        d_u : ndarray
+            Momentum equation coefficient
+        residual_info : dict or (float, float, ndarray)
+            Either a dictionary with complete residual information (if return_dict=True)
+            or a tuple with (residual_norm_relaxed, residual_norm_unrelaxed, residual_field_unrelaxed)
+            for backward compatibility.
+        """
         nx, ny = mesh.get_dimensions()
         imax, jmax = nx, ny
         alpha = relaxation_factor
@@ -181,6 +273,14 @@ class AMGMomentumSolver(MomentumSolver):
         self.u_a_p = safe_ap_unrelaxed / alpha 
         u_source = u_source_unrelaxed + (1 - alpha) * self.u_a_p * u_bc
 
+        # Store unrelaxed coefficients for residual calculation later
+        self.u_a_e = u_a_e
+        self.u_a_w = u_a_w
+        self.u_a_n = u_a_n
+        self.u_a_s = u_a_s
+        self.u_a_p_unrelaxed = u_a_p_unrelaxed # Already stored
+        self.u_source_unrelaxed = u_source_unrelaxed # Already stored
+
         # Build the sparse matrix system using RELAXED coefficients
         self.u_matrix, self.u_rhs, idx_map = self._build_sparse_matrix(
             u_a_e, u_a_w, u_a_n, u_a_s, self.u_a_p, # Use RELAXED a_p
@@ -213,46 +313,94 @@ class AMGMomentumSolver(MomentumSolver):
         Ax = self.u_matrix @ u_star.flatten() 
         r = self.u_rhs - Ax # Residual vector (1D)
 
-        # --- Calculate normalized L2 norm explicitly excluding boundaries --- 
+        # --- Calculate normalized L2 norm using interior points only --- 
         # 1. Reshape residual and RHS to 2D fields
         u_residual_field_full = r.reshape((imax+1, jmax))
         rhs_field_full = self.u_rhs.reshape((imax+1, jmax))
         
-        # 2. Create copies and zero out boundary values
-        u_residual_field_masked = u_residual_field_full.copy()
-        rhs_field_masked = rhs_field_full.copy()
-        
-        u_residual_field_masked[0, :] = 0.0  # Left boundary
-        u_residual_field_masked[nx, :] = 0.0  # Right boundary
-        u_residual_field_masked[:, 0] = 0.0  # Bottom boundary
-        u_residual_field_masked[:, ny-1] = 0.0 # Top boundary (u lives up to j=ny-1)
-        
-        rhs_field_masked[0, :] = 0.0
-        rhs_field_masked[nx, :] = 0.0
-        rhs_field_masked[:, 0] = 0.0
-        rhs_field_masked[:, ny-1] = 0.0
+        # 2. Extract interior points only using slicing
+        u_residual_interior = u_residual_field_full[1:nx, 1:ny-1]
+        rhs_field_interior = rhs_field_full[1:nx, 1:ny-1]
 
-        # 3. Calculate L2 norm of the masked fields
-        r_norm = np.linalg.norm(u_residual_field_masked)
-        b_norm = np.linalg.norm(rhs_field_masked)
+        # 3. Calculate L2 norm of interior points only
+        r_norm = np.linalg.norm(u_residual_interior)
+        b_norm = np.linalg.norm(rhs_field_interior)
         
         # 4. Calculate normalized residual norm
         u_residual_norm = r_norm / (b_norm + 1e-15) if (b_norm + 1e-15) > 0 else r_norm
-        # --- End of explicit boundary exclusion norm calculation ---
+        # --- End of interior points norm calculation ---
 
         # Reshape the original full residual field for returning (will be zeroed later)
-        u_residual_field = u_residual_field_full 
+        u_residual_field_relaxed = u_residual_field_full # Keep relaxed field temporarily if needed
 
-        # Zero out residuals at boundary and adjacent nodes in the RETURNED field
-        u_residual_field[0, :] = 0.0
-        u_residual_field[1, :] = 0.0
-        if nx > 1:
-            u_residual_field[nx-1, :] = 0.0
-        u_residual_field[nx, :] = 0.0
+        # Calculate UNRELAXED residual norm and field
+        u_residual_norm_unrelaxed, u_residual_field_unrelaxed = self._calculate_unrelaxed_residual(
+            u_star, self.u_a_e, self.u_a_w, self.u_a_n, self.u_a_s,
+            self.u_a_p_unrelaxed, self.u_source_unrelaxed, nx, ny, is_u=True
+        )
 
-        return u_star, d_u, u_residual_norm, u_residual_field
+        # Zero out residuals at boundary and adjacent nodes in the RETURNED field (use unrelaxed field now)
+        # This logic is now inside _calculate_unrelaxed_residual
 
-    def solve_v_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None):
+        # Calculate absolute L2 norms for both relaxed and unrelaxed residuals
+        # Extract the interior points matching visualization function
+        u_abs_relaxed = np.linalg.norm(u_residual_field_relaxed[1:nx, 1:ny-1], ord=2)
+        u_abs_unrelaxed = np.linalg.norm(u_residual_field_unrelaxed[1:nx, 1:ny-1], ord=2)
+        
+        # Create a dictionary with all residual information
+        residual_info = {
+            'relaxed_norm': u_residual_norm,  # Normalized/relative (r/b)
+            'unrelaxed_norm': u_residual_norm_unrelaxed,  # Normalized/relative (r/b)
+            'relaxed_abs': u_abs_relaxed,  # Absolute L2 norm
+            'unrelaxed_abs': u_abs_unrelaxed,  # Absolute L2 norm
+            'unrelaxed_field': u_residual_field_unrelaxed,  # Full residual field
+        }
+
+        # Return: u*, d_u, residual_info
+        if return_dict:
+            return u_star, d_u, residual_info
+        else:
+            import warnings
+            warnings.warn(
+                "Non-dictionary return format is deprecated. Use return_dict=True for future compatibility.",
+                DeprecationWarning, stacklevel=2
+            )
+            # Return the traditional 5-value format for backward compatibility
+            return u_star, d_u, residual_info['relaxed_norm'], residual_info['unrelaxed_norm'], residual_info['unrelaxed_field']
+
+    def solve_v_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
+        """
+        Solve the v-momentum equation using Algebraic Multigrid.
+        
+        Parameters:
+        -----------
+        mesh : StructuredMesh
+            The computational mesh
+        fluid : FluidProperties
+            Fluid properties
+        u, v : ndarray
+            Current velocity fields
+        p : ndarray
+            Current pressure field
+        relaxation_factor : float, optional
+            Relaxation factor for under-relaxation
+        boundary_conditions : dict or BoundaryConditionManager, optional
+            Boundary conditions
+        return_dict : bool, optional
+            If True, returns residual information in a dictionary format (default).
+            If False, returns separate residual values (deprecated).
+            
+        Returns:
+        --------
+        v_star : ndarray
+            Intermediate v-velocity field
+        d_v : ndarray
+            Momentum equation coefficient
+        residual_info : dict or (float, float, ndarray)
+            Either a dictionary with complete residual information (if return_dict=True)
+            or a tuple with (residual_norm_relaxed, residual_norm_unrelaxed, residual_field_unrelaxed)
+            for backward compatibility.
+        """
         nx, ny = mesh.get_dimensions()
         imax, jmax = nx, ny
         alpha = relaxation_factor
@@ -285,7 +433,21 @@ class AMGMomentumSolver(MomentumSolver):
         # Apply under-relaxation to coefficients (ORIGINAL METHOD)
         safe_ap_unrelaxed_v = np.where(np.abs(v_a_p_unrelaxed) > 1e-12, v_a_p_unrelaxed, 1e-12)
         self.v_a_p = safe_ap_unrelaxed_v / alpha
-        v_source = v_source_unrelaxed + (1 - alpha) * self.v_a_p * v_bc
+        # Apply similar shape check/logic for v_bc as for u_bc
+        if v_bc.shape != self.v_a_p.shape:
+             # Add robust handling or ensure shapes match
+             # Assuming v_a_p is (nx, ny+1) like v_bc
+             v_source = v_source_unrelaxed + (1 - alpha) * self.v_a_p * v_bc
+        else:
+             v_source = v_source_unrelaxed + (1 - alpha) * self.v_a_p * v_bc
+
+        # Store unrelaxed coefficients for residual calculation later
+        self.v_a_e = v_a_e
+        self.v_a_w = v_a_w
+        self.v_a_n = v_a_n
+        self.v_a_s = v_a_s
+        self.v_a_p_unrelaxed = v_a_p_unrelaxed # Already stored
+        self.v_source_unrelaxed = v_source_unrelaxed # Already stored
 
         # Build the sparse matrix system using RELAXED coefficients
         self.v_matrix, self.v_rhs, idx_map = self._build_sparse_matrix(
@@ -317,41 +479,50 @@ class AMGMomentumSolver(MomentumSolver):
         Ax = self.v_matrix @ v_star.flatten()
         r = self.v_rhs - Ax # Residual vector (1D)
 
-        # --- Calculate normalized L2 norm explicitly excluding boundaries --- 
+        # --- Calculate normalized L2 norm using interior points only ---
         # 1. Reshape residual and RHS to 2D fields
-        v_residual_field_full = r.reshape((imax, jmax+1))
-        rhs_field_full = self.v_rhs.reshape((imax, jmax+1))
+        v_residual_field_relaxed_full = r.reshape((imax, jmax+1)) # Relaxed residual field
+        rhs_field_full = self.v_rhs.reshape((imax, jmax+1)) # Relaxed RHS field
 
-        # 2. Create copies and zero out boundary values
-        v_residual_field_masked = v_residual_field_full.copy()
-        rhs_field_masked = rhs_field_full.copy()
+        # 2. Extract interior points only using slicing
+        v_residual_interior = v_residual_field_relaxed_full[1:nx-1, 1:ny]
+        rhs_field_interior = rhs_field_full[1:nx-1, 1:ny]
 
-        v_residual_field_masked[0, :] = 0.0   # Left boundary
-        v_residual_field_masked[nx-1, :] = 0.0 # Right boundary (v lives up to i=nx-1)
-        v_residual_field_masked[:, 0] = 0.0   # Bottom boundary
-        v_residual_field_masked[:, ny] = 0.0   # Top boundary (v lives up to j=ny)
+        # 3. Calculate L2 norm of interior points only
+        r_norm_relaxed = np.linalg.norm(v_residual_interior, ord=2)
+        b_norm_relaxed = np.linalg.norm(rhs_field_interior, ord=2)
 
-        rhs_field_masked[0, :] = 0.0
-        rhs_field_masked[nx-1, :] = 0.0
-        rhs_field_masked[:, 0] = 0.0
-        rhs_field_masked[:, ny] = 0.0
+        # 4. Calculate normalized RELAXED residual norm
+        v_residual_norm = r_norm_relaxed / (b_norm_relaxed + 1e-15) if (b_norm_relaxed + 1e-15) > 0 else r_norm_relaxed
+
+        # Calculate UNRELAXED residual norm and field
+        v_residual_norm_unrelaxed, v_residual_field_unrelaxed = self._calculate_unrelaxed_residual(
+            v_star, self.v_a_e, self.v_a_w, self.v_a_n, self.v_a_s,
+            self.v_a_p_unrelaxed, self.v_source_unrelaxed, nx, ny, is_u=False
+        )
+
+        # Calculate absolute L2 norms for both relaxed and unrelaxed residuals
+        # Extract the interior points matching visualization function
+        v_abs_relaxed = np.linalg.norm(v_residual_field_relaxed_full[1:nx-1, 1:ny], ord=2)
+        v_abs_unrelaxed = np.linalg.norm(v_residual_field_unrelaxed[1:nx-1, 1:ny], ord=2)
         
-        # 3. Calculate L2 norm of the masked fields
-        r_norm = np.linalg.norm(v_residual_field_masked)
-        b_norm = np.linalg.norm(rhs_field_masked)
+        # Create a dictionary with all residual information
+        residual_info = {
+            'relaxed_norm': v_residual_norm,  # Normalized/relative (r/b)
+            'unrelaxed_norm': v_residual_norm_unrelaxed,  # Normalized/relative (r/b)
+            'relaxed_abs': v_abs_relaxed,  # Absolute L2 norm
+            'unrelaxed_abs': v_abs_unrelaxed,  # Absolute L2 norm
+            'unrelaxed_field': v_residual_field_unrelaxed,  # Full residual field
+        }
 
-        # 4. Calculate normalized residual norm
-        v_residual_norm = r_norm / (b_norm + 1e-15) if (b_norm + 1e-15) > 0 else r_norm
-        # --- End of explicit boundary exclusion norm calculation ---
-
-        # Reshape the original full residual field for returning (will be zeroed later)
-        v_residual_field = v_residual_field_full
-
-        # Zero out residuals at boundary and adjacent nodes in the RETURNED field
-        v_residual_field[:, 0] = 0.0
-        v_residual_field[:, 1] = 0.0
-        if ny > 1:
-            v_residual_field[:, ny-1] = 0.0
-        v_residual_field[:, ny] = 0.0
-
-        return v_star, d_v, v_residual_norm, v_residual_field 
+        # Return: v*, d_v, residual_info
+        if return_dict:
+            return v_star, d_v, residual_info
+        else:
+            import warnings
+            warnings.warn(
+                "Non-dictionary return format is deprecated. Use return_dict=True for future compatibility.",
+                DeprecationWarning, stacklevel=2
+            )
+            # Return the traditional 5-value format for backward compatibility
+            return v_star, d_v, residual_info['relaxed_norm'], residual_info['unrelaxed_norm'], residual_info['unrelaxed_field'] 

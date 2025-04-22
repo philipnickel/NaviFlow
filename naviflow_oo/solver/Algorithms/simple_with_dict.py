@@ -1,24 +1,27 @@
 """
-SIMPLE (Semi-Implicit Method for Pressure-Linked Equations) algorithm implementation.
+SIMPLE (Semi-Implicit Method for Pressure-Linked Equations) algorithm implementation
+with residual dictionary handling.
 """ 
 
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import warnings
 from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
 from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error, calculate_l2_norm_error
 from ...postprocessing.visualization import plot_final_residuals
 from ..pressure_solver.helpers.rhs_construction import get_rhs
 
-class SimpleSolver(BaseAlgorithm):
+class SimpleSolverDict(BaseAlgorithm):
     """
-    SIMPLE algorithm implementation.
+    SIMPLE algorithm implementation with residual dictionaries.
     
-    The SIMPLE (Semi-Implicit Method for Pressure-Linked Equations) algorithm
-    is a widely used method for solving the Navier-Stokes equations for incompressible flows.
-    It uses a predictor-corrector approach to handle the pressure-velocity coupling.
-    Uses dictionary-based residual information for improved code structure.
+    This version of the SIMPLE algorithm uses dictionaries for residual information
+    rather than calculating residuals in multiple places.
+    
+    .. deprecated:: Use SimpleSolver instead, which now uses dictionary-based 
+       residual handling by default.
     """
     def __init__(self, mesh, fluid, pressure_solver=None, momentum_solver=None, 
                  velocity_updater=None, boundary_conditions=None, 
@@ -45,6 +48,11 @@ class SimpleSolver(BaseAlgorithm):
         fix_lid_corners : bool
             Whether to set the corners of the lid to stationary for better stability
         """
+        warnings.warn(
+            "SimpleSolverDict is deprecated. Use SimpleSolver instead, which now uses dictionary-based residual handling by default.",
+            DeprecationWarning, stacklevel=2
+        )
+        
         self.alpha_p = alpha_p
         self.alpha_u = alpha_u
         self.fix_lid_corners = fix_lid_corners
@@ -100,7 +108,7 @@ class SimpleSolver(BaseAlgorithm):
                 self.v_old = self.v.copy()
                 self.p_old = self.p.copy()
 
-                # Solve momentum equations and get comprehensive residual info as dictionaries
+                # Solve momentum equations and get comprehensive residual info
                 u_star, d_u, u_res_info = self.momentum_solver.solve_u_momentum(
                     self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
@@ -121,7 +129,7 @@ class SimpleSolver(BaseAlgorithm):
                 self._tmp_d_u = d_u
                 self._tmp_d_v = d_v
 
-                # Solve pressure correction equation with residual info as dictionary
+                # Solve pressure correction equation with residual info
                 p_prime, p_res_info = self.pressure_solver.solve(self.mesh, u_star, v_star, d_u, d_v, p_star, return_dict=True)
                 
                 # Update pressure with relaxation
@@ -262,4 +270,4 @@ class SimpleSolver(BaseAlgorithm):
             print(f"Saved profile to {self.save_profiling_data(filename)}")
         self.profiler.end_section("Finalization") # End timing finalization
 
-        return result
+        return result 
