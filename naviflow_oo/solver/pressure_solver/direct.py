@@ -60,9 +60,10 @@ class DirectPressureSolver(PressureSolver):
         --------
         p_prime : ndarray
             Pressure correction field
-        residual_info : dict or (float, ndarray)
-            Either a dictionary with complete residual information (if return_dict=True)
-            or a tuple with (residual_norm, residual_field) for backward compatibility
+        residual_info : dict
+            Dictionary with residual information: 
+            - 'rel_norm': l2(r)/max(l2(r))
+            - 'field': residual field
         """
         
         # Store the mesh for use in boundary conditions
@@ -78,52 +79,44 @@ class DirectPressureSolver(PressureSolver):
         rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
         
         # Get coefficient matrix with boundary conditions already integrated
-        # Although we use spsolve, we need A for the residual calculation later if not using compute_Ap_product
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
-        
-        # Fix reference pressure at (0,0) - first index in flattened system
-        # Convert to LIL format for efficient single element modifications
-        #A = A.tolil()
-        #A[0, :] = 0  # Zero out entire row for reference point
-        #A[0, 0] = 1  # Set diagonal to 1 for reference equation
-        #rhs[0] = 0  # Set right-hand side to zero at reference point
         
         # Solve the system
         p_prime_flat = spsolve(A, rhs)
         
-        # Calculate residual for tracking using the explicit matrix A
-        Ax = A.dot(p_prime_flat) # Use explicit matrix-vector product
+        # Calculate residual for tracking
+        Ax = A.dot(p_prime_flat)
         r = rhs - Ax # This is the residual field (1D)
         
-        # Reshape residual and RHS to 2D for interior point extraction
+        # Reshape residual to 2D for interior point extraction
         r_field_full = r.reshape((nx, ny), order='F')  # Reshape residual field 
-        rhs_field_full = rhs.reshape((nx, ny), order='F')  # Reshape RHS field
         
         # Extract interior points only (1:nx-1, 1:ny-1) for pressure
-        r_interior = r_field_full[1:nx-1, 1:ny-1].flatten()
-        rhs_interior = rhs_field_full[1:nx-1, 1:ny-1].flatten()
+        r_interior = r_field_full[1:nx-1, 1:ny-1]
         
         # Calculate L2 norm on interior points only
-        r_norm = np.linalg.norm(r_interior, 2)
-        b_norm = np.linalg.norm(rhs_interior, 2)
-        res_norm = r_norm / b_norm if b_norm > 0 else r_norm
-        self.residual_history.append(res_norm) # Store normalized residual
+        p_current_l2 = np.linalg.norm(r_interior, 2)
+        
+        # Keep track of the maximum L2 norm for relative scaling
+        if not hasattr(self, 'p_max_l2'):
+            self.p_max_l2 = p_current_l2
+        else:
+            self.p_max_l2 = max(self.p_max_l2, p_current_l2)
+        
+        # Calculate relative norm as l2(r)/max(l2(r))
+        p_rel_norm = p_current_l2 / self.p_max_l2 if self.p_max_l2 > 0 else 1.0
+        
+        # Track history of normalized residual
+        self.residual_history.append(p_rel_norm)
         
         # Reshape solution to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
-        # Also calculate absolute L2 norm of interior points
-        p_abs = np.linalg.norm(r_field_full[1:nx-1, 1:ny-1], ord=2)
-        
-        # Create a residual information dictionary
+        # Create the minimal residual information dictionary
         residual_info = {
-            'norm': res_norm,         # Normalized/relative (r/b)
-            'abs': p_abs,             # Absolute L2 norm
-            'field': r_field_full     # Full residual field
+            'rel_norm': p_rel_norm,  # l2(r)/max(l2(r))
+            'field': r_field_full     # Absolute residual field
         }
-        
-        # Enforce pressure boundary conditions
-        #self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
         # Return the solution and residual info
         if return_dict:
@@ -134,8 +127,8 @@ class DirectPressureSolver(PressureSolver):
                 "Non-dictionary return format is deprecated. Use return_dict=True for future compatibility.",
                 DeprecationWarning, stacklevel=2
             )
-            # For backward compatibility, return p_prime, residual_norm, and residual_field
-            return p_prime, residual_info['norm'], residual_info['field']
+            # For backward compatibility
+            return p_prime, p_rel_norm, r_field_full
         
     def get_solver_info(self):
         """

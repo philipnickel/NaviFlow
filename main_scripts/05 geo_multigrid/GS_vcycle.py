@@ -19,13 +19,12 @@ from naviflow_oo.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrix
 from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
-from naviflow_oo.postprocessing.visualization import plot_u_v_continuity_residuals
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
 nx, ny = 2**6-1, 2**6-1 # Grid size
 reynolds = 100            # Reynolds number
-alpha_p = 0.1              # Pressure relaxation factor
+alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
 max_iterations = 1000     # Maximum number of iterations
 
@@ -71,7 +70,7 @@ multigrid_solver = MultiGridSolver(
 )
 
 #momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=5)
-momentum_solver = AMGMomentumSolver(tolerance=1e-20, max_iterations=1)
+momentum_solver = AMGMomentumSolver(tolerance=1e-4, max_iterations=1)
 
 velocity_updater = StandardVelocityUpdater()
 
@@ -128,21 +127,15 @@ result.plot_combined_results(
 )
 # 11. Visualize final residuals
 plot_final_residuals(
-    result.u_residual_field, 
-    result.v_residual_field, 
-    result.p_residual_field,
+    algorithm._final_u_residual_field, 
+    algorithm._final_v_residual_field, 
+    algorithm._final_p_residual_field,
     mesh,
-    title=f'Final Residuals (Re={reynolds})',
-    filename=os.path.join(results_dir, f'final_residuals_Re_GS{reynolds}.pdf'),
-    show=False
-)
-
-# 12. Visualize residual history
-plot_u_v_continuity_residuals(
-    algorithm.x_momentum_residuals, 
-    algorithm.y_momentum_residuals, 
-    algorithm.continuity_residuals,
-    title=f'Residual History (Re={reynolds})',
-    filename=os.path.join(results_dir, f'residual_history_Re{reynolds}.pdf'),
-    show=False
+    title=f'Final Algebraic Residual Fields (Re={reynolds})',
+    filename=os.path.join(results_dir, f'final_algebraic_residual_fields_Re{reynolds}.pdf'),
+    show=False,
+    u_rel_norms=result.get_history('u_rel_norm'),
+    v_rel_norms=result.get_history('v_rel_norm'),
+    p_rel_norms=result.get_history('p_rel_norm'),
+    history_filename=os.path.join(results_dir, f'unrelaxed_rel_residual_history_Re{reynolds}.pdf')
 )

@@ -232,10 +232,10 @@ class AMGMomentumSolver(MomentumSolver):
             Intermediate u-velocity field
         d_u : ndarray
             Momentum equation coefficient
-        residual_info : dict or (float, float, ndarray)
-            Either a dictionary with complete residual information (if return_dict=True)
-            or a tuple with (residual_norm_relaxed, residual_norm_unrelaxed, residual_field_unrelaxed)
-            for backward compatibility.
+        residual_info : dict
+            Dictionary with residual information: 
+            - 'rel_norm': l2(r)/max(l2(r))
+            - 'field': residual field
         """
         nx, ny = mesh.get_dimensions()
         imax, jmax = nx, ny
@@ -266,9 +266,7 @@ class AMGMomentumSolver(MomentumSolver):
         u_a_p_unrelaxed = coeffs['a_p']
         u_source_unrelaxed = coeffs['source']
 
-        # Apply under-relaxation to coefficients (ORIGINAL METHOD)
-        self.u_a_p = u_a_p_unrelaxed / alpha
-        # Need to handle potential division by zero if alpha is 0 or a_p_unrelaxed is 0
+        # Apply under-relaxation to coefficients
         safe_ap_unrelaxed = np.where(np.abs(u_a_p_unrelaxed) > 1e-12, u_a_p_unrelaxed, 1e-12)
         self.u_a_p = safe_ap_unrelaxed / alpha 
         u_source = u_source_unrelaxed + (1 - alpha) * self.u_a_p * u_bc
@@ -278,17 +276,16 @@ class AMGMomentumSolver(MomentumSolver):
         self.u_a_w = u_a_w
         self.u_a_n = u_a_n
         self.u_a_s = u_a_s
-        self.u_a_p_unrelaxed = u_a_p_unrelaxed # Already stored
-        self.u_source_unrelaxed = u_source_unrelaxed # Already stored
+        self.u_a_p_unrelaxed = u_a_p_unrelaxed
+        self.u_source_unrelaxed = u_source_unrelaxed
 
         # Build the sparse matrix system using RELAXED coefficients
         self.u_matrix, self.u_rhs, idx_map = self._build_sparse_matrix(
-            u_a_e, u_a_w, u_a_n, u_a_s, self.u_a_p, # Use RELAXED a_p
-            u_source, # Use RELAXED source
+            u_a_e, u_a_w, u_a_n, u_a_s, self.u_a_p,
+            u_source,
             nx, ny, is_u=True
         )
 
-        # --- AMG Solver ---
         # Create the AMG solver hierarchy
         ml = pyamg.smoothed_aggregation_solver(self.u_matrix)
 
@@ -298,75 +295,42 @@ class AMGMomentumSolver(MomentumSolver):
         # Reshape result back to 2D
         u_star = u_flat.reshape((imax+1, jmax))
 
-        # Apply boundary conditions explicitly AFTER the solve to ensure they are met
-        # (AMG might not perfectly preserve them, especially if BCs were implicitly handled)
+        # Apply boundary conditions explicitly AFTER the solve
         u_star, _ = bc_manager.apply_velocity_boundary_conditions(u_star, v.copy(), imax, jmax)
         
-        # Calculate d_u (using the RELAXED a_p, as this is consistent with the solved system)
+        # Calculate d_u (using the RELAXED a_p)
         d_u.fill(np.nan)
         valid_ap_mask = np.abs(self.u_a_p) > 1e-12
         dy = mesh.get_cell_sizes()[1]
         d_u[valid_ap_mask] = dy / self.u_a_p[valid_ap_mask]
 
-        # Calculate residual: r = b - Ax (using the RELAXED system and the final u_star)
-        # Re-flatten u_star after potentially applying BCs
-        Ax = self.u_matrix @ u_star.flatten() 
-        r = self.u_rhs - Ax # Residual vector (1D)
-
-        # --- Calculate normalized L2 norm using interior points only --- 
-        # 1. Reshape residual and RHS to 2D fields
-        u_residual_field_full = r.reshape((imax+1, jmax))
-        rhs_field_full = self.u_rhs.reshape((imax+1, jmax))
-        
-        # 2. Extract interior points only using slicing
-        u_residual_interior = u_residual_field_full[1:nx, 1:ny-1]
-        rhs_field_interior = rhs_field_full[1:nx, 1:ny-1]
-
-        # 3. Calculate L2 norm of interior points only
-        r_norm = np.linalg.norm(u_residual_interior)
-        b_norm = np.linalg.norm(rhs_field_interior)
-        
-        # 4. Calculate normalized residual norm
-        u_residual_norm = r_norm / (b_norm + 1e-15) if (b_norm + 1e-15) > 0 else r_norm
-        # --- End of interior points norm calculation ---
-
-        # Reshape the original full residual field for returning (will be zeroed later)
-        u_residual_field_relaxed = u_residual_field_full # Keep relaxed field temporarily if needed
-
-        # Calculate UNRELAXED residual norm and field
-        u_residual_norm_unrelaxed, u_residual_field_unrelaxed = self._calculate_unrelaxed_residual(
+        # Calculate residual norm and field using unrelaxed system
+        _, u_residual_field = self._calculate_unrelaxed_residual(
             u_star, self.u_a_e, self.u_a_w, self.u_a_n, self.u_a_s,
             self.u_a_p_unrelaxed, self.u_source_unrelaxed, nx, ny, is_u=True
         )
 
-        # Zero out residuals at boundary and adjacent nodes in the RETURNED field (use unrelaxed field now)
-        # This logic is now inside _calculate_unrelaxed_residual
-
-        # Calculate absolute L2 norms for both relaxed and unrelaxed residuals
-        # Extract the interior points matching visualization function
-        u_abs_relaxed = np.linalg.norm(u_residual_field_relaxed[1:nx, 1:ny-1], ord=2)
-        u_abs_unrelaxed = np.linalg.norm(u_residual_field_unrelaxed[1:nx, 1:ny-1], ord=2)
+        # Calculate L2 norm of the interior residual field
+        u_interior_residual = u_residual_field[1:nx, 1:ny-1]
+        u_current_l2 = np.linalg.norm(u_interior_residual)
         
-        # Create a dictionary with all residual information
+        # Keep track of the maximum L2 norm for relative scaling
+        if not hasattr(self, 'u_max_l2'):
+            self.u_max_l2 = u_current_l2
+        else:
+            self.u_max_l2 = max(self.u_max_l2, u_current_l2)
+        
+        # Calculate relative norm as l2(r)/max(l2(r))
+        u_rel_norm = u_current_l2 / self.u_max_l2 if self.u_max_l2 > 0 else 1.0
+        
+        # Create the minimal residual information dictionary
         residual_info = {
-            'relaxed_norm': u_residual_norm,  # Normalized/relative (r/b)
-            'unrelaxed_norm': u_residual_norm_unrelaxed,  # Normalized/relative (r/b)
-            'relaxed_abs': u_abs_relaxed,  # Absolute L2 norm
-            'unrelaxed_abs': u_abs_unrelaxed,  # Absolute L2 norm
-            'unrelaxed_field': u_residual_field_unrelaxed,  # Full residual field
+            'rel_norm': u_rel_norm,  # l2(r)/max(l2(r))
+            'field': u_residual_field  # Absolute residual field
         }
 
-        # Return: u*, d_u, residual_info
-        if return_dict:
-            return u_star, d_u, residual_info
-        else:
-            import warnings
-            warnings.warn(
-                "Non-dictionary return format is deprecated. Use return_dict=True for future compatibility.",
-                DeprecationWarning, stacklevel=2
-            )
-            # Return the traditional 5-value format for backward compatibility
-            return u_star, d_u, residual_info['relaxed_norm'], residual_info['unrelaxed_norm'], residual_info['unrelaxed_field']
+        # Return u*, d_u, residual_info
+        return u_star, d_u, residual_info
 
     def solve_v_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
@@ -396,10 +360,10 @@ class AMGMomentumSolver(MomentumSolver):
             Intermediate v-velocity field
         d_v : ndarray
             Momentum equation coefficient
-        residual_info : dict or (float, float, ndarray)
-            Either a dictionary with complete residual information (if return_dict=True)
-            or a tuple with (residual_norm_relaxed, residual_norm_unrelaxed, residual_field_unrelaxed)
-            for backward compatibility.
+        residual_info : dict
+            Dictionary with residual information: 
+            - 'rel_norm': l2(r)/max(l2(r))
+            - 'field': residual field
         """
         nx, ny = mesh.get_dimensions()
         imax, jmax = nx, ny
@@ -430,13 +394,10 @@ class AMGMomentumSolver(MomentumSolver):
         v_a_p_unrelaxed = coeffs['a_p']
         v_source_unrelaxed = coeffs['source']
 
-        # Apply under-relaxation to coefficients (ORIGINAL METHOD)
+        # Apply under-relaxation to coefficients
         safe_ap_unrelaxed_v = np.where(np.abs(v_a_p_unrelaxed) > 1e-12, v_a_p_unrelaxed, 1e-12)
         self.v_a_p = safe_ap_unrelaxed_v / alpha
-        # Apply similar shape check/logic for v_bc as for u_bc
         if v_bc.shape != self.v_a_p.shape:
-             # Add robust handling or ensure shapes match
-             # Assuming v_a_p is (nx, ny+1) like v_bc
              v_source = v_source_unrelaxed + (1 - alpha) * self.v_a_p * v_bc
         else:
              v_source = v_source_unrelaxed + (1 - alpha) * self.v_a_p * v_bc
@@ -446,17 +407,16 @@ class AMGMomentumSolver(MomentumSolver):
         self.v_a_w = v_a_w
         self.v_a_n = v_a_n
         self.v_a_s = v_a_s
-        self.v_a_p_unrelaxed = v_a_p_unrelaxed # Already stored
-        self.v_source_unrelaxed = v_source_unrelaxed # Already stored
+        self.v_a_p_unrelaxed = v_a_p_unrelaxed
+        self.v_source_unrelaxed = v_source_unrelaxed
 
         # Build the sparse matrix system using RELAXED coefficients
         self.v_matrix, self.v_rhs, idx_map = self._build_sparse_matrix(
-            v_a_e, v_a_w, v_a_n, v_a_s, self.v_a_p, # Use RELAXED a_p
-            v_source, # Use RELAXED source
+            v_a_e, v_a_w, v_a_n, v_a_s, self.v_a_p,
+            v_source,
             nx, ny, is_u=False
         )
 
-        # --- AMG Solver ---
         # Create the AMG solver hierarchy
         ml = pyamg.smoothed_aggregation_solver(self.v_matrix)
 
@@ -475,54 +435,30 @@ class AMGMomentumSolver(MomentumSolver):
         dx = mesh.get_cell_sizes()[0]
         d_v[valid_ap_mask] = dx / self.v_a_p[valid_ap_mask]
 
-        # Calculate residual: r = b - Ax (using the RELAXED system and final v_star)
-        Ax = self.v_matrix @ v_star.flatten()
-        r = self.v_rhs - Ax # Residual vector (1D)
-
-        # --- Calculate normalized L2 norm using interior points only ---
-        # 1. Reshape residual and RHS to 2D fields
-        v_residual_field_relaxed_full = r.reshape((imax, jmax+1)) # Relaxed residual field
-        rhs_field_full = self.v_rhs.reshape((imax, jmax+1)) # Relaxed RHS field
-
-        # 2. Extract interior points only using slicing
-        v_residual_interior = v_residual_field_relaxed_full[1:nx-1, 1:ny]
-        rhs_field_interior = rhs_field_full[1:nx-1, 1:ny]
-
-        # 3. Calculate L2 norm of interior points only
-        r_norm_relaxed = np.linalg.norm(v_residual_interior, ord=2)
-        b_norm_relaxed = np.linalg.norm(rhs_field_interior, ord=2)
-
-        # 4. Calculate normalized RELAXED residual norm
-        v_residual_norm = r_norm_relaxed / (b_norm_relaxed + 1e-15) if (b_norm_relaxed + 1e-15) > 0 else r_norm_relaxed
-
-        # Calculate UNRELAXED residual norm and field
-        v_residual_norm_unrelaxed, v_residual_field_unrelaxed = self._calculate_unrelaxed_residual(
+        # Calculate residual norm and field using unrelaxed system
+        _, v_residual_field = self._calculate_unrelaxed_residual(
             v_star, self.v_a_e, self.v_a_w, self.v_a_n, self.v_a_s,
             self.v_a_p_unrelaxed, self.v_source_unrelaxed, nx, ny, is_u=False
         )
 
-        # Calculate absolute L2 norms for both relaxed and unrelaxed residuals
-        # Extract the interior points matching visualization function
-        v_abs_relaxed = np.linalg.norm(v_residual_field_relaxed_full[1:nx-1, 1:ny], ord=2)
-        v_abs_unrelaxed = np.linalg.norm(v_residual_field_unrelaxed[1:nx-1, 1:ny], ord=2)
+        # Calculate L2 norm of the interior residual field
+        v_interior_residual = v_residual_field[1:nx-1, 1:ny]
+        v_current_l2 = np.linalg.norm(v_interior_residual)
         
-        # Create a dictionary with all residual information
+        # Keep track of the maximum L2 norm for relative scaling
+        if not hasattr(self, 'v_max_l2'):
+            self.v_max_l2 = v_current_l2
+        else:
+            self.v_max_l2 = max(self.v_max_l2, v_current_l2)
+        
+        # Calculate relative norm as l2(r)/max(l2(r))
+        v_rel_norm = v_current_l2 / self.v_max_l2 if self.v_max_l2 > 0 else 1.0
+        
+        # Create the minimal residual information dictionary
         residual_info = {
-            'relaxed_norm': v_residual_norm,  # Normalized/relative (r/b)
-            'unrelaxed_norm': v_residual_norm_unrelaxed,  # Normalized/relative (r/b)
-            'relaxed_abs': v_abs_relaxed,  # Absolute L2 norm
-            'unrelaxed_abs': v_abs_unrelaxed,  # Absolute L2 norm
-            'unrelaxed_field': v_residual_field_unrelaxed,  # Full residual field
+            'rel_norm': v_rel_norm,  # l2(r)/max(l2(r))
+            'field': v_residual_field  # Absolute residual field
         }
 
-        # Return: v*, d_v, residual_info
-        if return_dict:
-            return v_star, d_v, residual_info
-        else:
-            import warnings
-            warnings.warn(
-                "Non-dictionary return format is deprecated. Use return_dict=True for future compatibility.",
-                DeprecationWarning, stacklevel=2
-            )
-            # Return the traditional 5-value format for backward compatibility
-            return v_star, d_v, residual_info['relaxed_norm'], residual_info['unrelaxed_norm'], residual_info['unrelaxed_field'] 
+        # Return v*, d_v, residual_info
+        return v_star, d_v, residual_info

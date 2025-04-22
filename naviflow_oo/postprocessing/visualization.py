@@ -489,13 +489,13 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
     return fig
 
 def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, mesh, title=None, filename=None, show=True, output_dir=None,
-                      u_abs_unrelaxed_history=None, v_abs_unrelaxed_history=None, p_abs_history=None, history_filename=None):
+                      u_rel_norms=None, v_rel_norms=None, p_rel_norms=None, history_filename=None):
     """
     Plot final absolute algebraic residuals for pressure, u-momentum, and v-momentum fields on their native grids.
     Shows both linear scale (top row) and logarithmic scale (bottom row).
     
     If residual history arrays are provided, also generates a separate plot showing the history of
-    unrelaxed absolute residuals over iterations and relative residual norm defined as ||r_n||/||r_0||.
+    relative residual norms defined as l2(r)/max(l2(r)).
     
     Parameters:
     -----------
@@ -515,12 +515,12 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
         Whether to display the plot
     output_dir : str, optional
         Directory where to save the output. If None, uses 'results' in the calling script's directory.
-    u_abs_unrelaxed_history : list, optional
-        History of absolute unrelaxed u-velocity residuals
-    v_abs_unrelaxed_history : list, optional
-        History of absolute unrelaxed v-velocity residuals
-    p_abs_history : list, optional
-        History of absolute pressure/continuity residuals
+    u_rel_norms : list, optional
+        History of relative u-velocity residual norms (l2(r)/max(l2(r)))
+    v_rel_norms : list, optional
+        History of relative v-velocity residual norms (l2(r)/max(l2(r)))
+    p_rel_norms : list, optional
+        History of relative pressure/continuity residual norms (l2(r)/max(l2(r)))
     history_filename : str, optional
         If provided, saves the residual history plot to this filename
     """
@@ -654,22 +654,19 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
         plt.close()
     
     # Create and save residual history plot if history data is provided
-    if u_abs_unrelaxed_history is not None and v_abs_unrelaxed_history is not None and p_abs_history is not None and history_filename is not None:
-        # Plot relative unrelaxed residual history
+    if u_rel_norms is not None and v_rel_norms is not None and p_rel_norms is not None and history_filename is not None:
+        # Plot relative residual history
         plt.figure(figsize=(10, 5))
         
         # Get colors from coolwarm colormap
         colors = [plt.cm.coolwarm(0.95), plt.cm.coolwarm(0.75), plt.cm.coolwarm(0.2)]  # Get colors at 0.8, 0.5, 0.2 positions
         
-        # Calculate relative residuals, checking for zero initial residuals to prevent division by zero
-        u_rel_residuals = [r / max(u_abs_unrelaxed_history) for r in u_abs_unrelaxed_history]
-        v_rel_residuals = [r / max(v_abs_unrelaxed_history) for r in v_abs_unrelaxed_history]
-        p_rel_residuals = [r / max(p_abs_history) for r in p_abs_history]
-        plt.semilogy(range(len(u_rel_residuals)), u_rel_residuals, color=colors[0], label='u-momentum')  # Warm color
-        plt.semilogy(range(len(v_rel_residuals)), v_rel_residuals, color=colors[1], label='v-momentum')  # Neutral color
-        plt.semilogy(range(len(p_rel_residuals)), p_rel_residuals, color=colors[2], label='pressure')    # Cool color
+        # Plot the relative residual norms
+        plt.semilogy(range(len(u_rel_norms)), u_rel_norms, color=colors[0], label='u-momentum')  # Warm color
+        plt.semilogy(range(len(v_rel_norms)), v_rel_norms, color=colors[1], label='v-momentum')  # Neutral color
+        plt.semilogy(range(len(p_rel_norms)), p_rel_norms, color=colors[2], label='pressure')    # Cool color
         plt.grid(True)
-        plt.title('Relative Unrelaxed Residual History $\\|r_n\\|/\\|r_0\\|$')
+        plt.title('Relative Residual History $\\|r_n\\|/\\max(\\|r\\|)$')
         plt.xlabel('Iteration')
         plt.ylabel('Relative Residual Norm')
         plt.legend()
@@ -693,7 +690,7 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
         # Save the plot
         hist_full_path = _ensure_output_directory(history_filename, output_dir)
         plt.savefig(hist_full_path, dpi=300, bbox_inches='tight')
-        print(f"Unrelaxed residual history plot saved to {hist_full_path}")
+        print(f"Relative residual history plot saved to {hist_full_path}")
         
         if not show:
             plt.close()

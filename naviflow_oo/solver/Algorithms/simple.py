@@ -81,26 +81,38 @@ class SimpleSolver(BaseAlgorithm):
         nx, ny = self.mesh.get_dimensions()
         p_star = self.p.copy()
         p_prime = np.zeros((nx, ny))
-        self.residual_history = []
-        self.momentum_residual_history = []
-        self.pressure_residual_history = []
-        self.infinity_norm_history = []
-
-        iteration = 1
-        # Initialize absolute residuals for the first iteration check and convergence
-        u_res_abs = v_res_abs = p_res_abs = 1e6 
-        # Use absolute residuals for the loop condition check and reporting
-        total_res_check = max(u_res_abs, v_res_abs, p_res_abs) 
         
-        print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u} with normalized algebraic residuals.") # Updated print message
+        # Initialize/reset residual histories - only store what's needed
+        self.residual_history = []  # Overall convergence 
+        
+        # Store only relative residual norms for each equation
+        self.x_momentum_rel_norms = []
+        self.y_momentum_rel_norms = []
+        self.pressure_rel_norms = []
+        
+        # For infinity norm tracking if needed
+        self.infinity_norm_history = []
+        
+        # Final residual fields
+        self._final_u_residual_field = None
+        self._final_v_residual_field = None
+        self._final_p_residual_field = None
+        
+        iteration = 1
+        # Initialize residuals for convergence check
+        u_rel_norm = v_rel_norm = p_rel_norm = 1.0
+        total_res_check = max(u_rel_norm, v_rel_norm, p_rel_norm)
+        
+        print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u}")
 
         try:
             while iteration <= max_iterations and total_res_check > tolerance:
+                # Store previous solution
                 self.u_old = self.u.copy()
                 self.v_old = self.v.copy()
                 self.p_old = self.p.copy()
 
-                # Solve momentum equations and get comprehensive residual info as dictionaries
+                # Solve momentum equations
                 u_star, d_u, u_res_info = self.momentum_solver.solve_u_momentum(
                     self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
@@ -115,14 +127,17 @@ class SimpleSolver(BaseAlgorithm):
                     return_dict=True
                 )
 
-                # Store intermediate fields needed for pressure residual calculation
+                # Save intermediate fields for pressure equation
                 self._tmp_u_star = u_star
                 self._tmp_v_star = v_star
                 self._tmp_d_u = d_u
                 self._tmp_d_v = d_v
 
-                # Solve pressure correction equation with residual info as dictionary
-                p_prime, p_res_info = self.pressure_solver.solve(self.mesh, u_star, v_star, d_u, d_v, p_star, return_dict=True)
+                # Solve pressure correction equation
+                p_prime, p_res_info = self.pressure_solver.solve(
+                    self.mesh, u_star, v_star, d_u, d_v, p_star, 
+                    return_dict=True
+                )
                 
                 # Update pressure with relaxation
                 self.p = p_star + self.alpha_p * p_prime
@@ -134,49 +149,28 @@ class SimpleSolver(BaseAlgorithm):
                     self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
                 )
                 
-                # Extract residual information from dictionaries
-                u_res_norm_relaxed = u_res_info['relaxed_norm']
-                u_res_norm_unrelaxed = u_res_info['unrelaxed_norm']
-                v_res_norm_relaxed = v_res_info['relaxed_norm']
-                v_res_norm_unrelaxed = v_res_info['unrelaxed_norm']
-                p_res_abs = p_res_info['norm']
+                # Extract relative norms for convergence check
+                u_rel_norm = u_res_info['rel_norm']
+                v_rel_norm = v_res_info['rel_norm']
+                p_rel_norm = p_res_info['rel_norm']
                 
-                # Extract absolute residuals
-                u_abs_l2_relaxed = u_res_info['relaxed_abs']
-                u_abs_l2_unrelaxed = u_res_info['unrelaxed_abs']
-                v_abs_l2_relaxed = v_res_info['relaxed_abs']
-                v_abs_l2_unrelaxed = v_res_info['unrelaxed_abs']
-                p_abs_l2 = p_res_info['abs']
-                
-                # Store residual fields
-                u_res_field_unrelaxed = u_res_info['unrelaxed_field']
-                v_res_field_unrelaxed = v_res_info['unrelaxed_field']
+                # Save residual fields for final visualization
+                u_res_field = u_res_info['field']
+                v_res_field = v_res_info['field']
                 p_res_field = p_res_info['field']
                 
-                # Store normalized algebraic residual norms
-                self.x_momentum_residuals_relaxed.append(u_res_norm_relaxed)
-                self.x_momentum_residuals_unrelaxed.append(u_res_norm_unrelaxed)
-                self.y_momentum_residuals_relaxed.append(v_res_norm_relaxed)
-                self.y_momentum_residuals_unrelaxed.append(v_res_norm_unrelaxed)
-                self.continuity_residuals.append(p_res_abs) # Continuity residual is represented by pressure correction
+                # Store relative norms
+                self.x_momentum_rel_norms.append(u_rel_norm)
+                self.y_momentum_rel_norms.append(v_rel_norm)
+                self.pressure_rel_norms.append(p_rel_norm)
 
-                # Store absolute L2 residual norms
-                self.x_momentum_abs_relaxed.append(u_abs_l2_relaxed)
-                self.y_momentum_abs_relaxed.append(v_abs_l2_relaxed)
-                self.x_momentum_abs_unrelaxed.append(u_abs_l2_unrelaxed)
-                self.y_momentum_abs_unrelaxed.append(v_abs_l2_unrelaxed)
-                self.pressure_abs_residuals.append(p_abs_l2)
+                # Define convergence criteria using relative norms
+                total_res_check = max(u_rel_norm, v_rel_norm)#, p_rel_norm)
 
-                # Define convergence criteria based on UNRELAXED residuals
-                total_res_unrelaxed = max(u_res_norm_unrelaxed, v_res_norm_unrelaxed, p_res_abs)
-                total_res_check = total_res_unrelaxed # Use unrelaxed for convergence check
+                # Store total residual for history tracking
+                self.residual_history.append(total_res_check)
 
-                # For general history tracking, use unrelaxed (matches convergence check)
-                self.residual_history.append(total_res_unrelaxed)
-                # Store combined momentum residual norms for simpler plotting/reporting if needed
-                self.momentum_residual_history.append(max(u_res_norm_unrelaxed, v_res_norm_unrelaxed))
-                self.pressure_residual_history.append(p_res_abs)
-
+                # Track infinity norm if requested
                 if track_infinity_norm and (iteration % infinity_norm_interval == 0 or total_res_check < tolerance):
                     try:
                         inf_err = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
@@ -186,33 +180,29 @@ class SimpleSolver(BaseAlgorithm):
                     except Exception as e:
                         print(f"Error calc failed: {e}")
 
-                # Print both normalized and absolute L2 norms
-                print(f"[{iteration}] Rel Alg Res -> u: {u_res_norm_relaxed:.3e}/{u_res_norm_unrelaxed:.3e}, "
-                      f"v: {v_res_norm_relaxed:.3e}/{v_res_norm_unrelaxed:.3e}, "
-                      f"p: {p_res_abs:.3e}")
-                print(f"[{iteration}] Abs L2 Norms -> u: {u_abs_l2_relaxed:.3e}/{u_abs_l2_unrelaxed:.3e}, "
-                      f"v: {v_abs_l2_relaxed:.3e}/{v_abs_l2_unrelaxed:.3e}, "
-                      f"p: {p_abs_l2:.3e}")
+                # Print relative norms
+                print(f"[{iteration}] Relative L2 norms: u: {u_rel_norm:.3e}, "
+                      f"v: {v_rel_norm:.3e}, p: {p_rel_norm:.3e}")
                 
                 iteration += 1
 
         except KeyboardInterrupt:
             print("Interrupted by user.")
 
-        # After the loop, store the UNRELAXED residual fields from the last completed iteration
-        self._final_u_residual_field = u_res_field_unrelaxed
-        self._final_v_residual_field = v_res_field_unrelaxed
+        # Store the final residual fields
+        self._final_u_residual_field = u_res_field
+        self._final_v_residual_field = v_res_field
         self._final_p_residual_field = p_res_field
 
-        # Ensure total_res_check holds the final UNRELAXED residual for reporting
-        final_residual_to_report = total_res_check
+        # For reporting
+        final_residual = total_res_check
 
         self.profiler.set_iterations(iteration - 1)
         self.profiler.set_convergence_info(
             tolerance=tolerance,
-            final_residual=final_residual_to_report, # Store the final absolute residual
-            residual_history=self.residual_history, # Already contains absolute residuals
-            converged=(final_residual_to_report < tolerance)
+            final_residual=final_residual,
+            residual_history=self.residual_history,
+            converged=(final_residual < tolerance)
         )
 
         if hasattr(self.pressure_solver, 'get_solver_info'):
@@ -226,13 +216,11 @@ class SimpleSolver(BaseAlgorithm):
 
         self.profiler.end()
 
+        # Create simulation result with the relevant residual histories
         result = SimulationResult(
             self.u, self.v, self.p, self.mesh,
             iterations=iteration-1,
             residuals=self.residual_history,
-            momentum_residuals=self.momentum_residual_history,
-            pressure_residuals=self.pressure_residual_history,
-            divergence=self.calculate_divergence(),
             reynolds=self.fluid.get_reynolds_number(),
             # Pass final residual fields
             u_residual_field=self._final_u_residual_field,
@@ -240,20 +228,11 @@ class SimpleSolver(BaseAlgorithm):
             p_residual_field=self._final_p_residual_field
         )
 
-        # Add relaxed/unrelaxed histories to the result object for plotting
-        result.add_history('u_momentum_relaxed', self.x_momentum_residuals_relaxed)
-        result.add_history('u_momentum_unrelaxed', self.x_momentum_residuals_unrelaxed)
-        result.add_history('v_momentum_relaxed', self.y_momentum_residuals_relaxed)
-        result.add_history('v_momentum_unrelaxed', self.y_momentum_residuals_unrelaxed)
-        result.add_history('continuity', self.continuity_residuals)
-        result.add_history('total_unrelaxed', self.residual_history)
-        
-        # Add absolute residual histories
-        result.add_history('u_abs_relaxed', self.x_momentum_abs_relaxed)
-        result.add_history('v_abs_relaxed', self.y_momentum_abs_relaxed)
-        result.add_history('u_abs_unrelaxed', self.x_momentum_abs_unrelaxed)
-        result.add_history('v_abs_unrelaxed', self.y_momentum_abs_unrelaxed)
-        result.add_history('p_abs', self.pressure_abs_residuals)
+        # Add only the necessary residual histories to the result
+        result.add_history('u_rel_norm', self.x_momentum_rel_norms)
+        result.add_history('v_rel_norm', self.y_momentum_rel_norms)
+        result.add_history('p_rel_norm', self.pressure_rel_norms)
+        result.add_history('total_rel_norm', self.residual_history)
 
         self.profiler.start_section() # Start timing finalization
         if save_profile:
