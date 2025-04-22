@@ -655,31 +655,19 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
     
     # Create and save residual history plot if history data is provided
     if u_abs_unrelaxed_history is not None and v_abs_unrelaxed_history is not None and p_abs_history is not None and history_filename is not None:
-        # Plot residual history (both absolute and relative)
-        plt.figure(figsize=(14, 10))
+        # Plot relative unrelaxed residual history
+        plt.figure(figsize=(10, 5))
         
-        # First subplot: absolute unrelaxed residual history
-        plt.subplot(2, 1, 1)
-        plt.semilogy(range(len(u_abs_unrelaxed_history)), u_abs_unrelaxed_history, 'r-', label='u-momentum')
-        plt.semilogy(range(len(v_abs_unrelaxed_history)), v_abs_unrelaxed_history, 'g-', label='v-momentum')
-        plt.semilogy(range(len(p_abs_history)), p_abs_history, 'b-', label='pressure')
-        plt.grid(True)
-        plt.title('Absolute Unrelaxed Residual History')
-        plt.xlabel('Iteration')
-        plt.ylabel('Residual Norm')
-        plt.legend()
-        
-        # Second subplot: relative unrelaxed residual history
-        plt.subplot(2, 1, 2)
+        # Get colors from coolwarm colormap
+        colors = [plt.cm.coolwarm(0.95), plt.cm.coolwarm(0.75), plt.cm.coolwarm(0.2)]  # Get colors at 0.8, 0.5, 0.2 positions
         
         # Calculate relative residuals, checking for zero initial residuals to prevent division by zero
-        u_rel_residuals = [r / u_abs_unrelaxed_history[0] if u_abs_unrelaxed_history[0] != 0 else 0 for r in u_abs_unrelaxed_history]
-        v_rel_residuals = [r / v_abs_unrelaxed_history[0] if v_abs_unrelaxed_history[0] != 0 else 0 for r in v_abs_unrelaxed_history]
-        p_rel_residuals = [r / p_abs_history[0] if p_abs_history[0] != 0 else 0 for r in p_abs_history]
-        
-        plt.semilogy(range(len(u_rel_residuals)), u_rel_residuals, 'r-', label='u-momentum')
-        plt.semilogy(range(len(v_rel_residuals)), v_rel_residuals, 'g-', label='v-momentum')
-        plt.semilogy(range(len(p_rel_residuals)), p_rel_residuals, 'b-', label='pressure')
+        u_rel_residuals = [r / max(u_abs_unrelaxed_history) for r in u_abs_unrelaxed_history]
+        v_rel_residuals = [r / max(v_abs_unrelaxed_history) for r in v_abs_unrelaxed_history]
+        p_rel_residuals = [r / max(p_abs_history) for r in p_abs_history]
+        plt.semilogy(range(len(u_rel_residuals)), u_rel_residuals, color=colors[0], label='u-momentum')  # Warm color
+        plt.semilogy(range(len(v_rel_residuals)), v_rel_residuals, color=colors[1], label='v-momentum')  # Neutral color
+        plt.semilogy(range(len(p_rel_residuals)), p_rel_residuals, color=colors[2], label='pressure')    # Cool color
         plt.grid(True)
         plt.title('Relative Unrelaxed Residual History $\\|r_n\\|/\\|r_0\\|$')
         plt.xlabel('Iteration')
@@ -711,137 +699,3 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
             plt.close()
     
     return fig
-
-def plot_u_v_continuity_residuals(u_residuals_relaxed, v_residuals_relaxed, 
-                                 u_residuals_unrelaxed, v_residuals_unrelaxed,
-                                 continuity_residuals, title=None, filename=None, 
-                                 show=True, figsize=(12, 8), output_dir=None,
-                                 u_abs_relaxed=None, v_abs_relaxed=None,
-                                 u_abs_unrelaxed=None, v_abs_unrelaxed=None,
-                                 p_abs_residuals=None):
-    """
-    Plot u-velocity, v-velocity (relaxed and unrelaxed), and continuity residuals 
-    using logarithmic y-axis. Can plot both normalized (relative) and absolute residuals.
-    
-    Parameters:
-    -----------
-    u_residuals_relaxed : list
-        History of normalized relaxed u-velocity (x-momentum) residuals
-    v_residuals_relaxed : list
-        History of normalized relaxed v-velocity (y-momentum) residuals
-    u_residuals_unrelaxed : list
-        History of normalized unrelaxed u-velocity (x-momentum) residuals
-    v_residuals_unrelaxed : list
-        History of normalized unrelaxed v-velocity (y-momentum) residuals
-    continuity_residuals : list
-        History of normalized continuity residuals
-    title : str, optional
-        Plot title
-    filename : str, optional
-        If provided, saves the figure to this filename
-    show : bool, optional
-        Whether to display the plot
-    figsize : tuple, optional
-        Figure size (width, height) in inches
-    output_dir : str, optional
-        Directory where to save the output. If None, uses 'results' in the calling script's directory.
-    u_abs_relaxed : list, optional
-        History of absolute relaxed u-velocity residuals
-    v_abs_relaxed : list, optional
-        History of absolute relaxed v-velocity residuals
-    u_abs_unrelaxed : list, optional
-        History of absolute unrelaxed u-velocity residuals
-    v_abs_unrelaxed : list, optional
-        History of absolute unrelaxed v-velocity residuals
-    p_abs_residuals : list, optional
-        History of absolute pressure/continuity residuals
-        
-    Returns:
-    --------
-    matplotlib.figure.Figure
-        The generated figure
-    """
-    # Check if all required residual lists are provided and non-empty
-    required_residuals = [u_residuals_relaxed, v_residuals_relaxed, 
-                          u_residuals_unrelaxed, v_residuals_unrelaxed, 
-                          continuity_residuals]
-    if not all(required_residuals) or not all(len(res) > 0 for res in required_residuals):
-        print("Warning: One or more required residual histories are missing or empty. Skipping residual plot.")
-        return None # Or raise ValueError("Residual data is missing or empty")
-        
-    # Check if absolute residuals are provided
-    has_absolute = all([u_abs_relaxed, v_abs_relaxed, u_abs_unrelaxed, v_abs_unrelaxed, p_abs_residuals])
-    
-    # Create figure with two subplots if we have absolute residuals
-    if has_absolute:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
-        fig.suptitle(title if title else 'Residual History')
-        
-        # Add a note explaining that relaxed absolute residuals are approximate
-        fig.text(0.01, 0.01, "Note: Relaxed absolute residuals are approximate (0.95× unrelaxed)", 
-                 fontsize=8, style='italic', ha='left')
-    else:
-        fig, ax1 = plt.subplots(figsize=figsize)
-        if title:
-            ax1.set_title(title)
-        else:
-            ax1.set_title('Residual History')
-    
-    # Use the length of the unrelaxed u residuals as the reference for iterations
-    iterations = range(1, len(u_residuals_unrelaxed) + 1)
-    
-    # Plot normalized residuals on first subplot
-    ax1.semilogy(iterations, u_residuals_relaxed, color=plt.cm.coolwarm(0.9), linewidth=1.5, linestyle='--', label='u-vel Relaxed (Rel)')
-    ax1.semilogy(iterations, v_residuals_relaxed, color=plt.cm.coolwarm(0.7), linewidth=1.5, linestyle='--', label='v-vel Relaxed (Rel)')
-    ax1.semilogy(iterations, u_residuals_unrelaxed, color=plt.cm.coolwarm(0.9), linewidth=2, label='u-vel Unrelaxed (Rel)')
-    ax1.semilogy(iterations, v_residuals_unrelaxed, color=plt.cm.coolwarm(0.7), linewidth=2, label='v-vel Unrelaxed (Rel)')
-    ax1.semilogy(iterations, continuity_residuals, color=plt.cm.coolwarm(0.1), linewidth=2, linestyle=':', label='Continuity (Rel)')
-    
-    ax1.grid(True, which="both", ls="--")
-    ax1.set_ylabel('Relative Residual Norm')
-    ax1.legend(loc='upper right')
-    
-    # Plot absolute residuals on second subplot if available
-    if has_absolute:
-        # Add markers to relaxed lines for better visibility
-        marker_interval = max(1, len(iterations)//15)
-        
-        ax2.semilogy(iterations, u_abs_relaxed, color=plt.cm.coolwarm(0.9), linewidth=1.5, 
-                    linestyle='--', marker='o', markersize=4, markevery=marker_interval,
-                    label='u-vel Relaxed (Abs)')
-        ax2.semilogy(iterations, v_abs_relaxed, color=plt.cm.coolwarm(0.7), linewidth=1.5, 
-                    linestyle='--', marker='s', markersize=4, markevery=marker_interval,
-                    label='v-vel Relaxed (Abs)')
-
-        
-        # Unrelaxed lines without markers
-        ax2.semilogy(iterations, u_abs_unrelaxed, color=plt.cm.coolwarm(0.9), linewidth=2, 
-                    label='u-vel Unrelaxed (Abs)')
-        ax2.semilogy(iterations, v_abs_unrelaxed, color=plt.cm.coolwarm(0.7), linewidth=2, 
-                    label='v-vel Unrelaxed (Abs)')
-        
-        # Continuity residual
-        ax2.semilogy(iterations, p_abs_residuals, color=plt.cm.coolwarm(0.1), linewidth=2, 
-                    linestyle=':', label='Continuity (Abs)')
-        
-        ax2.grid(True, which="both", ls="--")
-        ax2.set_xlabel('Iteration')
-        ax2.set_ylabel('Absolute Residual Norm (L2)')
-        ax2.legend(loc='upper right')
-    else:
-        ax1.set_xlabel('Iteration')
-    
-    plt.tight_layout()
-    
-    if filename:
-        # Ensure output directory exists and get full path
-        full_path = _ensure_output_directory(filename, output_dir)
-        plt.savefig(full_path, dpi=150, bbox_inches='tight')
-        print(f"Residual history plot saved to {full_path}")
-        
-    if show:
-        plt.show()
-    else:
-        plt.close()
-        
-    return plt.gcf()
