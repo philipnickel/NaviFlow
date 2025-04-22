@@ -47,7 +47,6 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # 4. Create solvers
 pressure_solver = DirectPressureSolver()
 
-#momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
 #momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=1)
 #momentum_solver = CGMatrixMomentumSolver(tolerance=1e-1, max_iterations=1000)
 # Use the new AMG solver

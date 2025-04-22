@@ -22,17 +22,17 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**6-1, 2**6-1 # Grid size
+nx, ny = 2**7-1, 2**7-1 # Grid size
 reynolds = 100            # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 1000     # Maximum number of iterations
+max_iterations = 10000     # Maximum number of iterations
 
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
 #tolerance = expected_disc_error * 1e-3
-tolerance = 1e-15
+tolerance = 1e-3
 pressure_tolerance = expected_disc_error
 #pressure_tolerance = 1e-10
 print(f"Tolerance: {tolerance}")
@@ -58,9 +58,9 @@ multigrid_solver = MultiGridSolver(
     tolerance=pressure_tolerance,         # Overall tolerance
     pre_smoothing=2,        # Pre-smoothing steps
     post_smoothing=4,       # Post-smoothing steps
-    cycle_type='v',         # Use W-cycles
-    cycle_type_buildup='w',
-    cycle_type_final='w',
+    cycle_type='fmg',         # Use W-cycles
+    cycle_type_buildup='v',
+    cycle_type_final='v',
     max_cycles_buildup=1,
     restriction_method='restrict_inject',  # Use direct injection restriction
     #restriction_method='restrict_full_weighting',  # Use linear interpolation
@@ -70,7 +70,7 @@ multigrid_solver = MultiGridSolver(
 )
 
 #momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=5)
-momentum_solver = AMGMomentumSolver(tolerance=1e-4, max_iterations=1)
+momentum_solver = AMGMomentumSolver(tolerance=1e-4, max_iterations=1000)
 
 velocity_updater = StandardVelocityUpdater()
 
@@ -125,6 +125,8 @@ result.plot_combined_results(
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_multigrid_gauss_seidel_results.pdf'),
     show=False
 )
+
+
 # 11. Visualize final residuals
 plot_final_residuals(
     algorithm._final_u_residual_field, 

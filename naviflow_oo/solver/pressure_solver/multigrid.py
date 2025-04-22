@@ -118,7 +118,7 @@ class MultiGridSolver(PressureSolver):
         self.p_a_p = None
         self.p_source = None
 
-    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
+    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star, return_dict=True):
         """
         Solve the pressure correction equation using the matrix-free multigrid method.
         
@@ -132,22 +132,18 @@ class MultiGridSolver(PressureSolver):
             Momentum equation coefficients.
         p_star : ndarray
             Current pressure field.
-        use_zero_pressure_bc : bool, optional
-            If True, applies zero pressure (Dirichlet) boundary conditions
-            instead of the default zero gradient (Neumann) conditions.
-        zero_pressure_boundaries : list or str, optional
-            Specifies which boundaries to apply zero pressure BC.
-            Can include 'west', 'east', 'south', 'north', or 'all'.
-            Only used when use_zero_pressure_bc is True.
+        return_dict : bool, optional
+            If True, returns a dictionary with complete residual information (default)
+            If False, returns separate residual values (deprecated)
             
         Returns:
         --------
         p_prime : ndarray
             Pressure correction field.
-        p_res_abs : float
-            Absolute residual of the final solution.
-        p_res_field : ndarray
-            Residual field of the final solution.
+        residual_info : dict
+            Dictionary with residual information: 
+            - 'rel_norm': l2(r)/max(l2(r))
+            - 'field': residual field
         """
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
@@ -248,38 +244,26 @@ class MultiGridSolver(PressureSolver):
         # Reshape to 2D with Fortran ordering
         p_prime = x.reshape((nx, ny), order='F')
         
-        # --- Calculate final residual and norm --- 
-        Ax_final = compute_Ap_product(x, nx, ny, dx, dy, self.rho, d_u, d_v)
-        r_final = b - Ax_final
-        r_final_field = r_final.reshape((nx, ny), order='F')
-
-        # Mask boundaries in residual and RHS fields to calculate norm
-        r_final_field_masked = r_final_field.copy()
-        b_field_masked = b.reshape((nx, ny), order='F').copy()
-
-        r_final_field_masked[0, :] = 0.0
-        r_final_field_masked[nx-1, :] = 0.0
-        r_final_field_masked[:, 0] = 0.0
-        r_final_field_masked[:, ny-1] = 0.0
-
-        b_field_masked[0, :] = 0.0
-        b_field_masked[nx-1, :] = 0.0
-        b_field_masked[:, 0] = 0.0
-        b_field_masked[:, ny-1] = 0.0
-
-        r_norm = np.linalg.norm(r_final_field_masked)
-        b_norm = np.linalg.norm(b_field_masked)
-        p_res_abs = r_norm / (b_norm + 1e-15) if (b_norm + 1e-15) > 0 else r_norm
+        # Create a residual field of the proper shape (nx, ny)
+        r_field = r.reshape((nx, ny), order='F')
         
-        # Zero out boundaries in the RETURNED residual field
-        p_res_field = r_final_field
-        p_res_field[0, :] = 0.0
-        p_res_field[nx-1, :] = 0.0
-        p_res_field[:, 0] = 0.0
-        p_res_field[:, ny-1] = 0.0
-        # ------------------------------------------
+        # Keep track of the maximum L2 norm for relative scaling
+        if not hasattr(self, 'p_max_l2'):
+            self.p_max_l2 = r_norm
+        else:
+            self.p_max_l2 = max(self.p_max_l2, r_norm)
         
-        return p_prime, p_res_abs, p_res_field
+        # Calculate relative norm as l2(r)/max(l2(r))
+        p_rel_norm = r_norm / self.p_max_l2 if self.p_max_l2 > 0 else 1.0
+        
+        # Create the residual information dictionary
+        residual_info = {
+            'rel_norm': p_rel_norm,  # l2(r)/max(l2(r))
+            'field': r_field         # Absolute residual field
+        }
+        
+        # Return the solution and residual info
+        return p_prime, residual_info
     
     def _solve_residual_direct(self, mesh, residual, d_u, d_v, rho=1.0):
         """
