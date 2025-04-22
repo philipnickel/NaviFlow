@@ -119,16 +119,8 @@ class DirectPressureSolver(PressureSolver):
         }
         
         # Return the solution and residual info
-        if return_dict:
-            return p_prime, residual_info
-        else:
-            import warnings
-            warnings.warn(
-                "Non-dictionary return format is deprecated. Use return_dict=True for future compatibility.",
-                DeprecationWarning, stacklevel=2
-            )
-            # For backward compatibility
-            return p_prime, p_rel_norm, r_field_full
+        return p_prime, residual_info
+ 
         
     def get_solver_info(self):
         """
