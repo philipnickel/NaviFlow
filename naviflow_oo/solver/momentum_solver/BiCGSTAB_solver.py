@@ -1,32 +1,33 @@
 """
-Algebraic Multigrid (AMG) momentum solver.
+BiCGSTAB (Biconjugate Gradient Stabilized) momentum solver with AMG preconditioning.
 """
 
 import numpy as np
 from scipy import sparse
+from scipy.sparse.linalg import bicgstab
 from .base_momentum_solver import MomentumSolver
 from .discretization import power_law
 from ...constructor.boundary_conditions import BoundaryConditionManager
-import pyamg # PyAMG library for AMG solvers
+import pyamg  # PyAMG library for AMG preconditioner
 
-class AMGMomentumSolver(MomentumSolver):
+class BiCGSTABMomentumSolver(MomentumSolver):
     """
-    Momentum solver that uses Algebraic Multigrid (AMG) to solve the momentum equations.
-    Uses Practice B to incorporate BCs.
+    Momentum solver that uses BiCGSTAB (Biconjugate Gradient Stabilized) with AMG preconditioning
+    to solve the momentum equations. Uses Practice B to incorporate BCs.
     """
 
     def __init__(self, discretization_scheme='power_law', tolerance=1e-8, max_iterations=100):
         """
-        Initialize the AMG momentum solver.
+        Initialize the BiCGSTAB momentum solver with AMG preconditioning.
 
         Parameters:
         -----------
         discretization_scheme : str, optional
             The discretization scheme to use (default: 'power_law').
         tolerance : float, optional
-            Convergence tolerance for the AMG solver (default: 1e-8).
+            Convergence tolerance for the BiCGSTAB solver (default: 1e-8).
         max_iterations : int, optional
-            Maximum number of iterations for the AMG solver (default: 100).
+            Maximum number of iterations for the BiCGSTAB solver (default: 100).
         """
         super().__init__()
         self.tolerance = tolerance
@@ -206,7 +207,7 @@ class AMGMomentumSolver(MomentumSolver):
 
     def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
-        Solve the u-momentum equation using Algebraic Multigrid.
+        Solve the u-momentum equation using BiCGSTAB with AMG preconditioning.
         
         Parameters:
         -----------
@@ -286,11 +287,13 @@ class AMGMomentumSolver(MomentumSolver):
             nx, ny, is_u=True
         )
 
-        # Create the AMG solver hierarchy
-        ml = pyamg.smoothed_aggregation_solver(self.u_matrix)
+        # Create AMG preconditioner
+        ml_u = pyamg.smoothed_aggregation_solver(self.u_matrix)
+        M_u = ml_u.aspreconditioner()
 
-        # Solve the RELAXED system Ax = b, using initial guess
-        u_flat = ml.solve(self.u_rhs, x0=u_initial_guess.flatten(), tol=self.tolerance, maxiter=self.max_iterations)
+        # Solve the RELAXED system Ax = b using BiCGSTAB with AMG preconditioner
+        u_flat, info = bicgstab(self.u_matrix, self.u_rhs, x0=u_initial_guess.flatten(), 
+                               M=M_u, atol=self.tolerance, maxiter=self.max_iterations)
 
         # Reshape result back to 2D
         u_star = u_flat.reshape((imax+1, jmax))
@@ -334,7 +337,7 @@ class AMGMomentumSolver(MomentumSolver):
 
     def solve_v_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
-        Solve the v-momentum equation using Algebraic Multigrid.
+        Solve the v-momentum equation using BiCGSTAB with AMG preconditioning.
         
         Parameters:
         -----------
@@ -417,11 +420,13 @@ class AMGMomentumSolver(MomentumSolver):
             nx, ny, is_u=False
         )
 
-        # Create the AMG solver hierarchy
-        ml = pyamg.smoothed_aggregation_solver(self.v_matrix)
+        # Create AMG preconditioner
+        ml_v = pyamg.smoothed_aggregation_solver(self.v_matrix)
+        M_v = ml_v.aspreconditioner()
 
-        # Solve the RELAXED system Ax = b, using initial guess
-        v_flat = ml.solve(self.v_rhs, x0=v_initial_guess.flatten(), tol=self.tolerance, maxiter=self.max_iterations)
+        # Solve the RELAXED system Ax = b using BiCGSTAB with AMG preconditioner
+        v_flat, info = bicgstab(self.v_matrix, self.v_rhs, x0=v_initial_guess.flatten(), 
+                               M=M_v, atol=self.tolerance, maxiter=self.max_iterations)
 
         # Reshape result back to 2D
         v_star = v_flat.reshape((imax, jmax+1))

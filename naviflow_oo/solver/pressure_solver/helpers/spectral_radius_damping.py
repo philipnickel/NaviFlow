@@ -19,7 +19,7 @@ else:
     from ..gauss_seidel import GaussSeidelSolver
 
 
-def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_iterations=20, num_random_vectors=5):
+def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_iterations=20, num_random_vectors=5, method_type='red_black'):
     """
     Find the optimal omega value for matrix-free Gauss-Seidel iteration using spectral radius analysis.
     
@@ -63,9 +63,9 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
         random_vectors.append(x)
     
     # Search for optimal omega
-    omega_min = 0  # Minimum omega value to test
-    omega_max = 1.8   # Maximum omega value to test
-    num_points = 200   # Number of points to test in that range
+    omega_min = 0.5  # Minimum omega value to test
+    omega_max = 2   # Maximum omega value to test
+    num_points = 50   # Number of points to test in that range
     
     omega_range = np.linspace(omega_min, omega_max, num_points)
     print(f"Searching for optimal omega in range: [{omega_min}, {omega_max}] with {num_points} points")
@@ -79,7 +79,7 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
     print("Searching for optimal omega...")
     for omega in tqdm(omega_range, desc="Testing omega values"):
         # Create a Gauss-Seidel solver with the current omega
-        solver = GaussSeidelSolver(tolerance=1e-10, max_iterations=1, omega=omega)
+        solver = GaussSeidelSolver(tolerance=1e-10, max_iterations=1, omega=omega, method_type=method_type)
         
         # Create a zero right-hand side for power iteration
         b = np.zeros(n)
@@ -89,19 +89,33 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
         
         for x in random_vectors:
             # Start with a random vector
-            p = x.copy()
+            v = x.copy()
             
-            # Apply one iteration of Gauss-Seidel
-            p_2d = p.reshape((nx, ny), order='F')
-            p_2d = solver.solve(p=p_2d, b=b, nx=nx, ny=ny, dx=dx, dy=dy, rho=rho, 
+            # Power iteration to estimate the dominant eigenvalue
+            for _ in range(num_iterations):
+                # Apply one iteration of Gauss-Seidel
+                v_2d = v.reshape((nx, ny), order='F')
+                result = solver.solve(p=v_2d, b=b, nx=nx, ny=ny, dx=dx, dy=dy, rho=rho, 
+                                   d_u=d_u, d_v=d_v, num_iterations=1, track_residuals=False)
+                # Extract the pressure array from the result (which is a tuple)
+                v_new_2d = result[0] if isinstance(result, tuple) else result
+                v_new = v_new_2d.flatten('F')
+                
+                # Normalize to prevent overflow/underflow
+                v_norm = np.linalg.norm(v_new)
+                if v_norm > 0:
+                    v = v_new / v_norm
+            
+            # Apply one final iteration to estimate eigenvalue
+            v_2d = v.reshape((nx, ny), order='F')
+            result = solver.solve(p=v_2d, b=b, nx=nx, ny=ny, dx=dx, dy=dy, rho=rho, 
                                d_u=d_u, d_v=d_v, num_iterations=1, track_residuals=False)
+            v_new_2d = result[0] if isinstance(result, tuple) else result
+            v_new = v_new_2d.flatten('F')
             
-            # Compute the action of the iteration matrix on x
-            # This is equivalent to M*x where M is the iteration matrix
-            Mx = p_2d.flatten('F')
-            
-            # Compute the spectral radius as the norm of Mx normalized by the norm of x
-            eig = np.linalg.norm(Mx) / np.linalg.norm(x)
+            # Calculate Rayleigh quotient for better eigenvalue approximation
+            # For non-symmetric matrices, use the Rayleigh quotient with the current eigenvector
+            eig = np.abs(np.dot(v_new, v) / np.dot(v, v))
             
             # Update max_eig if this vector gives a larger eigenvalue
             max_eig = max(max_eig, eig)
@@ -115,6 +129,7 @@ def find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, n
             optimal_omega = omega
     
     # Plot the results using standard matplotlib
+    plt.style.use(['science', 'grid'])
     plt.figure(figsize=(12, 8))
     plt.plot(omega_range, spectral_radii, 'b-', label='Spectral Radius')
     plt.plot(optimal_omega, min_spectral_radius, 'ro', label='Optimal Point')
@@ -188,9 +203,9 @@ def find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_ite
         random_vectors.append(x)
     
     # Search for optimal omega
-    omega_min = 0.75  # Minimum omega value to test
-    omega_max = 0.8  # Maximum omega value to test
-    num_points = 1000  # Number of points to test in that range
+    omega_min = 0.1  # Minimum omega value to test
+    omega_max = 1  # Maximum omega value to test
+    num_points = 100  # Number of points to test in that range
     
     omega_range = np.linspace(omega_min, omega_max, num_points)
     print(f"Searching for optimal omega in range: [{omega_min}, {omega_max}] with {num_points} points")
@@ -214,19 +229,33 @@ def find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_ite
         
         for x in random_vectors:
             # Start with a random vector
-            p = x.copy()
+            v = x.copy()
             
-            # Apply one iteration of Jacobi
-            p_2d = p.reshape((nx, ny), order='F')
-            p_2d = solver.solve(p=p_2d, b=b, nx=nx, ny=ny, dx=dx, dy=dy, rho=rho, 
+            # Power iteration to estimate the dominant eigenvalue
+            for _ in range(num_iterations):
+                # Apply one iteration of Jacobi
+                v_2d = v.reshape((nx, ny), order='F')
+                result = solver.solve(p=v_2d, b=b, nx=nx, ny=ny, dx=dx, dy=dy, rho=rho, 
+                                   d_u=d_u, d_v=d_v, num_iterations=1, track_residuals=False)
+                # Extract the pressure array from the result (which is a tuple)
+                v_new_2d = result[0] if isinstance(result, tuple) else result
+                v_new = v_new_2d.flatten('F')
+                
+                # Normalize to prevent overflow/underflow
+                v_norm = np.linalg.norm(v_new)
+                if v_norm > 0:
+                    v = v_new / v_norm
+            
+            # Apply one final iteration to estimate eigenvalue
+            v_2d = v.reshape((nx, ny), order='F')
+            result = solver.solve(p=v_2d, b=b, nx=nx, ny=ny, dx=dx, dy=dy, rho=rho, 
                                d_u=d_u, d_v=d_v, num_iterations=1, track_residuals=False)
+            v_new_2d = result[0] if isinstance(result, tuple) else result
+            v_new = v_new_2d.flatten('F')
             
-            # Compute the action of the iteration matrix on x
-            # This is equivalent to M*x where M is the iteration matrix
-            Mx = p_2d.flatten('F')
-            
-            # Compute the spectral radius as the norm of Mx normalized by the norm of x
-            eig = np.linalg.norm(Mx) / np.linalg.norm(x)
+            # Calculate Rayleigh quotient for better eigenvalue approximation
+            # For Jacobi, we can use this simpler approach since the matrix is closer to symmetric
+            eig = np.abs(np.dot(v_new, v) / np.dot(v, v))
             
             # Update max_eig if this vector gives a larger eigenvalue
             max_eig = max(max_eig, eig)
@@ -240,6 +269,7 @@ def find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_ite
             optimal_omega = omega
     
     # Plot the results using standard matplotlib
+    plt.style.use(['science', 'grid'])
     plt.figure(figsize=(12, 8))
     plt.plot(omega_range, spectral_radii, 'b-', label='Spectral Radius')
     plt.plot(optimal_omega, min_spectral_radius, 'ro', label='Optimal Point')
@@ -274,14 +304,20 @@ if __name__ == "__main__":
     print("Starting spectral radius analysis...")
     
     # Example parameters
-    nx, ny = 63, 63
+    nx, ny = 63, 63 
     dx, dy = 1.0 / (nx - 1), 1.0 / (ny - 1)
     rho = 1.0
     d_u = np.ones((nx, ny))
     d_v = np.ones((nx, ny))
-    
+    method_type = 'standard'
     # Find optimal omega using matrix-free spectral radius analysis for Gauss-Seidel
     print("\nComputing matrix-free spectral radius analysis for Gauss-Seidel...")
-    optimal_omega_gs, spectral_radius_gs = find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_random_vectors=5)
+    optimal_omega_gs, spectral_radius_gs = find_optimal_gauss_seidel_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_random_vectors=5, method_type=method_type)
     print(f"\nOptimal omega (Gauss-Seidel): {optimal_omega_gs:.4f}")
     print(f"Spectral radius (Gauss-Seidel): {spectral_radius_gs:.4f}")
+    
+    # Find optimal omega using matrix-free spectral radius analysis for Jacobi
+    print("\nComputing matrix-free spectral radius analysis for Jacobi...")
+    optimal_omega_jacobi, spectral_radius_jacobi = find_optimal_jacobi_omega_matrix_free(nx, ny, dx, dy, rho, d_u, d_v, num_random_vectors=5)
+    print(f"\nOptimal omega (Jacobi): {optimal_omega_jacobi:.4f}")
+    print(f"Spectral radius (Jacobi): {spectral_radius_jacobi:.4f}")

@@ -54,7 +54,7 @@ class PreconditionedCGSolver(PressureSolver):
         self.residual_history = []
         self.inner_iterations = []
     
-    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
+    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star, return_dict=True):
         """
         Solve the pressure correction equation using the preconditioned conjugate gradient method.
         
@@ -68,11 +68,18 @@ class PreconditionedCGSolver(PressureSolver):
             Momentum equation coefficients
         p_star : ndarray
             Current pressure field
+        return_dict : bool, optional
+            If True, returns a dictionary with complete residual information (default)
+            If False, returns separate residual values (deprecated)
             
         Returns:
         --------
         p_prime : ndarray
             Pressure correction field
+        residual_info : dict
+            Dictionary with residual information: 
+            - 'rel_norm': l2(r)/max(l2(r))
+            - 'field': residual field
         """
         nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
@@ -132,8 +139,30 @@ class PreconditionedCGSolver(PressureSolver):
         # Reshape to 2D
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
+        # Calculate residual for tracking
+        r = b - A.dot(p_prime_flat)  # This is the residual field (1D)
+        r_field_full = r.reshape((nx, ny), order='F')  # Reshape residual field
         
-        return p_prime
+        # Calculate L2 norm on interior points only
+        r_interior = r_field_full[1:nx-1, 1:ny-1]
+        p_current_l2 = np.linalg.norm(r_interior, 2)
+        
+        # Keep track of the maximum L2 norm for relative scaling
+        if not hasattr(self, 'p_max_l2'):
+            self.p_max_l2 = p_current_l2
+        else:
+            self.p_max_l2 = max(self.p_max_l2, p_current_l2)
+        
+        # Calculate relative norm as l2(r)/max(l2(r))
+        p_rel_norm = p_current_l2 / self.p_max_l2 if self.p_max_l2 > 0 else 1.0
+        
+        # Create the residual information dictionary
+        residual_info = {
+            'rel_norm': p_rel_norm,  # l2(r)/max(l2(r))
+            'field': r_field_full     # Absolute residual field
+        }
+        
+        return p_prime, residual_info
     
     def get_solver_info(self):
         """

@@ -1,5 +1,5 @@
 """
-Lid-driven cavity flow simulation using the object-oriented framework.
+Lid-driven cavity flow simulation using the object-oriented framework with matrix-free solver.
 """
 
 import numpy as np
@@ -8,27 +8,30 @@ import time
 import os
 from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
-from naviflow_oo.preprocessing.fields.vector_field import VectorField
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
-from naviflow_oo.solver.pressure_solver.direct import DirectPressureSolver
+from naviflow_oo.solver.pressure_solver.matrix_free_BiCGSTAB import MatrixFreeBiCGSTABSolver
 from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
-from naviflow_oo.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrixMomentumSolver
 from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
+from naviflow_oo.solver.momentum_solver.BiCGSTAB_solver import BiCGSTABMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
-
 # Start timing
+
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**5-1, 2**5-1 # Grid size
-reynolds = 100             # Reynolds number
+nx, ny = 2**7-1, 2**7-1 # Grid size
+reynolds = 1000             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
 max_iterations = 10000     # Maximum number of iterations
 tolerance = 1e-3
-
-
+h = 1/nx 
+disc_order = 1
+expected_disc_error = h**(disc_order)
+#pressure_tolerance = expected_disc_error 
+pressure_tolerance = 1e-5
+print(f"Tolerance: {tolerance}")
+print(f"Pressure tolerance: {pressure_tolerance}")
 
 # 2. Create mesh
 mesh = StructuredMesh(nx=nx, ny=ny, length=1.0, height=1.0)
@@ -45,13 +48,22 @@ print(f"Reynolds number: {fluid.get_reynolds_number()}")
 print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
-pressure_solver = DirectPressureSolver()
-
-#momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=1)
-#momentum_solver = CGMatrixMomentumSolver(tolerance=1e-1, max_iterations=1000)
-# Use the new AMG solver
+# Use matrix-free conjugate gradient solver instead of direct solver
+pressure_solver = MatrixFreeBiCGSTABSolver(
+    tolerance=pressure_tolerance,
+    max_iterations=100000,
+    use_preconditioner=True,
+    preconditioner='multigrid',
+    mg_pre_smoothing=1,
+    mg_post_smoothing=1,
+    mg_cycle_type='v',
+    mg_restriction_method='restrict_full_weighting',
+    mg_interpolation_method='interpolate_linear',
+    smoother_relaxation=1.5,
+    smoother_method_type='red_black'
+)
 momentum_solver = AMGMomentumSolver(tolerance=1e-5, max_iterations=10000)
-
+#momentum_solver = BiCGSTABMomentumSolver(tolerance=1e-5, max_iterations=10000)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -62,7 +74,7 @@ algorithm = SimpleSolver(
     momentum_solver=momentum_solver,
     velocity_updater=velocity_updater,
     alpha_p=alpha_p,
-    alpha_u=alpha_u,
+    alpha_u=alpha_u
 )
 
 # 6. Set boundary conditions
@@ -77,15 +89,7 @@ os.makedirs(results_dir, exist_ok=True)
 
 # 7. Solve the problem
 print("Starting simulation...")
-result = algorithm.solve(
-    max_iterations=max_iterations,
-    tolerance=tolerance,
-    save_profile=True,
-    profile_dir=results_dir,
-    track_infinity_norm=True,
-    infinity_norm_interval=10,
-    #use_l2_norm=True  
-)
+result = algorithm.solve(max_iterations=max_iterations, tolerance=tolerance, save_profile=True, profile_dir=results_dir, track_infinity_norm=True, infinity_norm_interval=10, use_l2_norm=True)
 
 # End timing
 end_time = time.time()
@@ -101,10 +105,11 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'Cavity Flow Results (Re={reynolds})',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_results.pdf'),
+    title=f'CG Cavity Flow Results (Re={reynolds})',
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_CG_results.pdf'),
     show=True
 )
+
 
 # 11. Visualize final residuals
 plot_final_residuals(

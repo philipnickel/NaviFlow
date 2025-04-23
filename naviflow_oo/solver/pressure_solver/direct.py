@@ -84,6 +84,7 @@ class DirectPressureSolver(PressureSolver):
         # Solve the system
         p_prime_flat = spsolve(A, rhs)
         
+        # Apply zero gradient boundary conditions to the direct solution
         # Calculate residual for tracking
         Ax = A.dot(p_prime_flat)
         r = rhs - Ax # This is the residual field (1D)
@@ -94,8 +95,8 @@ class DirectPressureSolver(PressureSolver):
         # Extract interior points only (1:nx-1, 1:ny-1) for pressure
         r_interior = r_field_full[1:nx-1, 1:ny-1]
         
-        # Calculate L2 norm on interior points only
-        p_current_l2 = np.linalg.norm(r_interior, 2)
+        # Calculate L2 norm on interior points only - use more stable calculation
+        p_current_l2 = np.sqrt(np.sum(r_interior**2))
         
         # Keep track of the maximum L2 norm for relative scaling
         if not hasattr(self, 'p_max_l2'):

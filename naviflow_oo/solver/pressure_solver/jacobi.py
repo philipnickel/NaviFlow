@@ -35,9 +35,51 @@ class JacobiSolver(PressureSolver):
         self.total_inner_iterations = 0
         self.convergence_rates = []
     
+    def _get_diagonal_elements(self, nx, ny, dx, dy, rho, d_u, d_v):
+        """
+        Calculate the diagonal elements of the pressure matrix.
+        This is needed for the Jacobi method since we need the inverse of diagonal elements.
+        
+        Returns:
+        --------
+        ndarray
+            Diagonal elements of the pressure matrix
+        """
+        # Create diagonal array
+        diag = np.zeros((nx, ny))
+        
+        # East and West contributions
+        diag[:-1, :] += rho * d_u[1:nx, :] * dy  # East neighbors
+        diag[1:, :] += rho * d_u[1:nx, :] * dy   # West neighbors
+        
+        # North and South contributions
+        diag[:, :-1] += rho * d_v[:, 1:ny] * dx  # North neighbors
+        diag[:, 1:] += rho * d_v[:, 1:ny] * dx   # South neighbors
+        
+        # Apply boundary conditions 
+        # West boundary (i=0)
+        diag[0, :] += diag[0, :]
+        
+        # East boundary (i=nx-1)
+        diag[nx-1, :] += diag[nx-1, :]
+        
+        # South boundary (j=0)
+        diag[:, 0] += diag[:, 0]
+        
+        # North boundary (j=ny-1)
+        diag[:, ny-1] += diag[:, ny-1]
+        
+        # Ensure diagonal elements are non-zero
+        diag[diag < 1e-15] = 1.0
+        
+        # Fix reference point
+        diag[0, 0] = 1.0
+        
+        return diag
+
     def solve(self, mesh=None, u_star=None, v_star=None, d_u=None, d_v=None, p_star=None, 
               p=None, b=None, nx=None, ny=None, dx=None, dy=None, rho=1.0, num_iterations=None, 
-              track_residuals=True):
+              track_residuals=True, return_dict=False):
         """
         Solve the pressure correction equation using the Jacobi method.
         
@@ -65,11 +107,13 @@ class JacobiSolver(PressureSolver):
             Number of iterations to perform
         track_residuals : bool, optional
             Whether to track residuals (default: True)
+        return_dict : bool, optional
+            Whether to return a dictionary of results (default: False)
             
         Returns:
         --------
-        p_prime : ndarray
-            Pressure correction field
+        p_prime : ndarray or tuple
+            Pressure correction field, or tuple of (p_prime, info_dict) if return_dict=True
         """
         # Get grid dimensions and spacing if mesh is provided
         if mesh is not None:
@@ -109,59 +153,29 @@ class JacobiSolver(PressureSolver):
         else:
             b_2d = b.copy()
         
-        # Pre-compute coefficient arrays
-        # East coefficients
-        aE = np.zeros((nx, ny))
-        aE[:-1, :] = rho * d_u[1:nx, :] * dy#/dx
+        # Get diagonal elements for Jacobi method
+        diag = self._get_diagonal_elements(nx, ny, dx, dy, rho, d_u, d_v)
         
-        # West coefficients
-        aW = np.zeros((nx, ny))
-        aW[1:, :] = rho * d_u[1:nx, :] * dy#/dx
-        
-        # North coefficients
-        aN = np.zeros((nx, ny))
-        aN[:, :-1] = rho * d_v[:, 1:ny] * dx#/dy
-        
-        # South coefficients
-        aS = np.zeros((nx, ny))
-        aS[:, 1:] = rho * d_v[:, 1:ny] * dx#/dy
-        
-        # Diagonal coefficients
-        aP = aE + aW + aN + aS
-        # Reference point
-        aP[0, 0] = 1.0
-        aE[0, 0] = aW[0, 0] = aN[0, 0] = aS[0, 0] = 0.0
+        # Set reference pressure point
+        p_2d[0, 0] = 0.0
         b_2d[0, 0] = 0.0
-        
-        # Avoid division by zero
-        aP[aP == 0] = 1.0
-        
-        # Inverse of aP for efficiency
-        inv_aP = 1.0 / aP
-        # Shifted arrays for neighbors
-        p_east = np.zeros_like(p_2d)
-        p_west = np.zeros_like(p_2d)
-        p_north = np.zeros_like(p_2d)
-        p_south = np.zeros_like(p_2d)
         
         # Main iteration loop
         for k in range(num_iterations):
- 
-            # Ensure reference point
+            # Make sure the reference pressure point stays at zero
             p_2d[0, 0] = 0.0
             
+            # Compute Ap product using the matrix-free function
+            p_flat = p_2d.flatten('F')
+            Ap = compute_Ap_product(p_flat, nx, ny, dx, dy, rho, d_u, d_v)
+            Ap = Ap.reshape((nx, ny), order='F')
             
-            # Update neighbor values
-            p_east[:-1, :] = p_2d[1:, :]
-            p_west[1:, :] = p_2d[:-1, :]
-            p_north[:, :-1] = p_2d[:, 1:]
-            p_south[:, 1:] = p_2d[:, :-1]
+            # Jacobi iteration formula: p_new = p + omega * (b - Ap) / diag
+            # This computes p_new = p + omega * D⁻¹(b - Ap)
+            p_new = p_2d + self.omega * (b_2d - Ap) / diag
             
-            # Calculate the standard Jacobi update first
-            p_standard = (b_2d + aE * p_east + aW * p_west + aN * p_north + aS * p_south) * inv_aP
-
-            # Then apply relaxation as a separate step (numerically more stable)
-            p_new = p_2d + self.omega * (p_standard - p_2d)
+            # Fix reference point
+            p_new[0, 0] = 0.0
             
             # Track iterations
             inner_iterations += 1
@@ -169,30 +183,22 @@ class JacobiSolver(PressureSolver):
             # Check convergence if needed
             if track_residuals:
                 # Calculate residual using Ax - b
-                p_flat = p_new.flatten('F')
-                r = b.ravel() - compute_Ap_product(p_flat, nx, ny, dx, dy, rho, d_u, d_v)
-                res_norm = np.linalg.norm(r)
+                r = b.ravel() - compute_Ap_product(p_new.flatten('F'), nx, ny, dx, dy, rho, d_u, d_v)
+                res_norm = np.linalg.norm(r, ord=2)
+                rel_norm = res_norm / np.linalg.norm(b.ravel(), ord=2)
                 self.residual_history.append(res_norm)
                 
                 # Calculate convergence rate if we have enough iterations
                 if k >= 2 and self.residual_history[-2] > 1e-15:
                     conv_rate = self.residual_history[-1] / self.residual_history[-2]
                     self.convergence_rates.append(conv_rate)
-                
-                # Check solution change
-                if k > 0:
-                    change = np.linalg.norm(p_new - p_2d) / (np.linalg.norm(p_new) )
-                    if change < self.tolerance * 0.1:
-                        print(f"Jacobi converged in {k+1} iterations, solution change: {change:.6e}")
-                        p_2d = p_new
-                        break
+                 
                 
                 # Check residual-based convergence
-                if res_norm < self.tolerance:
+                if rel_norm < self.tolerance:
                     print(f"Jacobi converged in {k+1} iterations, residual: {res_norm:.6e}")
                     p_2d = p_new
                     break
-                #print(f"Jacobi iteration {k+1}, residual: {res_norm:.6e}")
             
             p_2d = p_new
         
@@ -200,6 +206,16 @@ class JacobiSolver(PressureSolver):
         self.inner_iterations_history.append(inner_iterations)
         self.total_inner_iterations += inner_iterations
         
+        # If the caller wants a dictionary of results
+        if return_dict:
+            # Create dictionary with result information
+            result_info = {
+                'rel_norm': 1.0 if not self.residual_history else self.residual_history[-1] / max(self.residual_history[0], 1e-10),
+                'abs_norm': self.residual_history[-1] if self.residual_history else 1.0,
+                'iterations': inner_iterations,
+                'field': r.reshape((nx, ny), order='F')  # Return a copy of the residual field for visualization
+            }
+            return p_2d, result_info
         
         return p_2d
     

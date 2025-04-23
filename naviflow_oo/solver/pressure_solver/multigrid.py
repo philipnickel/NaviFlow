@@ -350,7 +350,8 @@ class MultiGridSolver(PressureSolver):
 
         # Pre-smoothing steps
         p = self.smoother.solve(mesh=mesh, p=p.reshape((nx, ny), order='F'), b=rhs.reshape((nx, ny), order='F'),
-                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False,
+                              return_dict=False)
                               
         # Apply zero gradient boundary conditions after pre-smoothing
         #p = self._enforce_pressure_boundary_conditions(mesh, p)
@@ -420,7 +421,8 @@ class MultiGridSolver(PressureSolver):
 
         # Post-smoothing steps
         p = self.smoother.solve(mesh=mesh, p=p.reshape((nx, ny), order='F'), b=rhs.reshape((nx, ny), order='F'),
-                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
+                              d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False,
+                              return_dict=False)
                               
         # Apply zero gradient boundary conditions after post-smoothing
         #p = self._enforce_pressure_boundary_conditions(mesh, p)
@@ -473,7 +475,8 @@ class MultiGridSolver(PressureSolver):
   
         # Pre-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u.reshape((nx, ny), order='F'), b=f.reshape((nx, ny), order='F'),
-                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False)
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=pre_smoothing, track_residuals=False,
+                                return_dict=False)
             
         # Apply zero gradient boundary conditions after pre-smoothing
         #u = self._enforce_pressure_boundary_conditions(mesh, u)
@@ -546,7 +549,8 @@ class MultiGridSolver(PressureSolver):
         
         # Post-smoothing steps
         u = self.smoother.solve(mesh=mesh, p=u.reshape((nx, ny), order='F'), b=f.reshape((nx, ny), order='F'),
-                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False)
+                                d_u=d_u, d_v=d_v, rho=rho, num_iterations=post_smoothing, track_residuals=False,
+                                return_dict=False)
         
         # Apply zero gradient boundary conditions after post-smoothing
         #u = self._enforce_pressure_boundary_conditions(mesh, u)
@@ -624,7 +628,7 @@ class MultiGridSolver(PressureSolver):
 
 
         # Interpolate to fine grid with boundary preservation
-        solution_fine_2D = self.interpolation_operators[self.interpolation_method](solution_coarse_2D, nx_fine)
+        solution_fine_2D = self.interpolation_operators['interpolate_cubic'](solution_coarse_2D, nx_fine)
         
         # Apply zero gradient boundary conditions after interpolation
         #solution_fine_2D = self._enforce_pressure_boundary_conditions(mesh_fine, solution_fine_2D)

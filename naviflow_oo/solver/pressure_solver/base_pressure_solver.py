@@ -163,6 +163,7 @@ class PressureSolver(ABC):
             p_field[:, 0] = p_field[:, 1]
             # Top boundary (j=ny-1)
             p_field[:, ny-1] = p_field[:, ny-2]
+
         
         elif bc_type == 'zero_pressure':
             # Default to all boundaries if not specified

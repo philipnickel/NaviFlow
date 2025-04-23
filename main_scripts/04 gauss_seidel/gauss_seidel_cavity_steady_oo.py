@@ -10,9 +10,9 @@ from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.solver.Algorithms.simple import SimpleSolver
 from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
-from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
+from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.postprocessing.visualization import plot_final_residuals, plot_u_v_continuity_residuals
+from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
@@ -25,12 +25,13 @@ nx, ny = 63, 63          # Grid size
 reynolds = 100           # Reynolds number
 alpha_p = 0.1            # Pressure relaxation factor (lower for stability)
 alpha_u = 0.8            # Velocity relaxation factor
-max_iterations = 1000     # Maximum number of iterations
-tolerance = 1e-20         # Convergence tolerance
+max_iterations = 10000    # Maximum number of iterations
+tolerance = 1e-3         # Convergence tolerance
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
-pressure_tolerance = expected_disc_error 
+pressure_tolerance = expected_disc_error  
+#pressure_tolerance = 1e-5
 print(f"Pressure tolerance: {pressure_tolerance}")
 
 
@@ -52,10 +53,11 @@ print(f"Calculated viscosity: {fluid.get_viscosity()}")
 # Use Gauss-Seidel solver for pressure correction
 pressure_solver = GaussSeidelSolver(
     tolerance=pressure_tolerance,  # Relaxed tolerance for inner iterations
-    max_iterations=300,  # Fewer iterations per SIMPLE iteration
-    omega=0.86, 
+    max_iterations=3000,  # Fewer iterations per SIMPLE iteration
+    omega=1.8, 
+    method_type='standard'
 )
-momentum_solver = JacobiMomentumSolver(n_jacobi_sweeps=5)
+momentum_solver = AMGMomentumSolver(tolerance=1e-5, max_iterations=10000)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -98,22 +100,18 @@ result.plot_combined_results(
     show=True
 )
 
+
 # 11. Visualize final residuals
 plot_final_residuals(
-    result.u, result.v, result.p,
-    algorithm.u_old, algorithm.v_old, algorithm.p_old,
+    algorithm._final_u_residual_field, 
+    algorithm._final_v_residual_field, 
+    algorithm._final_p_residual_field,
     mesh,
-    title=f'Final Residuals (Re={reynolds})',
-    filename=os.path.join(results_dir, f'final_residuals_Re{reynolds}.pdf'),
-    show=False
-)
-
-# 12. Visualize residual history
-plot_u_v_continuity_residuals(
-    algorithm.x_momentum_residuals, 
-    algorithm.y_momentum_residuals, 
-    algorithm.continuity_residuals,
-    title=f'Residual History (Re={reynolds})',
-    filename=os.path.join(results_dir, f'residual_history_Re{reynolds}.pdf'),
-    show=False
+    title=f'Final Algebraic Residual Fields (Re={reynolds})',
+    filename=os.path.join(results_dir, f'final_algebraic_residual_fields_Re{reynolds}.pdf'),
+    show=False,
+    u_rel_norms=result.get_history('u_rel_norm'),
+    v_rel_norms=result.get_history('v_rel_norm'),
+    p_rel_norms=result.get_history('p_rel_norm'),
+    history_filename=os.path.join(results_dir, f'unrelaxed_rel_residual_history_Re{reynolds}.pdf')
 )

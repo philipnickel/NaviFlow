@@ -17,9 +17,9 @@ class GaussSeidelSolver(PressureSolver):
     Gauss-Seidel property that updates depend on the latest values of neighbors.
     """
     
-    def __init__(self, tolerance=1e-6, max_iterations=1000, omega=1.0):
+    def __init__(self, tolerance=1e-6, max_iterations=1000, omega=1.0, method_type='red_black'):
         """
-        Initialize the Red-Black Gauss-Seidel solver.
+        Initialize the Gauss-Seidel solver.
         
         Parameters:
         -----------
@@ -30,9 +30,15 @@ class GaussSeidelSolver(PressureSolver):
         omega : float, optional
             Relaxation factor for SOR (Successive Over-Relaxation)
             omega=1.0 for standard Gauss-Seidel, 1.0 < omega < 2.0 for SOR
+        method_type : str, optional
+            Type of Gauss-Seidel iteration: 'red_black', 'standard', or 'symmetric'
+            (default: 'red_black')
         """
         super().__init__(tolerance=tolerance, max_iterations=max_iterations)
+        if method_type not in ['red_black', 'standard', 'symmetric']:
+            raise ValueError("method_type must be one of 'red_black', 'standard', or 'symmetric'")
         self.omega = omega
+        self.method_type = method_type
         self.residual_history = []
         self.inner_iterations_history = []
         self.total_inner_iterations = 0
@@ -48,7 +54,7 @@ class GaussSeidelSolver(PressureSolver):
     
     def solve(self, mesh=None, u_star=None, v_star=None, d_u=None, d_v=None, p_star=None, 
               p=None, b=None, nx=None, ny=None, dx=None, dy=None, rho=1.0, num_iterations=None, 
-              track_residuals=True):
+              track_residuals=True, return_dict=True):
         """
         Solve the pressure correction equation using the Red-Black Gauss-Seidel method.
         
@@ -76,11 +82,18 @@ class GaussSeidelSolver(PressureSolver):
             Number of iterations to perform
         track_residuals : bool, optional
             Whether to track residuals (default: True)
+        return_dict : bool, optional
+            If True, returns a dictionary with complete residual information (default)
+            If False, returns only the pressure correction field (deprecated)
             
         Returns:
         --------
         p_prime : ndarray
             Pressure correction field
+        residual_info : dict
+            Dictionary with residual information: 
+            - 'rel_norm': l2(r)/max(l2(r))
+            - 'field': residual field
         """
         # Get grid dimensions and spacing if mesh is provided
         if mesh is not None:
@@ -139,9 +152,15 @@ class GaussSeidelSolver(PressureSolver):
         
         # Main iteration loop
         old_res_norm = float('inf')
+        final_residual_field = None
         for k in range(num_iterations):
-            # Perform one Red-Black Gauss-Seidel iteration
-            self._rb_gauss_seidel_step(p_2d, b_2d, aE, aW, aN, aS, aP, red_mask, black_mask)
+            # Perform one Gauss-Seidel iteration
+            if self.method_type == 'red_black':
+                self._rb_gauss_seidel_step(p_2d, b_2d, aE, aW, aN, aS, aP, red_mask, black_mask)
+            elif self.method_type == 'standard':
+                self._standard_gauss_seidel_step(p_2d, b_2d, aE, aW, aN, aS, aP)
+            else:
+                self._symmetric_gauss_seidel_step(p_2d, b_2d, aE, aW, aN, aS, aP)
             
             # Track convergence if needed
             if track_residuals:
@@ -149,6 +168,7 @@ class GaussSeidelSolver(PressureSolver):
                 p_flat = p_2d.flatten('F')
                 r = b_2d.flatten('F') - compute_Ap_product(p_flat, nx, ny, dx, dy, rho, d_u, d_v)
                 res_norm = np.linalg.norm(r)
+                rel_norm = res_norm / np.linalg.norm(b_2d.flatten('F'))
                 self.residual_history.append(res_norm)
                 
                 # Calculate convergence rate
@@ -157,13 +177,39 @@ class GaussSeidelSolver(PressureSolver):
                     self.convergence_rates.append(conv_rate)
                 old_res_norm = res_norm
                 
+                # Store residual field for return value
+                final_residual_field = r.reshape((nx, ny), order='F')
+                
                 # Check residual-based convergence
-                if res_norm < self.tolerance:
+                if rel_norm < self.tolerance:
                     print(f"Gauss-Seidel converged in {k+1} iterations, residual: {res_norm:.6e}")
                     break
-                #print(f"Gauss-Seidel iteration {k+1}, residual: {res_norm:.6e}")
+                #print(f"Gauss-Seidel iteration {k+1}, rel residual: {rel_norm:.6e}, abs residual: {res_norm:.6e}")
         
-        return p_2d
+        # Calculate L2 norm on interior points only
+        r_interior = final_residual_field[1:nx-1, 1:ny-1] if final_residual_field is not None else np.zeros((nx-2, ny-2))
+        p_current_l2 = np.linalg.norm(r_interior)
+        
+        # Keep track of the maximum L2 norm for relative scaling
+        if not hasattr(self, 'p_max_l2'):
+            self.p_max_l2 = p_current_l2
+        else:
+            self.p_max_l2 = max(self.p_max_l2, p_current_l2)
+        
+        # Calculate relative norm as l2(r)/max(l2(r))
+        p_rel_norm = p_current_l2 / self.p_max_l2 if self.p_max_l2 > 0 else 1.0
+        
+        # Create the residual information dictionary
+        residual_info = {
+            'rel_norm': p_rel_norm,  # l2(r)/max(l2(r))
+            'field': final_residual_field  # Absolute residual field
+        }
+        
+        if return_dict:
+            return p_2d, residual_info
+        else:
+            # For backward compatibility
+            return p_2d
     
     def _precompute_coefficients(self, nx, ny, dx, dy, rho, d_u, d_v):
         """
@@ -183,8 +229,6 @@ class GaussSeidelSolver(PressureSolver):
         aP = np.zeros((nx, ny))
         
         # East coefficients (aE) - For interior cells: i < nx-1
-        # Using explicit loops to match compute_Ap_product exactly
-        # East coefficients (aE) - For interior cells: i < nx-1
         aE[:-1, :] = rho * d_u[1:nx, :] * dy
         
         # West coefficients (aW) - For interior cells: i > 0
@@ -195,6 +239,7 @@ class GaussSeidelSolver(PressureSolver):
         
         # South coefficients (aS) - For interior cells: j > 0
         aS[:, 1:] = rho * d_v[:, 1:ny] * dx
+        
         # Apply boundary conditions by modifying coefficients
         # West boundary (i=0)
         aP[0, :] += aE[0, :]
@@ -214,9 +259,6 @@ class GaussSeidelSolver(PressureSolver):
         
         # Diagonal term is sum of all coefficients
         aP += aE + aW + aN + aS
-        
-        # IMPORTANT: No special handling for reference pressure point here
-        # Reference point is handled in the main solve loop with p[0, 0] = 0.0
         
         # Avoid division by zero
         aP[aP < 1e-15] = 1.0
@@ -262,6 +304,68 @@ class GaussSeidelSolver(PressureSolver):
         # Ensure reference point stays fixed
         p[0, 0] = 0.0
     
+    def _standard_gauss_seidel_step(self, p, b, aE, aW, aN, aS, aP):
+        """
+        Perform one standard Gauss-Seidel iteration with SOR.
+        Updates grid points sequentially.
+        """
+        nx, ny = p.shape
+        inv_aP = 1.0 / aP
+
+        for j in range(ny):
+            for i in range(nx):
+                # Skip the reference pressure point
+                if i == 0 and j == 0:
+                    continue
+                
+                # Calculate neighbor contributions using the most recent values
+                east_contrib = aE[i, j] * p[i + 1, j] if i < nx - 1 else 0
+                west_contrib = aW[i, j] * p[i - 1, j] if i > 0 else 0
+                north_contrib = aN[i, j] * p[i, j + 1] if j < ny - 1 else 0
+                south_contrib = aS[i, j] * p[i, j - 1] if j > 0 else 0
+                
+                # Calculate the new value without relaxation
+                p_new_ij = (b[i, j] + east_contrib + west_contrib + north_contrib + south_contrib) * inv_aP[i, j]
+                
+                # Apply SOR
+                p[i, j] = p[i, j] + self.omega * (p_new_ij - p[i, j])
+                
+        # Ensure reference point stays fixed after the iteration
+        p[0, 0] = 0.0
+
+    def _symmetric_gauss_seidel_step(self, p, b, aE, aW, aN, aS, aP):
+        """
+        Perform one symmetric Gauss-Seidel iteration with SOR.
+        Consists of a forward pass followed by a backward pass.
+        """
+        nx, ny = p.shape
+        inv_aP = 1.0 / aP
+
+        # Forward pass (standard GS)
+        for j in range(ny):
+            for i in range(nx):
+                if i == 0 and j == 0: continue # Skip reference point
+                east_contrib = aE[i, j] * p[i + 1, j] if i < nx - 1 else 0
+                west_contrib = aW[i, j] * p[i - 1, j] if i > 0 else 0
+                north_contrib = aN[i, j] * p[i, j + 1] if j < ny - 1 else 0
+                south_contrib = aS[i, j] * p[i, j - 1] if j > 0 else 0
+                p_new_ij = (b[i, j] + east_contrib + west_contrib + north_contrib + south_contrib) * inv_aP[i, j]
+                p[i, j] = p[i, j] + self.omega * (p_new_ij - p[i, j])
+
+        # Backward pass
+        for j in range(ny - 1, -1, -1):
+            for i in range(nx - 1, -1, -1):
+                if i == 0 and j == 0: continue # Skip reference point
+                east_contrib = aE[i, j] * p[i + 1, j] if i < nx - 1 else 0
+                west_contrib = aW[i, j] * p[i - 1, j] if i > 0 else 0
+                north_contrib = aN[i, j] * p[i, j + 1] if j < ny - 1 else 0
+                south_contrib = aS[i, j] * p[i, j - 1] if j > 0 else 0
+                p_new_ij = (b[i, j] + east_contrib + west_contrib + north_contrib + south_contrib) * inv_aP[i, j]
+                p[i, j] = p[i, j] + self.omega * (p_new_ij - p[i, j])
+                
+        # Ensure reference point stays fixed after the full iteration
+        p[0, 0] = 0.0
+
     def get_solver_info(self):
         """
         Get information about the solver's performance.
@@ -279,11 +383,12 @@ class GaussSeidelSolver(PressureSolver):
         else:
             avg_rate = None
             
+        method_type = self.method_type.capitalize()
         return {
             'name': 'GaussSeidelSolver',
             'inner_iterations_history': self.inner_iterations_history,
             'total_inner_iterations': self.total_inner_iterations,
             'convergence_rate': avg_rate,
             'omega': self.omega,
-            'method': 'Red-Black'
+            'method': method_type
         } 
