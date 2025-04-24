@@ -1,29 +1,33 @@
 """
-BiCGSTAB (Biconjugate Gradient Stabilized) momentum solver with AMG preconditioning.
+Biconjugate Gradient Stabilized (BiCGSTAB) momentum solver.
 """
 
 import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg import bicgstab
+from scipy.sparse.linalg import bicgstab  # BiCGSTAB solver
 from .base_momentum_solver import MomentumSolver
 from .discretization import power_law
+from .discretization import quick
+from .discretization import second_order_upwind
+from .discretization import second_order_upwind
 from ...constructor.boundary_conditions import BoundaryConditionManager
-import pyamg  # PyAMG library for AMG preconditioner
 
 class BiCGSTABMomentumSolver(MomentumSolver):
     """
-    Momentum solver that uses BiCGSTAB (Biconjugate Gradient Stabilized) with AMG preconditioning
-    to solve the momentum equations. Uses Practice B to incorporate BCs.
+    Momentum solver that uses Biconjugate Gradient Stabilized (BiCGSTAB) to solve the momentum equations.
+    Uses Practice B to incorporate BCs.
+    Supports power_law, quick, upwind, and second_order_upwind discretization schemes.
     """
 
     def __init__(self, discretization_scheme='power_law', tolerance=1e-8, max_iterations=100):
         """
-        Initialize the BiCGSTAB momentum solver with AMG preconditioning.
+        Initialize the BiCGSTAB momentum solver.
 
         Parameters:
         -----------
         discretization_scheme : str, optional
             The discretization scheme to use (default: 'power_law').
+            Options: 'power_law', 'quick', 'upwind', 'second_order_upwind'
         tolerance : float, optional
             Convergence tolerance for the BiCGSTAB solver (default: 1e-8).
         max_iterations : int, optional
@@ -34,11 +38,18 @@ class BiCGSTABMomentumSolver(MomentumSolver):
         self.max_iterations = max_iterations
 
         if discretization_scheme == 'power_law':
-            self.discretization = power_law.PowerLawDiscretization()
+            self.discretization_scheme = power_law.PowerLawDiscretization()
+        elif discretization_scheme == 'quick':
+            self.discretization_scheme = quick.QUICKDiscretization()
+        elif discretization_scheme == 'upwind':
+            self.discretization_scheme = second_order_upwind.UpwindDiscretization()
+        elif discretization_scheme == 'second_order_upwind':
+            self.discretization_scheme = second_order_upwind.SecondOrderUpwindDiscretization()
         else:
-            raise ValueError(f"Unsupported discretization scheme: {discretization_scheme}")
+            raise ValueError(f"Unsupported discretization scheme: {discretization_scheme}. "
+                           "Available options: 'power_law', 'quick', 'upwind', 'second_order_upwind'")
 
-        # Store coefficients and matrices similar to JacobiMatrixSolver
+        # Store coefficients and matrices
         self.u_a_e = None
         self.u_a_w = None
         self.u_a_n = None
@@ -60,20 +71,44 @@ class BiCGSTABMomentumSolver(MomentumSolver):
         self.v_source_unrelaxed = None
         self.v_matrix = None
         self.v_rhs = None
-
+        
     def _build_sparse_matrix(self, a_e, a_w, a_n, a_s, a_p, source, nx, ny, is_u=True):
         """
         Build a sparse matrix from the coefficients using vectorized operations.
-        (Copied from JacobiMatrixMomentumSolver - should be identical)
+        Handles standard and higher-order discretization schemes with second-neighbor coefficients.
+        
+        Parameters:
+        -----------
+        a_e, a_w, a_n, a_s : ndarray
+            Standard coefficients for east, west, north, south neighbors
+        a_p : ndarray
+            Diagonal coefficients
+        source : ndarray
+            Source term vector
+        nx, ny : int
+            Mesh dimensions
+        is_u : bool
+            True if building matrix for u-momentum, False for v-momentum
+            
+        Returns:
+        --------
+        matrix_csr : csr_matrix
+            Sparse matrix in CSR format
+        rhs : ndarray
+            Right-hand side vector
+        idx_map : ndarray
+            Mapping from grid indices to matrix indices
         """
+        # Determine matrix dimensions based on velocity component
         if is_u:
-            rows, cols = nx + 1, ny
+            rows, cols = nx + 1, ny  # u-velocity grid dimensions
         else:
-            rows, cols = nx, ny + 1
+            rows, cols = nx, ny + 1  # v-velocity grid dimensions
 
         n_cells = rows * cols
         idx_map = np.arange(n_cells).reshape(rows, cols)
 
+        # Initialize storage for matrix elements
         data = []
         row_indices = []
         col_indices = []
@@ -135,18 +170,73 @@ class BiCGSTABMomentumSolver(MomentumSolver):
                 row_indices.extend(row_idx_s)
                 col_indices.extend(col_idx_s)
 
-        # 6. RHS vector
+        # 6. Handle higher-order schemes (QUICK or second-order upwind)
+        if hasattr(self.discretization_scheme, '__class__') and \
+           self.discretization_scheme.__class__.__name__ in ['QUICKDiscretization', 'SecondOrderUpwindDiscretization']:
+            # Get second-neighbor coefficients if they exist
+            a_ee = getattr(self, 'u_a_ee' if is_u else 'v_a_ee', np.zeros_like(a_e))
+            a_ww = getattr(self, 'u_a_ww' if is_u else 'v_a_ww', np.zeros_like(a_w))
+            a_nn = getattr(self, 'u_a_nn' if is_u else 'v_a_nn', np.zeros_like(a_n))
+            a_ss = getattr(self, 'u_a_ss' if is_u else 'v_a_ss', np.zeros_like(a_s))
+
+            # East-East neighbors (-A_ee)
+            mask_ee = i_grid < rows - 2
+            valid_i_ee, valid_j_ee = i_grid[mask_ee], j_grid[mask_ee]
+            if valid_i_ee.size > 0:
+                row_idx_ee = idx_map[valid_i_ee, valid_j_ee]
+                col_idx_ee = idx_map[valid_i_ee + 2, valid_j_ee]
+                if a_ee.shape[0] > np.max(valid_i_ee) and a_ee.shape[1] > np.max(valid_j_ee):
+                    data_ee = -a_ee[valid_i_ee, valid_j_ee]
+                    data.extend(data_ee)
+                    row_indices.extend(row_idx_ee)
+                    col_indices.extend(col_idx_ee)
+
+            # West-West neighbors (-A_ww)
+            mask_ww = i_grid > 1
+            valid_i_ww, valid_j_ww = i_grid[mask_ww], j_grid[mask_ww]
+            if valid_i_ww.size > 0:
+                row_idx_ww = idx_map[valid_i_ww, valid_j_ww]
+                col_idx_ww = idx_map[valid_i_ww - 2, valid_j_ww]
+                if a_ww.shape[0] > np.max(valid_i_ww) and a_ww.shape[1] > np.max(valid_j_ww):
+                    data_ww = -a_ww[valid_i_ww, valid_j_ww]
+                    data.extend(data_ww)
+                    row_indices.extend(row_idx_ww)
+                    col_indices.extend(col_idx_ww)
+
+            # North-North neighbors (-A_nn)
+            mask_nn = j_grid < cols - 2
+            valid_i_nn, valid_j_nn = i_grid[mask_nn], j_grid[mask_nn]
+            if valid_i_nn.size > 0:
+                row_idx_nn = idx_map[valid_i_nn, valid_j_nn]
+                col_idx_nn = idx_map[valid_i_nn, valid_j_nn + 2]
+                if a_nn.shape[0] > np.max(valid_i_nn) and a_nn.shape[1] > np.max(valid_j_nn):
+                    data_nn = -a_nn[valid_i_nn, valid_j_nn]
+                    data.extend(data_nn)
+                    row_indices.extend(row_idx_nn)
+                    col_indices.extend(col_idx_nn)
+
+            # South-South neighbors (-A_ss)
+            mask_ss = j_grid > 1
+            valid_i_ss, valid_j_ss = i_grid[mask_ss], j_grid[mask_ss]
+            if valid_i_ss.size > 0:
+                row_idx_ss = idx_map[valid_i_ss, valid_j_ss]
+                col_idx_ss = idx_map[valid_i_ss, valid_j_ss - 2]
+                if a_ss.shape[0] > np.max(valid_i_ss) and a_ss.shape[1] > np.max(valid_j_ss):
+                    data_ss = -a_ss[valid_i_ss, valid_j_ss]
+                    data.extend(data_ss)
+                    row_indices.extend(row_idx_ss)
+                    col_indices.extend(col_idx_ss)
+
+        # 7. RHS vector
         rhs = source.flatten()
 
-        # 7. Create sparse matrix
+        # 8. Create sparse matrix
         matrix_coo = sparse.coo_matrix((data, (row_indices, col_indices)), shape=(n_cells, n_cells))
         matrix_csr = matrix_coo.tocsr()
-        matrix_csr.sum_duplicates() # Important for CSR format
+        matrix_csr.sum_duplicates()  # Important for CSR format to merge duplicates
 
         return matrix_csr, rhs, idx_map
 
-    # Helper function to calculate unrelaxed residual
-    # Note: This needs access to `self` to call `_build_sparse_matrix`
     def _calculate_unrelaxed_residual(self, u_star, a_e, a_w, a_n, a_s, a_p_unrelaxed, source_unrelaxed, nx, ny, is_u):
         """Calculates the unrelaxed residual norm and field."""
         if is_u:
@@ -180,34 +270,33 @@ class BiCGSTABMomentumSolver(MomentumSolver):
         b_unrelaxed_norm_val = np.linalg.norm(b_unrelaxed_interior)
 
         # Calculate normalized residual norm
-        residual_norm_unrelaxed = r_unrelaxed_norm_val #/ (b_unrelaxed_norm_val + 1e-15) if (b_unrelaxed_norm_val + 1e-15) > 0 else r_unrelaxed_norm_val
+        residual_norm_unrelaxed = r_unrelaxed_norm_val
         
-        # --- Zero out boundaries in the RETURNED field ---
-        # This matches the previous behavior for the relaxed residual field
+        # Zero out boundaries in the returned field
         r_unrelaxed_field_final = r_unrelaxed_field.copy()
         if is_u:
             r_unrelaxed_field_final[0, :] = 0.0
-            r_unrelaxed_field_final[1, :] = 0.0 # Adjacent
+            r_unrelaxed_field_final[1, :] = 0.0  # Adjacent
             if nx > 1:
-                 r_unrelaxed_field_final[nx-1, :] = 0.0 # Adjacent
+                 r_unrelaxed_field_final[nx-1, :] = 0.0  # Adjacent
             r_unrelaxed_field_final[nx, :] = 0.0
             # Zero top/bottom boundaries as well in the returned field
             r_unrelaxed_field_final[:, 0] = 0.0
             r_unrelaxed_field_final[:, ny-1] = 0.0
-        else: # is_v
+        else:  # is_v
             r_unrelaxed_field_final[0, :] = 0.0
             r_unrelaxed_field_final[nx-1, :] = 0.0
             r_unrelaxed_field_final[:, 0] = 0.0
-            r_unrelaxed_field_final[:, 1] = 0.0 # Adjacent
+            r_unrelaxed_field_final[:, 1] = 0.0  # Adjacent
             if ny > 1:
-                 r_unrelaxed_field_final[:, ny-1] = 0.0 # Adjacent
+                 r_unrelaxed_field_final[:, ny-1] = 0.0  # Adjacent
             r_unrelaxed_field_final[:, ny] = 0.0
 
         return residual_norm_unrelaxed, r_unrelaxed_field_final
 
     def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
-        Solve the u-momentum equation using BiCGSTAB with AMG preconditioning.
+        Solve the u-momentum equation using BiCGSTAB.
         
         Parameters:
         -----------
@@ -259,7 +348,7 @@ class BiCGSTABMomentumSolver(MomentumSolver):
         u_bc, v_bc = bc_manager.apply_velocity_boundary_conditions(u.copy(), v.copy(), imax, jmax)
 
         # Calculate coefficients using velocities with BCs applied
-        coeffs = self.discretization.calculate_u_coefficients(mesh, fluid, u_bc, v_bc, p, bc_manager)
+        coeffs = self.discretization_scheme.calculate_u_coefficients(mesh, fluid, u_bc, v_bc, p, bc_manager)
         u_a_e = coeffs['a_e']
         u_a_w = coeffs['a_w']
         u_a_n = coeffs['a_n']
@@ -287,13 +376,12 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             nx, ny, is_u=True
         )
 
-        # Create AMG preconditioner
-        ml_u = pyamg.smoothed_aggregation_solver(self.u_matrix)
-        M_u = ml_u.aspreconditioner()
-
-        # Solve the RELAXED system Ax = b using BiCGSTAB with AMG preconditioner
+        # Solve the RELAXED system Ax = b using BiCGSTAB, with initial guess
         u_flat, info = bicgstab(self.u_matrix, self.u_rhs, x0=u_initial_guess.flatten(), 
-                               M=M_u, atol=self.tolerance, maxiter=self.max_iterations)
+                               atol=self.tolerance, maxiter=self.max_iterations)
+
+        if info != 0:
+            print(f"Warning: BiCGSTAB did not converge for u-momentum. Info code: {info}")
 
         # Reshape result back to 2D
         u_star = u_flat.reshape((imax+1, jmax))
@@ -323,8 +411,8 @@ class BiCGSTABMomentumSolver(MomentumSolver):
         else:
             self.u_max_l2 = max(self.u_max_l2, u_current_l2)
         
-        # Calculate relative norm as l2(r)/max(l2(r))
-        u_rel_norm = u_current_l2 / self.u_max_l2 if self.u_max_l2 > 0 else 1.0
+        # Calculate relative norm
+        u_rel_norm = u_current_l2 / np.linalg.norm(u_source_unrelaxed)
         
         # Create the minimal residual information dictionary
         residual_info = {
@@ -332,12 +420,11 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             'field': u_residual_field  # Absolute residual field
         }
 
-        # Return u*, d_u, residual_info
         return u_star, d_u, residual_info
 
     def solve_v_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
-        Solve the v-momentum equation using BiCGSTAB with AMG preconditioning.
+        Solve the v-momentum equation using BiCGSTAB.
         
         Parameters:
         -----------
@@ -389,7 +476,7 @@ class BiCGSTABMomentumSolver(MomentumSolver):
         u_bc, v_bc = bc_manager.apply_velocity_boundary_conditions(u.copy(), v.copy(), imax, jmax)
 
         # Calculate coefficients using velocities with BCs applied
-        coeffs = self.discretization.calculate_v_coefficients(mesh, fluid, u_bc, v_bc, p, bc_manager)
+        coeffs = self.discretization_scheme.calculate_v_coefficients(mesh, fluid, u_bc, v_bc, p, bc_manager)
         v_a_e = coeffs['a_e']
         v_a_w = coeffs['a_w']
         v_a_n = coeffs['a_n']
@@ -420,13 +507,12 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             nx, ny, is_u=False
         )
 
-        # Create AMG preconditioner
-        ml_v = pyamg.smoothed_aggregation_solver(self.v_matrix)
-        M_v = ml_v.aspreconditioner()
-
-        # Solve the RELAXED system Ax = b using BiCGSTAB with AMG preconditioner
+        # Solve the RELAXED system Ax = b using BiCGSTAB, with initial guess
         v_flat, info = bicgstab(self.v_matrix, self.v_rhs, x0=v_initial_guess.flatten(), 
-                               M=M_v, atol=self.tolerance, maxiter=self.max_iterations)
+                               atol=self.tolerance, maxiter=self.max_iterations)
+
+        if info != 0:
+            print(f"Warning: BiCGSTAB did not converge for v-momentum. Info code: {info}")
 
         # Reshape result back to 2D
         v_star = v_flat.reshape((imax, jmax+1))
@@ -456,8 +542,8 @@ class BiCGSTABMomentumSolver(MomentumSolver):
         else:
             self.v_max_l2 = max(self.v_max_l2, v_current_l2)
         
-        # Calculate relative norm as l2(r)/max(l2(r))
-        v_rel_norm = v_current_l2 / self.v_max_l2 if self.v_max_l2 > 0 else 1.0
+        # Calculate relative norm
+        v_rel_norm = v_current_l2 / np.linalg.norm(v_source_unrelaxed)
         
         # Create the minimal residual information dictionary
         residual_info = {
@@ -465,5 +551,4 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             'field': v_residual_field  # Absolute residual field
         }
 
-        # Return v*, d_v, residual_info
         return v_star, d_v, residual_info

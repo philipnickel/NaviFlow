@@ -238,8 +238,8 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         src = src_un + (1 - α) * a_p * u_bc
 
         # Create ILU preconditioner
-        M = self._create_ilu_preconditioner(a_e, a_w, a_n, a_s, a_p, nx, ny, is_u=True)
-
+        #M = self._create_ilu_preconditioner(a_e, a_w, a_n, a_s, a_p, nx, ny, is_u=True)
+        M = None
         # Linear operator for relaxed system
         A = LinearOperator(
             ((nx + 1) * ny, (nx + 1) * ny),
@@ -304,8 +304,8 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         src = src_un + (1 - α) * a_p * v_bc
 
         # Create ILU preconditioner
-        M = self._create_ilu_preconditioner(a_e, a_w, a_n, a_s, a_p, nx, ny, is_u=False)
-
+        #M = self._create_ilu_preconditioner(a_e, a_w, a_n, a_s, a_p, nx, ny, is_u=False)
+        M = None
         # Linear operator for relaxed system
         A = LinearOperator(
             (nx * (ny + 1), nx * (ny + 1)),

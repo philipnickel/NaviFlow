@@ -20,17 +20,17 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**9-1, 2**9-1 # Grid size
-reynolds = 10000             # Reynolds number
+nx, ny = 2**8-1, 2**8-1 # Grid size
+reynolds = 3200             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
-alpha_u = 0.5              # Velocity relaxation factor
+alpha_u = 0.5            # Velocity relaxation factor
 max_iterations = 10000     # Maximum number of iterations
 tolerance = 1e-4
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
 #pressure_tolerance = expected_disc_error 
-pressure_tolerance = 1e-5
+pressure_tolerance = 1e-4
 print(f"Tolerance: {tolerance}")
 print(f"Pressure tolerance: {pressure_tolerance}")
 
@@ -58,13 +58,16 @@ pressure_solver = MatrixFreeBiCGSTABSolver(
     mg_pre_smoothing=1,
     mg_post_smoothing=1,
     mg_cycle_type='v',
+    mg_max_cycles_buildup=1,
+    mg_cycle_type_buildup='v',
     mg_restriction_method='restrict_full_weighting',
-    mg_interpolation_method='interpolate_linear',
+    mg_interpolation_method='interpolate_cubic',
     smoother_relaxation=1.5,
     smoother_method_type='red_black'
 )
 #momentum_solver = AMGMomentumSolver(tolerance=1e-6, max_iterations=10000)
-momentum_solver = MatrixFreeMomentumSolver(tolerance=1e-6, max_iterations=10000, solver_type='bicgstab')
+#momentum_solver = BiCGSTABMomentumSolver(tolerance=1e-6, max_iterations=10000)
+momentum_solver = MatrixFreeMomentumSolver(tolerance=1e-6, max_iterations=10000, solver_type='gmres')
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -106,9 +109,9 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'CG Cavity Flow Results (Re={reynolds}) Resolution {nx}x{ny}',
-    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_CG_results.pdf'),
-    show=True
+    title=f'BiCGSTAB Cavity Flow Results (Re={reynolds}) Resolution {nx}x{ny}',
+    filename=os.path.join(results_dir, f'cavity_Re{reynolds}_BiCGSTAB_results.pdf'),
+    show=False
 )
 
 
@@ -119,10 +122,10 @@ plot_final_residuals(
     algorithm._final_p_residual_field,
     mesh,
     title=f'Final Algebraic Residual Fields (Re={reynolds})',
-    filename=os.path.join(results_dir, f'final_algebraic_residual_fields_Re{reynolds}.pdf'),
+    filename=os.path.join(results_dir, f'final_algebraic_residual_fields_Re{reynolds}_BiCGSTAB.pdf'),
     show=False,
     u_rel_norms=result.get_history('u_rel_norm'),
     v_rel_norms=result.get_history('v_rel_norm'),
     p_rel_norms=result.get_history('p_rel_norm'),
-    history_filename=os.path.join(results_dir, f'unrelaxed_rel_residual_history_Re{reynolds}.pdf')
+    history_filename=os.path.join(results_dir, f'unrelaxed_rel_residual_history_Re{reynolds}_BiCGSTAB.pdf')
 )

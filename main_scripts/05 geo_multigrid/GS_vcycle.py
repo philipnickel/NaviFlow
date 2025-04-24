@@ -18,23 +18,23 @@ from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolve
 from naviflow_oo.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrixMomentumSolver
 from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
+from naviflow_oo.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
 nx, ny = 2**7-1, 2**7-1 # Grid size
-reynolds = 400            # Reynolds number
-alpha_p = 0.1              # Pressure relaxation factor
-alpha_u = 0.3              # Velocity relaxation factor
+reynolds = 3200            # Reynolds number
+alpha_p = 0.3              # Pressure relaxation factor
+alpha_u = 0.7              # Velocity relaxation factor
 max_iterations = 10000     # Maximum number of iterations
 
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
-#tolerance = expected_disc_error * 1e-3
-tolerance = 1e-3
+tolerance = 1e-4
 #pressure_tolerance = expected_disc_error
-pressure_tolerance = 1e-5
+pressure_tolerance = 1e-3
 print(f"Tolerance: {tolerance}")
 print(f"Pressure tolerance: {pressure_tolerance}")
 
@@ -49,8 +49,8 @@ print(f"Cell sizes: dx={dx}, dy={dy}")
 
 # Create solvers
 #smoother = GaussSeidelSolver(omega=1.5, method_type='symmetric')
-smoother = GaussSeidelSolver(omega=1.5, method_type='red_black') 
-#smoother = GaussSeidelSolver(omega=1.5, method_type='standard')
+smoother = GaussSeidelSolver(omega=1.5, method_type='standard') 
+#smoother = GaussSeidelSolver(omega=1.8, method_type='standard')
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
     smoother=smoother,
@@ -58,20 +58,20 @@ multigrid_solver = MultiGridSolver(
     tolerance=pressure_tolerance,         # Overall tolerance
     pre_smoothing=3,        # Pre-smoothing steps
     post_smoothing=3,       # Post-smoothing steps
-    cycle_type='w',         # Use W-cycles
-    cycle_type_buildup='w',
-    cycle_type_final='w',
+    cycle_type='v',         # Use W-cycles
+    cycle_type_buildup='v',
+    cycle_type_final='v',
     max_cycles_buildup=1,
     #restriction_method='restrict_inject',  # Use direct injection restriction
     restriction_method='restrict_full_weighting',  # Use linear interpolation
-    interpolation_method='interpolate_linear',  # Use cubic interpolation
-    #interpolation_method='interpolate_cubic',  # Use cubic interpolation
+    #interpolation_method='interpolate_linear',  # Use cubic interpolation
+    interpolation_method='interpolate_cubic',  # Use cubic interpolation
     coarsest_grid_size= 7,    # Size of the coarsest grid
 )
 
 #momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=5)
-momentum_solver = AMGMomentumSolver(tolerance=1e-5, max_iterations=10000)
-
+#momentum_solver = AMGMomentumSolver(tolerance=1e-5, max_iterations=10000)
+momentum_solver = MatrixFreeMomentumSolver(tolerance=1e-6, max_iterations=10000, solver_type='gmres')
 velocity_updater = StandardVelocityUpdater()
 
 # Create algorithm
@@ -121,7 +121,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # Visualize results
 result.plot_combined_results(
-    title=f'Multigrid with Gauss-Seidel Smoother Cavity Flow Results (Re={reynolds})',
+    title=f'Multigrid with Gauss-Seidel Smoother Cavity Flow Results (Re={reynolds}, nx={nx}, ny={ny})',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_multigrid_gauss_seidel_results.pdf'),
     show=False
 )

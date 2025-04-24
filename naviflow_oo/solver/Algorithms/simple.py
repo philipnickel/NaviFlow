@@ -105,6 +105,11 @@ class SimpleSolver(BaseAlgorithm):
         
         print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u}")
 
+        stall_check_window = 20
+        stall_threshold = 1e-8
+        recent_total_residuals = []
+
+
         try:
             while iteration <= max_iterations and total_res_check > tolerance:
                 # Store previous solution
@@ -184,6 +189,25 @@ class SimpleSolver(BaseAlgorithm):
                 # Print relative norms
                 print(f"[{iteration}] Relative L2 norms: u: {u_rel_norm:.3e}, "
                       f"v: {v_rel_norm:.3e}, p: {p_rel_norm:.3e}")
+
+
+                # Stall check
+                                # Store total residual for history tracking
+                self.residual_history.append(total_res_check)
+
+                # Update rolling residual history for stall detection
+                recent_total_residuals.append(total_res_check)
+                if len(recent_total_residuals) > stall_check_window:
+                    recent_total_residuals.pop(0)
+                    res_change = max(recent_total_residuals) - min(recent_total_residuals)
+                    avg_res = np.mean(recent_total_residuals)
+                    if avg_res > 0:  # Avoid divide-by-zero
+                        rel_change = res_change / avg_res
+                        if rel_change < 0.001:  # 0.1% relative change
+                            print(f"Residuals have stalled (<0.1% change) over the last {stall_check_window} iterations. Stopping early.")
+                            break
+
+
                 
                 iteration += 1
 
