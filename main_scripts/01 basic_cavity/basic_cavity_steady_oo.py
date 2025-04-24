@@ -15,18 +15,19 @@ from naviflow_oo.solver.pressure_solver.direct import DirectPressureSolver
 from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrixMomentumSolver
 from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
+from naviflow_oo.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**5-1, 2**5-1 # Grid size
+nx, ny = 2**6-1, 2**6-1 # Grid size
 reynolds = 100             # Reynolds number
-alpha_p = 0.1              # Pressure relaxation factor
+alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.8              # Velocity relaxation factor
-max_iterations = 10000     # Maximum number of iterations
-tolerance = 1e-3
+max_iterations = 500     # Maximum number of iterations
+tolerance = 1e-10
 
 
 
@@ -50,8 +51,8 @@ pressure_solver = DirectPressureSolver()
 #momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=1)
 #momentum_solver = CGMatrixMomentumSolver(tolerance=1e-1, max_iterations=1000)
 # Use the new AMG solver
-momentum_solver = AMGMomentumSolver(tolerance=1e-5, max_iterations=10000)
-
+#momentum_solver = AMGMomentumSolver(discretization_scheme='power_law', tolerance=1e-7, max_iterations=10000)
+momentum_solver = MatrixFreeMomentumSolver(discretization_scheme='power_law', tolerance=1e-7, max_iterations=100000, solver_type='bicgstab')
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm

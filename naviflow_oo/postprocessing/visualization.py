@@ -666,9 +666,9 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
         plt.semilogy(range(len(v_rel_norms)), v_rel_norms, color=colors[1], label='v-momentum')  # Neutral color
         plt.semilogy(range(len(p_rel_norms)), p_rel_norms, color=colors[2], label='pressure')    # Cool color
         plt.grid(True)
-        plt.title('Relative Residual History $\\|r_n\\|/\\max(\\|r\\|)$')
+        plt.title(f'Residual History')
         plt.xlabel('Iteration')
-        plt.ylabel('Relative Residual Norm')
+        plt.ylabel('Residual Norm')
         plt.legend()
         
         # Add overall title if provided

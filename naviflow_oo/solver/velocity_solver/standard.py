@@ -1,7 +1,6 @@
 import numpy as np
 from ..velocity_solver.base_velocity_solver import VelocityUpdater
 from ...constructor.boundary_conditions import BoundaryConditionManager
-
 class StandardVelocityUpdater(VelocityUpdater):
     """
     Standard implementation of velocity updater.
@@ -68,5 +67,3 @@ class StandardVelocityUpdater(VelocityUpdater):
         u, v = bc_manager.apply_velocity_boundary_conditions(u, v, imax, jmax)
         
         return u, v
-
- 

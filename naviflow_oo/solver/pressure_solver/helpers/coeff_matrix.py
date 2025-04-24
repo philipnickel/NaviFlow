@@ -119,5 +119,3 @@ def get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v, pin_pressure=True):
         A[pin_index, pin_index] = 1
     
     return A
-
-

@@ -135,7 +135,7 @@ class SimpleSolver(BaseAlgorithm):
 
                 # Solve pressure correction equation
                 p_prime, p_res_info = self.pressure_solver.solve(
-                    self.mesh, u_star, v_star, d_u, d_v, p_star, 
+                    self.mesh, u_star, v_star, d_u , d_v , p_star, 
                     return_dict=True
                 )
                 
@@ -148,7 +148,8 @@ class SimpleSolver(BaseAlgorithm):
                 self.u, self.v = self.velocity_updater.update_velocity(
                     self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
                 )
-                
+   
+
                 # Extract relative norms for convergence check
                 u_rel_norm = u_res_info['rel_norm']
                 v_rel_norm = v_res_info['rel_norm']

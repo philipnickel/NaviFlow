@@ -1,263 +1,261 @@
 """
-SIMPLER (SIMPLE Revised) algorithm implementation.
-""" 
+SIMPLER (SIMPLE-Revised) algorithm implementation – **gauge-fixed**.
 
-import numpy as np
+Author: ChatGPT (corrected 2025-04-23)
+"""
+
+from __future__ import annotations
+
 import os
+import numpy as np
+
 from .base_algorithm import BaseAlgorithm
 from ...postprocessing.simulation_result import SimulationResult
-from ...postprocessing.validation.cavity_flow import calculate_infinity_norm_error
+from ...postprocessing.validation.cavity_flow import (
+    calculate_infinity_norm_error,
+    calculate_l2_norm_error,
+)
+
+SMALL = 1.0e-30  # one reusable tiny number
+
 
 class SimplerSolver(BaseAlgorithm):
     """
-    SIMPLER (SIMPLE Revised) algorithm implementation.
-    
-    The SIMPLER algorithm is an improved version of SIMPLE that solves
-    the pressure equation twice per iteration. The first pressure equation
-    is solved for an intermediate pressure field, and the second for
-    pressure corrections. This approach often leads to better convergence
-    compared to the standard SIMPLE algorithm.
+    Patankar’s SIMPLER algorithm.
+
+    Outer loop:
+        1. Momentum prediction with previous pressure  →  u*, v*
+        2. Pressure Poisson (from u*, v*)              →  p̄
+        3. Momentum re-solve with p̄                   →  new u*, v*
+        4. Pressure-correction equation                →  p′
+        5. p ← p̄ + α_p·p′   (remove mean ⇒ fixed gauge)
+        6. Velocity correction with p′
     """
-    def __init__(self, mesh, fluid, pressure_solver=None, momentum_solver=None, 
-                 velocity_updater=None, boundary_conditions=None, 
-                 alpha_p=0.3, alpha_u=0.7):
-        """
-        Initialize the SIMPLER solver.
-        
-        Parameters:
-        -----------
-        mesh : StructuredMesh
-            The computational mesh
-        fluid : FluidProperties
-            Fluid properties
-        pressure_solver : PressureSolver, optional
-            Solver for pressure equation
-        momentum_solver : MomentumSolver, optional
-            Solver for momentum equations
-        velocity_updater : VelocityUpdater, optional
-            Method to update velocities
-        boundary_conditions : dict or BoundaryConditionManager, optional
-            Boundary conditions
-        alpha_p, alpha_u : float
-            Relaxation factors for pressure and velocity
-        """
-        super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
-                         velocity_updater, boundary_conditions)
+
+    # ------------------------------------------------------------------ #
+    # construction                                                       #
+    # ------------------------------------------------------------------ #
+    def __init__(
+        self,
+        mesh,
+        fluid,
+        pressure_solver=None,
+        momentum_solver=None,
+        velocity_updater=None,
+        boundary_conditions=None,
+        *,
+        alpha_p: float = 0.3,
+        alpha_u: float = 0.7,
+    ):
+        super().__init__(
+            mesh,
+            fluid,
+            pressure_solver,
+            momentum_solver,
+            velocity_updater,
+            boundary_conditions,
+        )
+
         self.alpha_p = alpha_p
         self.alpha_u = alpha_u
-        
-    
-    def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
-              track_infinity_norm=False, infinity_norm_interval=10):
-        """
-        Solve using the SIMPLER algorithm.
-        
-        Parameters:
-        -----------
-        max_iterations : int
-            Maximum number of iterations
-        tolerance : float
-            Convergence tolerance
-        save_profile : bool, optional
-            Whether to save profiling data to a file
-        profile_dir : str, optional
-            Directory to save profiling data
-        track_infinity_norm : bool, optional
-            Whether to track infinity norm error against Ghia data
-        infinity_norm_interval : int, optional
-            Interval (in iterations) at which to calculate infinity norm error
-            
-        Returns:
-        --------
-        SimulationResult
-            Object containing the solution fields and convergence history
-        """
-        # Start profiling
+
+        # ­histories ----------------------------------------------------
+        self.u_rel_hist: list[float] = []
+        self.v_rel_hist: list[float] = []
+        self.p_rel_hist: list[float] = []
+        self.outer_hist: list[float] = []
+        self.infinity_hist: list[float] = []
+
+        # fields for final plotting
+        self._final_u_res_field = None
+        self._final_v_res_field = None
+        self._final_p_res_field = None
+
+    # ------------------------------------------------------------------ #
+    # solver                                                             #
+    # ------------------------------------------------------------------ #
+    def solve(
+        self,
+        *,
+        max_iterations: int = 1000,
+        tolerance: float = 1.0e-6,
+        save_profile: bool = True,
+        profile_dir: str = "results/profiles",
+        track_infinity_norm: bool = False,
+        infinity_norm_interval: int = 10,
+        use_l2_norm: bool = False,
+    ) -> SimulationResult:
+
         self.profiler.start()
-        
-        # Get mesh dimensions and fluid properties
         nx, ny = self.mesh.get_dimensions()
-        dx, dy = self.mesh.get_cell_sizes()
-        rho = self.fluid.get_density()
-        mu = self.fluid.get_viscosity()
-        
-        # Initialize variables
-        p_star = self.p.copy()
-        p_prime = np.zeros((nx, ny))
-        self.residual_history = []  # Reset residual history
-        self.momentum_residual_history = []  # Track momentum residuals
-        self.pressure_residual_history = []  # Track pressure residuals
-        self.infinity_norm_history = []  # Track infinity norm errors
-        
-        # Main iteration loop
+        n_cells = nx * ny
+
+        print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u}")
+
+        # ----------------------------------------------------------------
         iteration = 1
-        max_res = 1000
-        momentum_res = 1000
-        pressure_res = 1000
-        
-        while (iteration <= max_iterations) and (max_res > tolerance):
-            # Store old values for convergence check
+        outer_residual = 1.0  # initialise larger than tol
+
+        while iteration <= max_iterations and outer_residual > tolerance:
+            # -- store previous step ----------------------------------
             u_old = self.u.copy()
             v_old = self.v.copy()
             p_old = self.p.copy()
-            
-            # First step: Solve momentum equations with relaxation factor
-            u_star, d_u = self.momentum_solver.solve_u_momentum(
-                self.mesh, self.fluid, self.u, self.v, p_star, 
+
+            # === 1. momentum prediction (old p) =====================
+            u_star, d_u, u_info = self.momentum_solver.solve_u_momentum(
+                self.mesh,
+                self.fluid,
+                self.u,
+                self.v,
+                self.p,
                 relaxation_factor=self.alpha_u,
-                boundary_conditions=self.bc_manager
+                boundary_conditions=self.bc_manager,
+                return_dict=True,
             )
-            
-            v_star, d_v = self.momentum_solver.solve_v_momentum(
-                self.mesh, self.fluid, self.u, self.v, p_star, 
+            v_star, d_v, v_info = self.momentum_solver.solve_v_momentum(
+                self.mesh,
+                self.fluid,
+                self.u,
+                self.v,
+                self.p,
                 relaxation_factor=self.alpha_u,
-                boundary_conditions=self.bc_manager
-            )
-            
-            # Calculate momentum residual
-            u_momentum_res = np.abs(u_star - self.u)
-            v_momentum_res = np.abs(v_star - self.v)
-            momentum_res = max(np.max(u_momentum_res), np.max(v_momentum_res))
-            
-            # Second step: Solve pressure equation for intermediate pressure field
-            p_star = self.pressure_solver.solve(
-                self.mesh, u_star, v_star, d_u, d_v, p_star
-            )
-            
-            # Apply pressure boundary conditions to the intermediate pressure field
-            self._enforce_pressure_boundary_conditions()
-            
-            # Third step: Solve momentum equations again with new pressure field
-            u_star, d_u = self.momentum_solver.solve_u_momentum(
-                self.mesh, self.fluid, self.u, self.v, p_star, 
-                relaxation_factor=self.alpha_u,
-                boundary_conditions=self.bc_manager
-            )
-            
-            v_star, d_v = self.momentum_solver.solve_v_momentum(
-                self.mesh, self.fluid, self.u, self.v, p_star, 
-                relaxation_factor=self.alpha_u,
-                boundary_conditions=self.bc_manager
-            )
-            
-            # Fourth step: Solve pressure correction equation
-            p_prime = self.pressure_solver.solve(
-                self.mesh, u_star, v_star, d_u, d_v, p_star
+                boundary_conditions=self.bc_manager,
+                return_dict=True,
             )
 
+            # === 2. intermediate pressure p̄ ========================
+            p_bar, _ = self.pressure_solver.solve(
+                self.mesh, u_star, v_star, d_u, d_v, self.p
+            )
+            self.p += p_bar
             self._enforce_pressure_boundary_conditions()
-            # Update pressure with relaxation
-            self.p = p_star + self.alpha_p * p_prime
-            
-            # Apply pressure boundary conditions
-            
-            # Calculate pressure residual
-            pressure_res = np.max(np.abs(self.p - p_old))
-            
-            p_star = self.p.copy()  # Update p_star for next iteration
-            
-            # Update velocity
+
+            # === 3. momentum with p̄ =================================
+            u_star, d_u, _ = self.momentum_solver.solve_u_momentum(
+                self.mesh,
+                self.fluid,
+                self.u,
+                self.v,
+                self.p,
+                relaxation_factor=self.alpha_u,
+                boundary_conditions=self.bc_manager,
+                return_dict=True,
+            )
+            v_star, d_v, _ = self.momentum_solver.solve_v_momentum(
+                self.mesh,
+                self.fluid,
+                self.u,
+                self.v,
+                self.p,
+                relaxation_factor=self.alpha_u,
+                boundary_conditions=self.bc_manager,
+                return_dict=True,
+            )
+
+            # === 4. correction pressure p′ ==========================
+            p_prime, p_info = self.pressure_solver.solve(
+                self.mesh, u_star, v_star, d_u, d_v, self.p
+            )
+
+            # === 5. final pressure & velocity =======================
+            self.p += self.alpha_p * p_prime
+            self._enforce_pressure_boundary_conditions()
+
             self.u, self.v = self.velocity_updater.update_velocity(
                 self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
             )
-            
-            # Calculate total residual
-            u_res = np.abs(self.u - u_old)
-            v_res = np.abs(self.v - v_old)
-            max_res = max(np.max(u_res), np.max(v_res))
-            
-            # Store residual history
-            self.residual_history.append(max_res)
-            self.momentum_residual_history.append(momentum_res)
-            self.pressure_residual_history.append(pressure_res)
-            
-            # Calculate infinity norm error if requested
-            infinity_norm_error = None
-            if track_infinity_norm and (iteration % infinity_norm_interval == 0 or iteration == max_iterations or max_res <= tolerance):
+
+            # -- residuals ------------------------------------------
+            u_rel = u_info["rel_norm"]
+            v_rel = v_info["rel_norm"]
+            p_rel = np.linalg.norm(self.p - p_old) / (np.sqrt(n_cells) + SMALL)
+            outer_residual = max(u_rel, v_rel)
+
+            # -- histories & fields ---------------------------------
+            self.u_rel_hist.append(u_rel)
+            self.v_rel_hist.append(v_rel)
+            self.p_rel_hist.append(p_rel)
+            self.outer_hist.append(outer_residual)
+
+            self._final_u_res_field = u_info["field"]
+            self._final_v_res_field = v_info["field"]
+            self._final_p_res_field = p_info["field"]
+
+            # -- optional Ghia error --------------------------------
+            if track_infinity_norm and (
+                iteration % infinity_norm_interval == 0
+                or outer_residual < tolerance
+            ):
                 try:
-                    infinity_norm_error = calculate_infinity_norm_error(self.u, self.v, self.mesh, self.fluid.get_reynolds_number())
-                    self.infinity_norm_history.append(infinity_norm_error)
-                    print(f"Iteration {iteration}, Infinity Norm Error: {infinity_norm_error:.6e}")
-                except Exception as e:
-                    print(f"Warning: Could not calculate infinity norm error: {str(e)}")
-            
-            # Add detailed residual data to profiler
-            self.profiler.add_residual_data(
-                iteration=iteration,
-                total_residual=max_res,
-                momentum_residual=momentum_res,
-                pressure_residual=pressure_res,
-                infinity_norm_error=infinity_norm_error
+                    inf_err = calculate_infinity_norm_error(
+                        self.u, self.v, self.mesh, self.fluid.get_reynolds_number()
+                    )
+                    l2_err = calculate_l2_norm_error(
+                        self.u, self.v, self.mesh, self.fluid.get_reynolds_number()
+                    )
+                    self.infinity_hist.append(l2_err if use_l2_norm else inf_err)
+                    print(
+                        f"Iter {iteration:4d}  ∞-norm err = {inf_err:.3e}  "
+                        f"L2 err = {l2_err:.3e}"
+                    )
+                except Exception as exc:
+                    print(f"Iter {iteration}: could not compute Ghia error – {exc}")
+
+            # -- console line ---------------------------------------
+            print(
+                f"[{iteration:4d}]  "
+                f"u-rel {u_rel:.3e}  v-rel {v_rel:.3e}  p-rel {p_rel:.3e}"
             )
-            
-            # Print progress with all residuals
-            print(f"Iteration {iteration}, "
-                  f"Total Residual: {max_res:.6e}, "
-                  f"Momentum Residual: {momentum_res:.6e}, "
-                  f"Pressure Residual: {pressure_res:.6e}")
-            
+
             iteration += 1
-        
-        # Update profiling data
+
+        # ----------------------------------------------------------------
+        # profiling & result                                             #
+        # ----------------------------------------------------------------
         self.profiler.set_iterations(iteration - 1)
-        
-        # Set convergence information
-        final_residual = max_res
-        converged = max_res <= tolerance
         self.profiler.set_convergence_info(
             tolerance=tolerance,
-            final_residual=final_residual,
-            residual_history=self.residual_history,
-            converged=converged
+            final_residual=outer_residual,
+            residual_history=self.outer_hist,
+            converged=outer_residual < tolerance,
         )
-        
-        # Collect pressure solver performance metrics if available
-        if hasattr(self.pressure_solver, 'get_solver_info'):
-            solver_info = self.pressure_solver.get_solver_info()
+        if hasattr(self.pressure_solver, "get_solver_info"):
+            info = self.pressure_solver.get_solver_info()
             self.profiler.set_pressure_solver_info(
-                solver_name=solver_info.get('name', self.pressure_solver.__class__.__name__),
-                inner_iterations=solver_info.get('inner_iterations_history'),
-                convergence_rate=solver_info.get('convergence_rate'),
-                solver_specific=solver_info.get('solver_specific')
+                solver_name=info.get("name", "unknown"),
+                inner_iterations=info.get("inner_iterations_history"),
+                convergence_rate=info.get("convergence_rate"),
+                solver_specific=info.get("solver_specific"),
             )
-        
-        # End profiling
         self.profiler.end()
-        
-        # Calculate divergence for final solution
-        divergence = self.calculate_divergence()
-        
-        # Create result object with the Reynolds number
-        reynolds_value = self.fluid.get_reynolds_number()
-        
+
+        # -- assemble SimulationResult -----------------------------------
         result = SimulationResult(
-            self.u, self.v, self.p, self.mesh, 
-            iterations=iteration-1, 
-            residuals=self.residual_history,
-            momentum_residuals=self.momentum_residual_history,
-            pressure_residuals=self.pressure_residual_history,
-            divergence=divergence,
-            reynolds=reynolds_value
+            self.u,
+            self.v,
+            self.p,
+            self.mesh,
+            iterations=iteration - 1,
+            residuals=self.outer_hist,
+            reynolds=self.fluid.get_reynolds_number(),
+            u_residual_field=self._final_u_res_field,
+            v_residual_field=self._final_v_res_field,
+            p_residual_field=self._final_p_res_field,
         )
-        
-        # Calculate final infinity norm error if not already done
-        if track_infinity_norm and not self.infinity_norm_history:
-            try:
-                result.calculate_infinity_norm_error()
-                print(f"Final Infinity Norm Error: {result.infinity_norm_error:.6e}")
-            except Exception as e:
-                print(f"Warning: Could not calculate final infinity norm error: {str(e)}")
-        elif self.infinity_norm_history:
-            result.infinity_norm_error = self.infinity_norm_history[-1]
-        
-        # Save profiling data if requested
+        result.add_history("u_rel_norm", self.u_rel_hist)
+        result.add_history("v_rel_norm", self.v_rel_hist)
+        result.add_history("p_rel_norm", self.p_rel_hist)
+        result.add_history("total_rel_norm", self.outer_hist)
+
+        # -- optional profile on disk ------------------------------------
         if save_profile:
             os.makedirs(profile_dir, exist_ok=True)
-            filename = os.path.join(
-                profile_dir, 
-                f"SIMPLER_Re{int(reynolds_value)}_mesh{nx}x{ny}_profile.h5"
+            fname = os.path.join(
+                profile_dir,
+                f"SIMPLER_Re{int(self.fluid.get_reynolds_number())}"
+                f"_mesh{nx}x{ny}_profile.h5",
             )
-            profile_path = self.save_profiling_data(filename)
-            print(f"Profiling data saved to: {profile_path}")
-        
+            print(f"Saved profile to {self.save_profiling_data(fname)}")
+
         return result

@@ -77,7 +77,7 @@ class DirectPressureSolver(PressureSolver):
         
         # Get right-hand side of pressure correction equation
         rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
-        
+
         # Get coefficient matrix with boundary conditions already integrated
         A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
         
@@ -92,20 +92,19 @@ class DirectPressureSolver(PressureSolver):
         # Reshape residual to 2D for interior point extraction
         r_field_full = r.reshape((nx, ny), order='F')  # Reshape residual field 
         
-        # Extract interior points only (1:nx-1, 1:ny-1) for pressure
-        r_interior = r_field_full[1:nx-1, 1:ny-1]
         
         # Calculate L2 norm on interior points only - use more stable calculation
-        p_current_l2 = np.sqrt(np.sum(r_interior**2))
+        p_current_l2 = np.linalg.norm(r_field_full)
         
         # Keep track of the maximum L2 norm for relative scaling
         if not hasattr(self, 'p_max_l2'):
             self.p_max_l2 = p_current_l2
         else:
             self.p_max_l2 = max(self.p_max_l2, p_current_l2)
+
         
-        # Calculate relative norm as l2(r)/max(l2(r))
-        p_rel_norm = p_current_l2 / self.p_max_l2 if self.p_max_l2 > 0 else 1.0
+        # Calculate relative norm as l2(r)/l2(b) 
+        p_rel_norm = p_current_l2 / np.linalg.norm(rhs)
         
         # Track history of normalized residual
         self.residual_history.append(p_rel_norm)
@@ -116,7 +115,7 @@ class DirectPressureSolver(PressureSolver):
         # Create the minimal residual information dictionary
         residual_info = {
             'rel_norm': p_rel_norm,  # l2(r)/max(l2(r))
-            'field': r_field_full     # Absolute residual field
+            'field': r_field_full    # Absolute residual field
         }
         
         # Return the solution and residual info

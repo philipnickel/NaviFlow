@@ -98,33 +98,6 @@ class MatrixFreeBiCGSTABSolver(PressureSolver):
             # Store omega from smoother
             self.omega = smoother.omega
     
-    def _create_jacobi_preconditioner(self, nx, ny, dx, dy, rho, d_u, d_v):
-        """
-        Create a Jacobi (diagonal) preconditioner for the pressure Poisson equation.
-        
-        Returns a LinearOperator that applies the preconditioner.
-        """
-        # Create diagonal approximation based on the standard 5-point stencil
-        # For each interior point, the diagonal entry is approximately:
-        # 2/dx^2 + 2/dy^2
-        diag = np.ones(nx * ny, dtype=np.float64)  # Initialize with 1s for boundary points
-        
-        # Create index arrays for interior points
-        i_interior = np.repeat(np.arange(1, nx-1), ny-2)
-        j_interior = np.tile(np.arange(1, ny-1), nx-2)
-        idx_interior = i_interior + j_interior * nx
-        
-        # Set interior point values vectorized
-        diag[idx_interior] = 2.0/(dx*dx) + 2.0/(dy*dy)
-        
-        # Invert the diagonal for the preconditioner
-        diag_inv = 1.0 / diag
-        
-        # Create preconditioner function
-        def apply_preconditioner(vec):
-            return diag_inv * vec.astype(np.float64)
-        
-        return LinearOperator((len(diag), len(diag)), matvec=apply_preconditioner, dtype=np.float64)
 
     def _create_multigrid_preconditioner(self, mesh, rho, d_u, d_v):
         """
@@ -278,26 +251,37 @@ class MatrixFreeBiCGSTABSolver(PressureSolver):
         p_prime = p_prime_flat.reshape((nx, ny), order='F')
         
         # Calculate residual for tracking
-        r = rhs - compute_Ap_product(p_prime_flat, nx, ny, dx, dy, rho, d_u, d_v)
-        r_field_full = r.reshape((nx, ny), order='F')  # Reshape residual field
+        # interior points only
+        rhs_field = rhs.reshape((nx, ny), order='F')
+        rhs_field[0, :] = 0
+        rhs_field[:, 0] = 0
+        rhs_field[nx-1, :] = 0
+        rhs_field[:, ny-1] = 0
+        Ax = compute_Ap_product(p_prime_flat, nx, ny, dx, dy, rho, d_u, d_v)
+        Ax_interior = Ax.reshape((nx, ny), order='F')
+        Ax_interior[0, :] = 0
+        Ax_interior[:, 0] = 0
+        Ax_interior[nx-1, :] = 0
+        Ax_interior[:, ny-1] = 0
+        r = rhs_field - Ax_interior
+        p_current_l2 = np.linalg.norm(r)
+
         
-        # Calculate L2 norm on interior points only
-        r_interior = r_field_full[1:nx-1, 1:ny-1]
-        p_current_l2 = np.linalg.norm(r_interior)
-        
+        # ### 
         # Keep track of the maximum L2 norm for relative scaling
         if not hasattr(self, 'p_max_l2'):
             self.p_max_l2 = p_current_l2
         else:
             self.p_max_l2 = max(self.p_max_l2, p_current_l2)
-        
+
         # Calculate relative norm as l2(r)/max(l2(r))
-        p_rel_norm = p_current_l2 / self.p_max_l2 if self.p_max_l2 > 0 else 1.0
+        #p_rel_norm = p_current_l2 #/ self.p_max_l2 if self.p_max_l2 > 0 else 1.0
+        p_rel_norm = p_current_l2 / np.linalg.norm(rhs)
         
         # Create the residual information dictionary
         residual_info = {
             'rel_norm': p_rel_norm,  # l2(r)/max(l2(r))
-            'field': r_field_full     # Absolute residual field
+            'field': r     # Absolute residual field
         }
         
         return p_prime, residual_info

@@ -13,18 +13,19 @@ from naviflow_oo.solver.pressure_solver.matrix_free_BiCGSTAB import MatrixFreeBi
 from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
 from naviflow_oo.solver.momentum_solver.BiCGSTAB_solver import BiCGSTABMomentumSolver
+from naviflow_oo.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
 
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**7-1, 2**7-1 # Grid size
-reynolds = 1000             # Reynolds number
+nx, ny = 2**9-1, 2**9-1 # Grid size
+reynolds = 10000             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor
-alpha_u = 0.8              # Velocity relaxation factor
+alpha_u = 0.5              # Velocity relaxation factor
 max_iterations = 10000     # Maximum number of iterations
-tolerance = 1e-3
+tolerance = 1e-4
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
@@ -62,8 +63,8 @@ pressure_solver = MatrixFreeBiCGSTABSolver(
     smoother_relaxation=1.5,
     smoother_method_type='red_black'
 )
-momentum_solver = AMGMomentumSolver(tolerance=1e-5, max_iterations=10000)
-#momentum_solver = BiCGSTABMomentumSolver(tolerance=1e-5, max_iterations=10000)
+#momentum_solver = AMGMomentumSolver(tolerance=1e-6, max_iterations=10000)
+momentum_solver = MatrixFreeMomentumSolver(tolerance=1e-6, max_iterations=10000, solver_type='bicgstab')
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -105,7 +106,7 @@ print(f"Maximum absolute divergence: {max_div:.6e}")
 
 # 10. Visualize results
 result.plot_combined_results(
-    title=f'CG Cavity Flow Results (Re={reynolds})',
+    title=f'CG Cavity Flow Results (Re={reynolds}) Resolution {nx}x{ny}',
     filename=os.path.join(results_dir, f'cavity_Re{reynolds}_CG_results.pdf'),
     show=True
 )
