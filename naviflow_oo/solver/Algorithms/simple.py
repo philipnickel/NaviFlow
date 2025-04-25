@@ -105,7 +105,7 @@ class SimpleSolver(BaseAlgorithm):
         
         print(f"Using α_p = {self.alpha_p}, α_u = {self.alpha_u}")
 
-        stall_check_window = 20
+        stall_check_window = 50
         stall_threshold = 1e-8
         recent_total_residuals = []
 
@@ -205,7 +205,7 @@ class SimpleSolver(BaseAlgorithm):
                         rel_change = res_change / avg_res
                         if rel_change < 0.001:  # 0.1% relative change
                             print(f"Residuals have stalled (<0.1% change) over the last {stall_check_window} iterations. Stopping early.")
-                            break
+                            #break
 
 
                 

@@ -411,7 +411,7 @@ class AMGMomentumSolver(MomentumSolver):
             self.u_max_l2 = max(self.u_max_l2, u_current_l2)
         
         # Calculate relative norm
-        u_rel_norm = u_current_l2 / np.linalg.norm(u_source_unrelaxed)
+        u_rel_norm = u_current_l2 #/ np.linalg.norm(u_source_unrelaxed)
         
         # Create the minimal residual information dictionary
         residual_info = {
@@ -541,7 +541,7 @@ class AMGMomentumSolver(MomentumSolver):
             self.v_max_l2 = max(self.v_max_l2, v_current_l2)
         
         # Calculate relative norm
-        v_rel_norm = v_current_l2 / np.linalg.norm(v_source_unrelaxed)
+        v_rel_norm = v_current_l2 #/ np.linalg.norm(v_source_unrelaxed)
         
         # Create the minimal residual information dictionary
         residual_info = {

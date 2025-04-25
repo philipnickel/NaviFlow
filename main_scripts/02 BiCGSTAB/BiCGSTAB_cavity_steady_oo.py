@@ -20,17 +20,18 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**8-1, 2**8-1 # Grid size
+nx, ny = 2**9-1, 2**9-1 # Grid size
 reynolds = 3200             # Reynolds number
-alpha_p = 0.1              # Pressure relaxation factor
-alpha_u = 0.5            # Velocity relaxation factor
-max_iterations = 10000     # Maximum number of iterations
+alpha_p = 0.3              # Pressure relaxation factor
+alpha_u = 0.7         # Velocity relaxation factor
+max_iterations = 30000     # Maximum number of iterations
 tolerance = 1e-4
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
 #pressure_tolerance = expected_disc_error 
-pressure_tolerance = 1e-4
+pressure_tolerance = 1e-6
+print(f"Expected disc error: {expected_disc_error}")
 print(f"Tolerance: {tolerance}")
 print(f"Pressure tolerance: {pressure_tolerance}")
 

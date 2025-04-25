@@ -1,25 +1,25 @@
 """
-Biconjugate Gradient Stabilized (BiCGSTAB) momentum solver.
+BiCGSTAB momentum solver.
 """
 
 import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg import bicgstab  # BiCGSTAB solver
 from .base_momentum_solver import MomentumSolver
 from .discretization import power_law
 from .discretization import quick
 from .discretization import second_order_upwind
 from .discretization import second_order_upwind
 from ...constructor.boundary_conditions import BoundaryConditionManager
+import pyamg  # PyAMG library for AMG solvers
 
 class BiCGSTABMomentumSolver(MomentumSolver):
     """
-    Momentum solver that uses Biconjugate Gradient Stabilized (BiCGSTAB) to solve the momentum equations.
+    Momentum solver that uses BiCGSTAB to solve the momentum equations.
     Uses Practice B to incorporate BCs.
     Supports power_law, quick, upwind, and second_order_upwind discretization schemes.
     """
 
-    def __init__(self, discretization_scheme='power_law', tolerance=1e-8, max_iterations=100):
+    def __init__(self, discretization_scheme='power_law', tolerance=1e-8, max_iterations=100, use_preconditioner=False, print_its=False):
         """
         Initialize the BiCGSTAB momentum solver.
 
@@ -29,13 +29,19 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             The discretization scheme to use (default: 'power_law').
             Options: 'power_law', 'quick', 'upwind', 'second_order_upwind'
         tolerance : float, optional
-            Convergence tolerance for the BiCGSTAB solver (default: 1e-8).
+            Convergence tolerance for the AMG solver (default: 1e-8).
         max_iterations : int, optional
-            Maximum number of iterations for the BiCGSTAB solver (default: 100).
+            Maximum number of iterations for the AMG solver (default: 100).
+        use_preconditioner : bool, optional
+            Whether to use ILU preconditioner for BiCGSTAB solver (default: False).
+        print_its : bool, optional
+            Whether to print the number of iterations needed for convergence (default: False).
         """
         super().__init__()
         self.tolerance = tolerance
         self.max_iterations = max_iterations
+        self.use_preconditioner = use_preconditioner
+        self.print_its = print_its
 
         if discretization_scheme == 'power_law':
             self.discretization_scheme = power_law.PowerLawDiscretization()
@@ -376,12 +382,32 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             nx, ny, is_u=True
         )
 
-        # Solve the RELAXED system Ax = b using BiCGSTAB, with initial guess
-        u_flat, info = bicgstab(self.u_matrix, self.u_rhs, x0=u_initial_guess.flatten(), 
-                               atol=self.tolerance, maxiter=self.max_iterations)
+        # Set up iteration counter
+        iteration_count = 0
+        
+        def callback(xk):
+            nonlocal iteration_count
+            iteration_count += 1
 
-        if info != 0:
-            print(f"Warning: BiCGSTAB did not converge for u-momentum. Info code: {info}")
+        # Solve using BiCGSTAB with optional ILU preconditioner
+        if self.use_preconditioner:
+            # Create ILU preconditioner
+            ilu = sparse.linalg.spilu(self.u_matrix)
+            M = sparse.linalg.LinearOperator(self.u_matrix.shape, lambda x: ilu.solve(x))
+            u_flat, info = sparse.linalg.bicgstab(self.u_matrix, self.u_rhs, x0=u_initial_guess.flatten(), 
+                                                  M=M, atol=self.tolerance, maxiter=self.max_iterations,
+                                                  callback=callback)
+        else:
+            u_flat, info = sparse.linalg.bicgstab(self.u_matrix, self.u_rhs, x0=u_initial_guess.flatten(), 
+                                                  atol=self.tolerance, maxiter=self.max_iterations,
+                                                  callback=callback)
+                                                  
+        # Print convergence information if requested
+        if self.print_its:
+            if info > 0:
+                print(f"U-momentum BiCGSTAB failed to converge after {iteration_count} iterations")
+            else:
+                print(f"U-momentum BiCGSTAB converged in {iteration_count} iterations")
 
         # Reshape result back to 2D
         u_star = u_flat.reshape((imax+1, jmax))
@@ -412,12 +438,13 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             self.u_max_l2 = max(self.u_max_l2, u_current_l2)
         
         # Calculate relative norm
-        u_rel_norm = u_current_l2 / np.linalg.norm(u_source_unrelaxed)
+        u_rel_norm = u_current_l2 #/ np.linalg.norm(u_source_unrelaxed)
         
         # Create the minimal residual information dictionary
         residual_info = {
             'rel_norm': u_rel_norm,  # l2(r)/max(l2(r))
-            'field': u_residual_field  # Absolute residual field
+            'field': u_residual_field,  # Absolute residual field
+            'iterations': iteration_count  # Add iteration count to the info dictionary
         }
 
         return u_star, d_u, residual_info
@@ -506,13 +533,33 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             v_source,
             nx, ny, is_u=False
         )
-
-        # Solve the RELAXED system Ax = b using BiCGSTAB, with initial guess
-        v_flat, info = bicgstab(self.v_matrix, self.v_rhs, x0=v_initial_guess.flatten(), 
-                               atol=self.tolerance, maxiter=self.max_iterations)
-
-        if info != 0:
-            print(f"Warning: BiCGSTAB did not converge for v-momentum. Info code: {info}")
+        
+        # Set up iteration counter
+        iteration_count = 0
+        
+        def callback(xk):
+            nonlocal iteration_count
+            iteration_count += 1
+        
+        # Solve using BiCGSTAB with optional ILU preconditioner
+        if self.use_preconditioner:
+            # Create ILU preconditioner
+            ilu = sparse.linalg.spilu(self.v_matrix)
+            M = sparse.linalg.LinearOperator(self.v_matrix.shape, lambda x: ilu.solve(x))
+            v_flat, info = sparse.linalg.bicgstab(self.v_matrix, self.v_rhs, x0=v_initial_guess.flatten(), 
+                                                 M=M, atol=self.tolerance, maxiter=self.max_iterations,
+                                                 callback=callback)
+        else:
+            v_flat, info = sparse.linalg.bicgstab(self.v_matrix, self.v_rhs, x0=v_initial_guess.flatten(), 
+                                                 atol=self.tolerance, maxiter=self.max_iterations,
+                                                 callback=callback)
+                                                 
+        # Print convergence information if requested
+        if self.print_its:
+            if info > 0:
+                print(f"V-momentum BiCGSTAB failed to converge after {iteration_count} iterations")
+            else:
+                print(f"V-momentum BiCGSTAB converged in {iteration_count} iterations")
 
         # Reshape result back to 2D
         v_star = v_flat.reshape((imax, jmax+1))
@@ -543,12 +590,13 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             self.v_max_l2 = max(self.v_max_l2, v_current_l2)
         
         # Calculate relative norm
-        v_rel_norm = v_current_l2 / np.linalg.norm(v_source_unrelaxed)
+        v_rel_norm = v_current_l2 #/ np.linalg.norm(v_source_unrelaxed)
         
         # Create the minimal residual information dictionary
         residual_info = {
             'rel_norm': v_rel_norm,  # l2(r)/max(l2(r))
-            'field': v_residual_field  # Absolute residual field
+            'field': v_residual_field,  # Absolute residual field
+            'iterations': iteration_count  # Add iteration count to the info dictionary
         }
 
         return v_star, d_v, residual_info

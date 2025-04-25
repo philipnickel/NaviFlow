@@ -260,7 +260,7 @@ class MatrixFreeMomentumSolver(MomentumSolver):
             u_star, a_e, a_w, a_n, a_s, a_p_un, src_un, nx, ny, True
         )
         src_un_interior = src_un[1:nx, 1:ny-1]
-        rel_norm = norm_un / (np.linalg.norm(src_un_interior) + 1e-16)
+        rel_norm = norm_un #/ (np.linalg.norm(src_un_interior) + 1e-16)
 
         if not hasattr(self, 'u_max_l2'):
             self.u_max_l2 = norm_un
@@ -326,7 +326,7 @@ class MatrixFreeMomentumSolver(MomentumSolver):
             v_star, a_e, a_w, a_n, a_s, a_p_un, src_un, nx, ny, False
         )
         src_un_interior = src_un[1:nx-1, 1:ny]
-        rel_norm = norm_un / (np.linalg.norm(src_un_interior) + 1e-16)
+        rel_norm = norm_un #/ (np.linalg.norm(src_un_interior) + 1e-16)
 
         if not hasattr(self, 'v_max_l2'):
             self.v_max_l2 = norm_un

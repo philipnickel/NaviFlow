@@ -23,11 +23,11 @@ from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**7-1, 2**7-1 # Grid size
-reynolds = 3200            # Reynolds number
+nx, ny = 2**9-1, 2**9-1 # Grid size
+reynolds = 5000            # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
-max_iterations = 10000     # Maximum number of iterations
+max_iterations = 30000     # Maximum number of iterations
 
 h = 1/nx 
 disc_order = 1
@@ -49,7 +49,7 @@ print(f"Cell sizes: dx={dx}, dy={dy}")
 
 # Create solvers
 #smoother = GaussSeidelSolver(omega=1.5, method_type='symmetric')
-smoother = GaussSeidelSolver(omega=1.5, method_type='standard') 
+smoother = GaussSeidelSolver(omega=1.5, method_type='red_black') 
 #smoother = GaussSeidelSolver(omega=1.8, method_type='standard')
 # Create multigrid solver with the Gauss-Seidel smoother
 multigrid_solver = MultiGridSolver(
@@ -58,7 +58,7 @@ multigrid_solver = MultiGridSolver(
     tolerance=pressure_tolerance,         # Overall tolerance
     pre_smoothing=3,        # Pre-smoothing steps
     post_smoothing=3,       # Post-smoothing steps
-    cycle_type='v',         # Use W-cycles
+    cycle_type='fmg',         # Use W-cycles
     cycle_type_buildup='v',
     cycle_type_final='v',
     max_cycles_buildup=1,
