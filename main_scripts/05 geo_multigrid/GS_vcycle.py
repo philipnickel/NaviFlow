@@ -19,12 +19,13 @@ from naviflow_oo.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrix
 from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
+from naviflow_oo.solver.momentum_solver.matrix_free_momentum_PETSc import MatrixFreeMomentumSolverPETSc
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**9-1, 2**9-1 # Grid size
-reynolds = 5000            # Reynolds number
+nx, ny = 2**6-1, 2**6-1 # Grid size
+reynolds = 100            # Reynolds number
 alpha_p = 0.3              # Pressure relaxation factor
 alpha_u = 0.7              # Velocity relaxation factor
 max_iterations = 30000     # Maximum number of iterations
@@ -32,7 +33,7 @@ max_iterations = 30000     # Maximum number of iterations
 h = 1/nx 
 disc_order = 1
 expected_disc_error = h**(disc_order)
-tolerance = 1e-4
+tolerance = 1e-5
 #pressure_tolerance = expected_disc_error
 pressure_tolerance = 1e-3
 print(f"Tolerance: {tolerance}")
@@ -69,11 +70,18 @@ multigrid_solver = MultiGridSolver(
     coarsest_grid_size= 7,    # Size of the coarsest grid
 )
 
-#momentum_solver = JacobiMatrixMomentumSolver(n_jacobi_sweeps=5)
-#momentum_solver = AMGMomentumSolver(tolerance=1e-5, max_iterations=10000)
-momentum_solver = MatrixFreeMomentumSolver(tolerance=1e-6, max_iterations=10000, solver_type='gmres')
-velocity_updater = StandardVelocityUpdater()
+# Configure Matrix-Free PETSc Solver for maximum performance
+momentum_solver = MatrixFreeMomentumSolverPETSc(
+    tolerance=1e-12, 
+    max_iterations=10000, 
+    solver_type='bcgs',       # Use BiCGSTAB (fastest for this problem)
+    use_preconditioner=False, # Disable preconditioning
+    petsc_pc_type='none',     # No preconditioner
+    print_its=False,           # Print iteration information to see convergence
+    restart=100               # Restart parameter for GMRES (if used)
+)
 
+velocity_updater = StandardVelocityUpdater()
 # Create algorithm
 algorithm = SimpleSolver(
     mesh=mesh,

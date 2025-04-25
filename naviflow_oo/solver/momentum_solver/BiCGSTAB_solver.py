@@ -1,5 +1,5 @@
 """
-BiCGSTAB momentum solver.
+Matrix-based momentum solver with multiple iterative methods.
 """
 
 import numpy as np
@@ -12,36 +12,50 @@ from .discretization import second_order_upwind
 from ...constructor.boundary_conditions import BoundaryConditionManager
 import pyamg  # PyAMG library for AMG solvers
 
-class BiCGSTABMomentumSolver(MomentumSolver):
+class MatrixMomentumSolver(MomentumSolver):
     """
-    Momentum solver that uses BiCGSTAB to solve the momentum equations.
+    Momentum solver that uses matrix-based iterative methods to solve the momentum equations.
+    Supports BiCGSTAB and GMRES solvers with optional preconditioning.
     Uses Practice B to incorporate BCs.
     Supports power_law, quick, upwind, and second_order_upwind discretization schemes.
     """
 
-    def __init__(self, discretization_scheme='power_law', tolerance=1e-8, max_iterations=100, use_preconditioner=False, print_its=False):
+    def __init__(self, solver_type='bicgstab', discretization_scheme='power_law', tolerance=1e-8, 
+                 max_iterations=100, use_preconditioner=False, print_its=False, restart=30):
         """
-        Initialize the BiCGSTAB momentum solver.
+        Initialize the matrix momentum solver.
 
         Parameters:
         -----------
+        solver_type : str, optional
+            The iterative solver to use (default: 'bicgstab').
+            Options: 'bicgstab', 'gmres'
         discretization_scheme : str, optional
             The discretization scheme to use (default: 'power_law').
             Options: 'power_law', 'quick', 'upwind', 'second_order_upwind'
         tolerance : float, optional
-            Convergence tolerance for the AMG solver (default: 1e-8).
+            Convergence tolerance for the solver (default: 1e-8).
         max_iterations : int, optional
-            Maximum number of iterations for the AMG solver (default: 100).
+            Maximum number of iterations for the solver (default: 100).
         use_preconditioner : bool, optional
-            Whether to use ILU preconditioner for BiCGSTAB solver (default: False).
+            Whether to use ILU preconditioner for the solver (default: False).
         print_its : bool, optional
             Whether to print the number of iterations needed for convergence (default: False).
+        restart : int, optional
+            Restart parameter for GMRES (default: 30).
         """
         super().__init__()
         self.tolerance = tolerance
         self.max_iterations = max_iterations
         self.use_preconditioner = use_preconditioner
         self.print_its = print_its
+        self.restart = restart
+        
+        # Validate and set solver type
+        self.solver_type = solver_type.lower()
+        if self.solver_type not in ['bicgstab', 'gmres']:
+            raise ValueError(f"Unsupported solver type: {solver_type}. "
+                           "Available options: 'bicgstab', 'gmres'")
 
         if discretization_scheme == 'power_law':
             self.discretization_scheme = power_law.PowerLawDiscretization()
@@ -300,9 +314,84 @@ class BiCGSTABMomentumSolver(MomentumSolver):
 
         return residual_norm_unrelaxed, r_unrelaxed_field_final
 
+    def _solve_matrix_system(self, matrix, rhs, initial_guess, component_name):
+        """
+        Solve a linear system using the selected iterative solver with optional preconditioning.
+        
+        Parameters:
+        -----------
+        matrix : csr_matrix
+            The sparse coefficient matrix
+        rhs : ndarray
+            The right-hand side vector
+        initial_guess : ndarray
+            Initial guess for the solution
+        component_name : str
+            Name of the component being solved ('u' or 'v') for logging
+            
+        Returns:
+        --------
+        solution : ndarray
+            Solution vector
+        iteration_count : int
+            Number of iterations performed
+        """
+        # Flatten initial guess if needed
+        if initial_guess.ndim > 1:
+            initial_guess = initial_guess.flatten()
+            
+        # Set up iteration counter
+        iteration_count = 0
+        
+        def callback(xk):
+            nonlocal iteration_count
+            iteration_count += 1
+        
+        # Create preconditioner if requested
+        M = None
+        if self.use_preconditioner:
+            try:
+                ilu = sparse.linalg.spilu(matrix)
+                M = sparse.linalg.LinearOperator(matrix.shape, lambda x: ilu.solve(x))
+            except Exception as e:
+                if self.print_its:
+                    print(f"Warning: ILU preconditioner creation failed: {str(e)}. Proceeding without preconditioning.")
+        
+        # Call the appropriate solver
+        if self.solver_type == 'bicgstab':
+            solution, info = sparse.linalg.bicgstab(
+                matrix, rhs, 
+                x0=initial_guess, 
+                M=M, 
+                atol=self.tolerance, 
+                maxiter=self.max_iterations,
+                callback=callback
+            )
+        elif self.solver_type == 'gmres':
+            solution, info = sparse.linalg.gmres(
+                matrix, rhs, 
+                x0=initial_guess, 
+                M=M, 
+                atol=self.tolerance, 
+                restart=self.restart,
+                maxiter=self.max_iterations,
+                callback=callback
+            )
+        else:
+            raise ValueError(f"Unsupported solver type: {self.solver_type}")
+        
+        # Print convergence information if requested
+        if self.print_its:
+            if info > 0:
+                print(f"{component_name.upper()}-momentum {self.solver_type.upper()} failed to converge after {iteration_count} iterations")
+            else:
+                print(f"{component_name.upper()}-momentum {self.solver_type.upper()} converged in {iteration_count} iterations")
+        
+        return solution, iteration_count
+
     def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
-        Solve the u-momentum equation using BiCGSTAB.
+        Solve the u-momentum equation using the selected iterative solver.
         
         Parameters:
         -----------
@@ -382,32 +471,10 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             nx, ny, is_u=True
         )
 
-        # Set up iteration counter
-        iteration_count = 0
-        
-        def callback(xk):
-            nonlocal iteration_count
-            iteration_count += 1
-
-        # Solve using BiCGSTAB with optional ILU preconditioner
-        if self.use_preconditioner:
-            # Create ILU preconditioner
-            ilu = sparse.linalg.spilu(self.u_matrix)
-            M = sparse.linalg.LinearOperator(self.u_matrix.shape, lambda x: ilu.solve(x))
-            u_flat, info = sparse.linalg.bicgstab(self.u_matrix, self.u_rhs, x0=u_initial_guess.flatten(), 
-                                                  M=M, atol=self.tolerance, maxiter=self.max_iterations,
-                                                  callback=callback)
-        else:
-            u_flat, info = sparse.linalg.bicgstab(self.u_matrix, self.u_rhs, x0=u_initial_guess.flatten(), 
-                                                  atol=self.tolerance, maxiter=self.max_iterations,
-                                                  callback=callback)
-                                                  
-        # Print convergence information if requested
-        if self.print_its:
-            if info > 0:
-                print(f"U-momentum BiCGSTAB failed to converge after {iteration_count} iterations")
-            else:
-                print(f"U-momentum BiCGSTAB converged in {iteration_count} iterations")
+        # Solve the matrix system using the selected solver
+        u_flat, iteration_count = self._solve_matrix_system(
+            self.u_matrix, self.u_rhs, u_initial_guess, 'u'
+        )
 
         # Reshape result back to 2D
         u_star = u_flat.reshape((imax+1, jmax))
@@ -451,7 +518,7 @@ class BiCGSTABMomentumSolver(MomentumSolver):
 
     def solve_v_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
-        Solve the v-momentum equation using BiCGSTAB.
+        Solve the v-momentum equation using the selected iterative solver.
         
         Parameters:
         -----------
@@ -534,32 +601,10 @@ class BiCGSTABMomentumSolver(MomentumSolver):
             nx, ny, is_u=False
         )
         
-        # Set up iteration counter
-        iteration_count = 0
-        
-        def callback(xk):
-            nonlocal iteration_count
-            iteration_count += 1
-        
-        # Solve using BiCGSTAB with optional ILU preconditioner
-        if self.use_preconditioner:
-            # Create ILU preconditioner
-            ilu = sparse.linalg.spilu(self.v_matrix)
-            M = sparse.linalg.LinearOperator(self.v_matrix.shape, lambda x: ilu.solve(x))
-            v_flat, info = sparse.linalg.bicgstab(self.v_matrix, self.v_rhs, x0=v_initial_guess.flatten(), 
-                                                 M=M, atol=self.tolerance, maxiter=self.max_iterations,
-                                                 callback=callback)
-        else:
-            v_flat, info = sparse.linalg.bicgstab(self.v_matrix, self.v_rhs, x0=v_initial_guess.flatten(), 
-                                                 atol=self.tolerance, maxiter=self.max_iterations,
-                                                 callback=callback)
-                                                 
-        # Print convergence information if requested
-        if self.print_its:
-            if info > 0:
-                print(f"V-momentum BiCGSTAB failed to converge after {iteration_count} iterations")
-            else:
-                print(f"V-momentum BiCGSTAB converged in {iteration_count} iterations")
+        # Solve the matrix system using the selected solver
+        v_flat, iteration_count = self._solve_matrix_system(
+            self.v_matrix, self.v_rhs, v_initial_guess, 'v'
+        )
 
         # Reshape result back to 2D
         v_star = v_flat.reshape((imax, jmax+1))

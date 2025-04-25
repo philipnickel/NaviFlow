@@ -254,7 +254,7 @@ class MultiGridSolver(PressureSolver):
             self.p_max_l2 = max(self.p_max_l2, r_norm)
         
         # Calculate relative norm as l2(r)/max(l2(r))
-        p_rel_norm = r_norm #/ self.p_max_l2 if self.p_max_l2 > 0 else 1.0
+        p_rel_norm = r_norm# / np.linalg.norm(b)
         
         # Create the residual information dictionary
         residual_info = {

@@ -18,17 +18,19 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         max_iterations: int = 200,
         solver_type: str = "bicgstab",
         ilu_drop_tol: float = 1e-3,
-        ilu_fill_factor: int = 15
+        ilu_fill_factor: int = 15,
+        idrs_s: int = 4
     ) -> None:
         super().__init__()
         self.tol = float(tolerance)
         self.maxiter = int(max_iterations)
         self.ilu_drop_tol = float(ilu_drop_tol)
         self.ilu_fill_factor = int(ilu_fill_factor)
+        self.idrs_s = int(idrs_s)
         
         solver_type = solver_type.lower()
-        if solver_type not in {"gmres", "bicgstab"}:
-            raise ValueError("solver_type must be 'gmres' or 'bicgstab'")
+        if solver_type not in {"gmres", "bicgstab", "idrs"}:
+            raise ValueError("solver_type must be 'gmres', 'bicgstab', or 'idrs'")
         self.solver_type = solver_type
 
         schemes = {
@@ -169,20 +171,210 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         ilu = spilu(A_sparse, drop_tol=self.ilu_drop_tol, fill_factor=self.ilu_fill_factor)
         return LinearOperator(A_sparse.shape, ilu.solve)
 
+    # ────────────────── IDR(s) solver implementation ──────────────────
+    def _idrs(self, A, b, x0=None, tol=1e-5, s=4, maxiter=None, M=None):
+        """
+        Implementation of the IDR(s) method for solving linear systems.
+        Based on the algorithm by Sonneveld and van Gijzen.
+        
+        Parameters:
+        -----------
+        A : LinearOperator
+            Matrix of the linear system
+        b : ndarray
+            Right-hand side vector
+        x0 : ndarray, optional
+            Initial guess
+        tol : float, optional
+            Convergence tolerance
+        s : int, optional
+            Dimension of the shadow space
+        maxiter : int, optional
+            Maximum number of iterations
+        M : LinearOperator, optional
+            Preconditioner
+            
+        Returns:
+        --------
+        x : ndarray
+            Solution vector
+        info : int
+            Convergence info: 0 for success, >0 for non-convergence (iterations)
+        residual_history : list
+            History of residual norms
+        """
+        # Initialize parameters
+        n = len(b)
+        if maxiter is None:
+            maxiter = n * 10
+            
+        # Apply preconditioner if provided
+        if M is not None:
+            psolve = M.matvec
+        else:
+            psolve = lambda x: x
+            
+        matvec = A.matvec
+        residual_history = []
+        
+        # Create random shadow space
+        np.random.seed(0)  # For reproducibility
+        P = np.random.randn(s, n)
+        
+        # Check for zero rhs
+        bnrm = np.linalg.norm(b)
+        if bnrm == 0.0:
+            return np.zeros(n, dtype=b.dtype), 0, residual_history
+            
+        # Initial solution
+        if x0 is None:
+            x = np.zeros(n, dtype=b.dtype)
+            r = b.copy()
+        else:
+            x = x0.copy()
+            r = b - matvec(x)
+            
+        # Check initial residual
+        rnrm = np.linalg.norm(r)
+        residual_history.append(rnrm)
+            
+        # Relative tolerance
+        tolb = tol * bnrm
+        if rnrm < tolb:
+            return x, 0, residual_history
+            
+        # Initialization for IDR(s)
+        angle = 0.7  # Angle for the plane rotation
+        G = np.zeros((n, s), dtype=b.dtype)  # G-space vectors
+        U = np.zeros((n, s), dtype=b.dtype)  # Preconditioned G-space vectors
+        Ms = np.eye(s, dtype=b.dtype)  # Coefficients for orthogonalization
+        om = 1.0  # Initial omega
+        iter_ = 0
+        
+        # Main iteration loop, build G-spaces
+        while rnrm >= tolb and iter_ < maxiter:
+            # New right-hand side for small system
+            f = P.dot(r)
+            
+            # Process each dimension of the shadow space
+            for k in range(s):
+                # Solve small system and make v orthogonal to P
+                c = np.linalg.solve(Ms[k:s, k:s], f[k:s])
+                v = r - G[:, k:s].dot(c)
+                
+                # Preconditioning
+                v = psolve(v)
+                
+                # Compute new basis vector
+                U[:, k] = v
+                if k > 0:
+                    U[:, k] += U[:, k:s].dot(c) * om
+                
+                # Matrix-vector product
+                G[:, k] = matvec(U[:, k])
+                
+                # Bi-orthogonalize the new basis vectors
+                for i in range(k):
+                    alpha = P[i, :].dot(G[:, k]) / Ms[i, i]
+                    G[:, k] = G[:, k] - alpha * G[:, i]
+                    U[:, k] = U[:, k] - alpha * U[:, i]
+                    
+                # New column of M = P'*G (first k-1 entries are zero)
+                for i in range(k, s):
+                    Ms[i, k] = P[i, :].dot(G[:, k])
+                    
+                # Check for breakdown
+                if Ms[k, k] == 0.0:
+                    return x, -1, residual_history
+                    
+                # Make r orthogonal to g_i, i = 1..k
+                beta = f[k] / Ms[k, k]
+                x = x + beta * U[:, k]
+                r = r - beta * G[:, k]
+                rnrm = np.linalg.norm(r)
+                residual_history.append(rnrm)
+                
+                iter_ += 1
+                if rnrm < tolb or iter_ >= maxiter:
+                    break
+                    
+                # New f = P'*r (first k components are zero)
+                if k < s - 1:
+                    f[k+1:s] = f[k+1:s] - beta * Ms[k+1:s, k]
+                    
+            # Now we have sufficient vectors in G_j to compute residual in G_j+1
+            if rnrm < tolb or iter_ >= maxiter:
+                break
+                
+            # Preconditioning
+            v = psolve(r)
+            
+            # Matrix-vector product
+            t = matvec(v)
+            
+            # Computation of a new omega
+            nr = np.linalg.norm(r)
+            nt = np.linalg.norm(t)
+            ts = t.dot(r)
+            rho = abs(ts / (nt * nr))
+            om = ts / (nt * nt)
+            
+            # Adjust omega if the cosine of the angle is too small
+            if rho < angle:
+                om = om * angle / rho
+                
+            # New vector in G_j+1
+            x = x + om * v
+            r = r - om * t
+            rnrm = np.linalg.norm(r)
+            residual_history.append(rnrm)
+            
+            iter_ += 1
+            
+        # Set return info based on convergence
+        if rnrm >= tolb:
+            info = iter_
+        else:
+            info = 0
+            
+        return x, info, residual_history
+
     # ───────────────────────── Krylov driver ────────────────────────
     def _solve_krylov(self, A: LinearOperator, rhs: np.ndarray, x0: np.ndarray, M: LinearOperator = None):
-        """Driver for GMRES/BiCGSTAB solvers with preconditioning."""
+        """Driver for GMRES/BiCGSTAB/IDR(s) solvers with preconditioning."""
+        residual_history = []
+        
+        def callback(x):
+            # Calculate residual
+            r = np.linalg.norm(A.matvec(x) - rhs)
+            residual_history.append(r)
+            
         if self.solver_type == "gmres":
             sol, info = gmres(
-                A, rhs, M=M, x0=x0, atol=self.tol, restart=60, maxiter=self.maxiter
+                A, rhs, M=M, x0=x0, atol=self.tol, restart=60, maxiter=self.maxiter,
+                callback=callback
             )
-        else:
+            return sol, residual_history
+        elif self.solver_type == "bicgstab":
             sol, info = bicgstab(
-                A, rhs, M=M, x0=x0, atol=self.tol, maxiter=self.maxiter
+                A, rhs, M=M, x0=x0, atol=self.tol, maxiter=self.maxiter,
+                callback=callback
             )
-        if info != 0:
-            raise RuntimeError(f"{self.solver_type.upper()} failed (info={info}).")
-        return sol
+            return sol, residual_history
+        elif self.solver_type == "idrs":
+            # Use the IDR(s) implementation
+            sol, info, residual_history = self._idrs(
+                A, rhs, x0=x0, tol=self.tol, s=self.idrs_s, maxiter=self.maxiter, M=M
+            )
+            
+            if info > 0:
+                print(f"Warning: IDR(s) did not converge after {info} iterations")
+            elif info < 0:
+                raise RuntimeError(f"IDR(s) failed (info={info}).")
+                
+            return sol, residual_history
+        else:
+            raise ValueError(f"Unknown solver type: {self.solver_type}")
 
     # ─────────────────── unrelaxed residual helper ──────────────────
     def _calculate_unrelaxed_residual(self, star_field, a_e, a_w, a_n, a_s, 
@@ -238,8 +430,8 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         src = src_un + (1 - α) * a_p * u_bc
 
         # Create ILU preconditioner
-        #M = self._create_ilu_preconditioner(a_e, a_w, a_n, a_s, a_p, nx, ny, is_u=True)
-        M = None
+        M = self._create_ilu_preconditioner(a_e, a_w, a_n, a_s, a_p, nx, ny, is_u=True)
+        
         # Linear operator for relaxed system
         A = LinearOperator(
             ((nx + 1) * ny, (nx + 1) * ny),
@@ -248,7 +440,8 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         )
 
         # Solve with preconditioning
-        u_star = self._solve_krylov(A, src.ravel(), x0=u.ravel(), M=M).reshape((nx + 1, ny))
+        u_star, residual_history = self._solve_krylov(A, src.ravel(), x0=u.ravel(), M=M)
+        u_star = u_star.reshape((nx + 1, ny))
         u_star, _ = bc.apply_velocity_boundary_conditions(u_star, v_bc, nx + 1, ny)
 
         # Calculate d_u coefficients
@@ -259,8 +452,7 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         r_un, norm_un = self._calculate_unrelaxed_residual(
             u_star, a_e, a_w, a_n, a_s, a_p_un, src_un, nx, ny, True
         )
-        src_un_interior = src_un[1:nx, 1:ny-1]
-        rel_norm = norm_un #/ (np.linalg.norm(src_un_interior) + 1e-16)
+        rel_norm = norm_un
 
         if not hasattr(self, 'u_max_l2'):
             self.u_max_l2 = norm_un
@@ -270,7 +462,13 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         res_info = {
             "rel_norm": rel_norm,
             "field": r_un,
+            "iterations": len(residual_history),
+            "solver_type": self.solver_type
         }
+        
+        if self.solver_type == "idrs":
+            res_info["idrs_s"] = self.idrs_s
+            
         return (u_star, d_u, res_info) if return_dict else (u_star, d_u, rel_norm)
 
     # ─────────────────────────── v-momentum ─────────────────────────
@@ -304,8 +502,8 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         src = src_un + (1 - α) * a_p * v_bc
 
         # Create ILU preconditioner
-        #M = self._create_ilu_preconditioner(a_e, a_w, a_n, a_s, a_p, nx, ny, is_u=False)
-        M = None
+        M = self._create_ilu_preconditioner(a_e, a_w, a_n, a_s, a_p, nx, ny, is_u=False)
+        
         # Linear operator for relaxed system
         A = LinearOperator(
             (nx * (ny + 1), nx * (ny + 1)),
@@ -314,7 +512,8 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         )
 
         # Solve with preconditioning
-        v_star = self._solve_krylov(A, src.ravel(), x0=v.ravel(), M=M).reshape((nx, ny + 1))
+        v_star, residual_history = self._solve_krylov(A, src.ravel(), x0=v.ravel(), M=M)
+        v_star = v_star.reshape((nx, ny + 1))
         _, v_star = bc.apply_velocity_boundary_conditions(u_bc, v_star, nx + 1, ny)
 
         # Calculate d_v coefficients
@@ -325,8 +524,7 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         r_un, norm_un = self._calculate_unrelaxed_residual(
             v_star, a_e, a_w, a_n, a_s, a_p_un, src_un, nx, ny, False
         )
-        src_un_interior = src_un[1:nx-1, 1:ny]
-        rel_norm = norm_un #/ (np.linalg.norm(src_un_interior) + 1e-16)
+        rel_norm = norm_un
 
         if not hasattr(self, 'v_max_l2'):
             self.v_max_l2 = norm_un
@@ -336,5 +534,11 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         res_info = {
             "rel_norm": rel_norm,
             "field": r_un,
+            "iterations": len(residual_history),
+            "solver_type": self.solver_type
         }
+        
+        if self.solver_type == "idrs":
+            res_info["idrs_s"] = self.idrs_s
+            
         return (v_star, d_v, res_info) if return_dict else (v_star, d_v, rel_norm)
