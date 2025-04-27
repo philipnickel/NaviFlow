@@ -4,7 +4,7 @@ Class to store and process simulation results.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from .visualization import plot_velocity_field, plot_combined_results_matrix
+from .visualization import plot_velocity_field, plot_combined_results_matrix, plot_combined_results_unstructured
 from .validation import BenchmarkData
 from .validation.cavity_flow import calculate_infinity_norm_error, calculate_l2_norm_error
 
@@ -124,30 +124,62 @@ class SimulationResult:
         show : bool, optional
             Whether to display the plot
         """
-        # Get mesh dimensions and create coordinates
-        nx, ny = self.mesh.get_dimensions()
-        dx, dy = self.mesh.get_cell_sizes()
-        
-        # Create x and y coordinates
-        x = np.linspace(dx/2, 1-dx/2, nx)
-        y = np.linspace(dy/2, 1-dy/2, ny)
-        
-        # Use the stored Reynolds number
-        Re = self.reynolds
-        
-        # Extract Reynolds number from title if not available
-        if Re is None and title is not None:
-            import re
-            match = re.search(r'Re=(\d+)', title)
-            if match:
-                Re = int(match.group(1))
-                print(f"Using Reynolds number extracted from title: {Re}")
-        
-        # Call the visualization function with all necessary parameters
-        plot_combined_results_matrix(
-            self.u, self.v, self.p, x, y, 
-            title=title, filename=filename, show=show, Re=Re
-        )
+        # Check if this is a structured or unstructured mesh based on the shape of u
+        if len(self.u.shape) == 2:  # Structured mesh (2D array)
+            # Get mesh dimensions and create coordinates
+            nx, ny = self.mesh.get_dimensions()
+            dx, dy = self.mesh.get_cell_sizes()
+            
+            # Create x and y coordinates
+            x = np.linspace(dx/2, 1-dx/2, nx)
+            y = np.linspace(dy/2, 1-dy/2, ny)
+            
+            # Use the stored Reynolds number
+            Re = self.reynolds
+            
+            # Extract Reynolds number from title if not available
+            if Re is None and title is not None:
+                import re
+                match = re.search(r'Re=(\d+)', title)
+                if match:
+                    Re = int(match.group(1))
+                    print(f"Using Reynolds number extracted from title: {Re}")
+            
+            # Call the visualization function with all necessary parameters
+            plot_combined_results_matrix(
+                self.u, self.v, self.p, x, y, 
+                title=title, filename=filename, show=show, Re=Re
+            )
+        else:  # Unstructured mesh (1D array)
+            # For unstructured meshes, we need the cell centers
+            if hasattr(self.mesh, 'mesh'):  # If using MeshAdapter
+                cell_centers = self.mesh.mesh.get_cell_centers()
+            else:  # Direct use of the mesh
+                cell_centers = self.mesh.get_cell_centers()
+            
+            # Extract x and y coordinates of cell centers
+            x = cell_centers[:, 0]
+            y = cell_centers[:, 1]
+            
+            # Use the stored Reynolds number
+            Re = self.reynolds
+            
+            # Extract Reynolds number from title if not available
+            if Re is None and title is not None:
+                import re
+                match = re.search(r'Re=(\d+)', title)
+                if match:
+                    Re = int(match.group(1))
+                    print(f"Using Reynolds number extracted from title: {Re}")
+            
+            # Import visualization for unstructured meshes
+            from .visualization import plot_combined_results_unstructured
+            
+            # Call the visualization function for unstructured meshes
+            plot_combined_results_unstructured(
+                self.u, self.v, self.p, x, y,
+                title=title, filename=filename, show=show, Re=Re
+            )
     
     def get_max_divergence(self):
         """
@@ -163,22 +195,53 @@ class SimulationResult:
             Maximum absolute divergence
         """
         if self.divergence is None:
-            from .validation.cavity_flow import calculate_divergence
-            dx, dy = self.mesh.get_cell_sizes()
-            self.divergence = calculate_divergence(self.u, self.v, dx, dy)
+            from .validation.cavity_flow import calculate_divergence, calculate_divergence_unstructured
+            
+            # Check if this is a structured or unstructured mesh based on the shape of u
+            if len(self.u.shape) == 2:  # Structured mesh (2D array)
+                # Use structured mesh divergence calculation
+                dx, dy = self.mesh.get_cell_sizes()
+                self.divergence = calculate_divergence(self.u, self.v, dx, dy)
+                
+                # Get dimensions
+                nx, ny = self.mesh.get_dimensions()
+                
+                # Create a mask to exclude boundary cells (one cell in from each boundary)
+                mask = np.ones_like(self.divergence, dtype=bool)
+                mask[0, :] = False  # Left boundary
+                mask[-1, :] = False  # Right boundary
+                mask[:, 0] = False  # Bottom boundary
+                mask[:, -1] = False  # Top boundary
+                
+                # Calculate maximum divergence in the interior
+                interior_divergence = self.divergence[mask]
+                
+            else:  # Unstructured mesh (1D array)
+                # Use unstructured mesh divergence calculation
+                self.divergence = calculate_divergence_unstructured(self.u, self.v, self.mesh)
+                
+                # For unstructured meshes, we'll exclude boundary cells by using a simple heuristic
+                # (cells connected to boundary faces)
+                
+                # Get mesh information (either directly or through adapter)
+                unstructured_mesh = self.mesh.mesh if hasattr(self.mesh, 'mesh') else self.mesh
+                owner_cells, neighbor_cells = unstructured_mesh.get_owner_neighbor()
+                
+                # Identify boundary cells (cells that have a face with no neighbor)
+                boundary_cells = set()
+                for face_idx, neighbor in enumerate(neighbor_cells):
+                    if neighbor < 0:  # Boundary face
+                        boundary_cells.add(owner_cells[face_idx])
+                
+                # Create a mask to exclude boundary cells
+                mask = np.ones_like(self.divergence, dtype=bool)
+                for cell_idx in boundary_cells:
+                    mask[cell_idx] = False
+                
+                # Calculate maximum divergence in the interior
+                interior_divergence = self.divergence[mask]
         
-        # Get dimensions
-        nx, ny = self.mesh.get_dimensions()
-        
-        # Create a mask to exclude boundary cells (one cell in from each boundary)
-        mask = np.ones_like(self.divergence, dtype=bool)
-        mask[0, :] = False  # Left boundary
-        mask[-1, :] = False  # Right boundary
-        mask[:, 0] = False  # Bottom boundary
-        mask[:, -1] = False  # Top boundary
-        
-        # Calculate maximum divergence in the interior
-        interior_divergence = self.divergence[mask]
+        # Calculate maximum divergence
         max_div = np.max(np.abs(interior_divergence))
         
         return max_div

@@ -175,6 +175,77 @@ def calculate_divergence(u, v, dx, dy, use_numba=False):
     return divergence
 
 
+def calculate_divergence_unstructured(u, v, mesh):
+    """
+    Calculate the divergence of the velocity field for unstructured meshes.
+    
+    For unstructured meshes, the divergence is calculated using the Gauss divergence theorem.
+    For each cell, we compute the outward flux through all faces and normalize by the cell volume.
+    
+    Parameters:
+    -----------
+    u, v : ndarray
+        Velocity components at cell centers (1D arrays)
+    mesh : UnstructuredMesh or MeshAdapter containing an UnstructuredMesh
+        The computational mesh
+        
+    Returns:
+    --------
+    ndarray
+        Divergence at each cell center (1D array)
+    """
+    # If it's a MeshAdapter, get the underlying mesh
+    unstructured_mesh = mesh.mesh if hasattr(mesh, 'mesh') else mesh
+    
+    # Get mesh information
+    n_cells = unstructured_mesh.n_cells
+    owner_cells, neighbor_cells = unstructured_mesh.get_owner_neighbor()
+    face_areas = unstructured_mesh.get_face_areas()
+    face_normals = unstructured_mesh.get_face_normals()
+    cell_volumes = unstructured_mesh.get_cell_volumes()
+    
+    # Initialize divergence array
+    divergence = np.zeros(n_cells)
+    
+    # For each face, compute the contribution to divergence
+    for face_idx in range(len(owner_cells)):
+        owner = owner_cells[face_idx]
+        neighbor = neighbor_cells[face_idx]
+        
+        # Face normal and area
+        normal = face_normals[face_idx]
+        area = face_areas[face_idx]
+        
+        # Velocity at face (simple interpolation)
+        if neighbor >= 0:  # Internal face
+            u_face = 0.5 * (u[owner] + u[neighbor])
+            v_face = 0.5 * (v[owner] + v[neighbor])
+        else:  # Boundary face - use cell center value for now
+            u_face = u[owner]
+            v_face = v[owner]
+        
+        # Compute face flux (dot product of velocity and area-weighted normal)
+        flux = (u_face * normal[0] + v_face * normal[1]) * area
+        
+        # Add contribution to owner cell (outgoing flux is positive divergence)
+        divergence[owner] += flux
+        
+        # Add contribution to neighbor cell (incoming flux is negative divergence)
+        if neighbor >= 0:
+            divergence[neighbor] -= flux
+    
+    # Normalize by cell volume to get divergence
+    # Handle possible zero volumes to avoid division by zero
+    for i in range(n_cells):
+        if cell_volumes[i] > 1e-15:  # Avoid division by very small values
+            divergence[i] /= cell_volumes[i]
+        else:
+            # For cells with zero or very small volume, set divergence to 0
+            divergence[i] = 0.0
+    
+    return divergence
+
+
 def calculate_infinity_norm_error(u, v, mesh, reynolds):
     """
     Calculate the infinity norm error against Ghia data.

@@ -6,8 +6,8 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from ..pressure_solver.base_pressure_solver import PressureSolver
-from ..pressure_solver.helpers.coeff_matrix import get_coeff_mat
-from ..pressure_solver.helpers.rhs_construction import get_rhs
+from ..pressure_solver.helpers.coeff_matrix import get_coeff_mat, get_coeff_mat_structured
+from ..pressure_solver.helpers.rhs_construction import get_rhs, get_rhs_structured
 from ..pressure_solver.helpers.pressure_corrections import pres_correct
 
 class DirectPressureSolver(PressureSolver):
@@ -44,8 +44,8 @@ class DirectPressureSolver(PressureSolver):
         
         Parameters:
         -----------
-        mesh : StructuredMesh
-            The computational mesh
+        mesh : Mesh
+            The computational mesh (structured or unstructured)
         u_star, v_star : ndarray
             Intermediate velocity fields
         d_u, d_v : ndarray
@@ -71,46 +71,83 @@ class DirectPressureSolver(PressureSolver):
         self.p = p_star
         self.bc_manager = getattr(mesh, 'bc_manager', None)
         
-        nx, ny = mesh.get_dimensions()
-        dx, dy = mesh.get_cell_sizes()
-        rho = 1.0  # This should come from fluid properties
-        
-        # Get right-hand side of pressure correction equation
-        rhs = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
+        # Fluid density - should come from a fluid properties object
+        rho = 1.0
 
-        # Get coefficient matrix with boundary conditions already integrated
-        A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
-        
-        # Solve the system
-        p_prime_flat = spsolve(A, rhs)
-        
-        # Apply zero gradient boundary conditions to the direct solution
-        # Calculate residual for tracking
-        Ax = A.dot(p_prime_flat)
-        r = rhs - Ax # This is the residual field (1D)
-        
-        # Reshape residual to 2D for interior point extraction
-        r_field_full = r.reshape((nx, ny), order='F')  # Reshape residual field 
-        
-        
-        # Calculate L2 norm on interior points only - use more stable calculation
-        p_current_l2 = np.linalg.norm(r_field_full)
-        
-        # Keep track of the maximum L2 norm for relative scaling
-        if not hasattr(self, 'p_max_l2'):
-            self.p_max_l2 = p_current_l2
+        # Check if we're working with a structured or unstructured mesh
+        if hasattr(mesh, 'get_dimensions') and hasattr(mesh, 'get_cell_sizes'):
+            # Handle structured mesh using the legacy approach
+            nx, ny = mesh.get_dimensions()
+            dx, dy = mesh.get_cell_sizes()
+            
+            # Get right-hand side of pressure correction equation
+            rhs = get_rhs_structured(nx, ny, dx, dy, rho, u_star, v_star)
+
+            # Get coefficient matrix with boundary conditions already integrated
+            A = get_coeff_mat_structured(nx, ny, dx, dy, rho, d_u, d_v)
+            
+            # Solve the system
+            p_prime_flat = spsolve(A, rhs)
+            
+            # Apply zero gradient boundary conditions to the direct solution
+            # Calculate residual for tracking
+            Ax = A.dot(p_prime_flat)
+            r = rhs - Ax # This is the residual field (1D)
+            
+            # Reshape residual to 2D for interior point extraction
+            r_field_full = r.reshape((nx, ny), order='F')
+            
+            # Calculate L2 norm on interior points only - use more stable calculation
+            p_current_l2 = np.linalg.norm(r_field_full)
+            
+            # Keep track of the maximum L2 norm for relative scaling
+            if not hasattr(self, 'p_max_l2'):
+                self.p_max_l2 = p_current_l2
+            else:
+                self.p_max_l2 = max(self.p_max_l2, p_current_l2)
+            
+            # Calculate relative norm as l2(r)/l2(b) 
+            p_rel_norm = p_current_l2 / np.linalg.norm(rhs)
+            
+            # Track history of normalized residual
+            self.residual_history.append(p_rel_norm)
+            
+            # Reshape solution to 2D
+            p_prime = p_prime_flat.reshape((nx, ny), order='F')
+            
         else:
-            self.p_max_l2 = max(self.p_max_l2, p_current_l2)
+            # Handle mesh-agnostic approach using the new topology-based functions
+            # Get right-hand side of pressure correction equation
+            rhs = get_rhs(mesh, rho, u_star, v_star)
 
-        
-        # Calculate relative norm as l2(r)/l2(b) 
-        p_rel_norm = p_current_l2 / np.linalg.norm(rhs)
-        
-        # Track history of normalized residual
-        self.residual_history.append(p_rel_norm)
-        
-        # Reshape solution to 2D
-        p_prime = p_prime_flat.reshape((nx, ny), order='F')
+            # Get coefficient matrix with boundary conditions already integrated
+            A = get_coeff_mat(mesh, rho, d_u, d_v)
+            
+            # Solve the system
+            p_prime_flat = spsolve(A, rhs)
+            
+            # Calculate residual for tracking
+            Ax = A.dot(p_prime_flat)
+            r = rhs - Ax # This is the residual field (1D)
+            
+            # Calculate L2 norm
+            p_current_l2 = np.linalg.norm(r)
+            
+            # Keep track of the maximum L2 norm for relative scaling
+            if not hasattr(self, 'p_max_l2'):
+                self.p_max_l2 = p_current_l2
+            else:
+                self.p_max_l2 = max(self.p_max_l2, p_current_l2)
+            
+            # Calculate relative norm as l2(r)/l2(b) 
+            p_rel_norm = p_current_l2 / np.linalg.norm(rhs)
+            
+            # Track history of normalized residual
+            self.residual_history.append(p_rel_norm)
+            
+            # For unstructured meshes, solution is already in the right format
+            p_prime = p_prime_flat
+            r_field_full = r
         
         # Create the minimal residual information dictionary
         residual_info = {

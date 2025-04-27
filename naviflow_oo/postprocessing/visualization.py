@@ -11,6 +11,7 @@ import inspect
 import scienceplots
 from scipy.interpolate import interp1d
 from .validation import BenchmarkData, get_closest_ghia_data
+import matplotlib.tri as tri
 
 
 plt.style.use('science')
@@ -488,24 +489,22 @@ def plot_combined_results_matrix(u, v, p, x, y, title=None, filename=None, show=
         
     return fig
 
-def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, mesh, title=None, filename=None, show=True, output_dir=None,
-                      u_rel_norms=None, v_rel_norms=None, p_rel_norms=None, history_filename=None):
+def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, mesh, 
+                        title=None, filename=None, show=True, output_dir=None,
+                        u_rel_norms=None, v_rel_norms=None, p_rel_norms=None, 
+                        history_filename=None):
     """
-    Plot final absolute algebraic residuals for pressure, u-momentum, and v-momentum fields on their native grids.
-    Shows both linear scale (top row) and logarithmic scale (bottom row).
-    
-    If residual history arrays are provided, also generates a separate plot showing the history of
-    relative residual norms defined as l2(r)/max(l2(r)).
+    Plot the final residual fields from the simulation.
     
     Parameters:
     -----------
     u_residual_field : ndarray
-        Final algebraic u-momentum residual field (staggered grid)
+        u-momentum residual field
     v_residual_field : ndarray
-        Final algebraic v-momentum residual field (staggered grid)
+        v-momentum residual field
     p_residual_field : ndarray
-        Final algebraic pressure residual field (cell-centered)
-    mesh : StructuredMesh
+        Pressure residual field
+    mesh : StructuredMesh or UnstructuredMesh
         The computational mesh
     title : str, optional
         Plot title
@@ -514,185 +513,291 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
     show : bool, optional
         Whether to display the plot
     output_dir : str, optional
-        Directory where to save the output. If None, uses 'results' in the calling script's directory.
-    u_rel_norms : list, optional
-        History of relative u-velocity residual norms (l2(r)/max(l2(r)))
-    v_rel_norms : list, optional
-        History of relative v-velocity residual norms (l2(r)/max(l2(r)))
-    p_rel_norms : list, optional
-        History of relative pressure/continuity residual norms (l2(r)/max(l2(r)))
+        Directory where to save the output
+    u_rel_norms, v_rel_norms, p_rel_norms : list, optional
+        Residual history data for plotting
     history_filename : str, optional
-        If provided, saves the residual history plot to this filename
+        If provided, saves the history plot to this filename
+    
+    Returns:
+    --------
+    tuple
+        (residual_fig, history_fig) - The generated figures
     """
-    if u_residual_field is None or v_residual_field is None or p_residual_field is None:
-        print("Warning: One or more final residual fields are missing. Skipping plot_final_residuals.")
-        return None
+    # Create figure for residual fields
+    is_structured = (len(u_residual_field.shape) == 2)
+    
+    if is_structured:  # Structured mesh residuals (2D arrays)
+        # Create figure for residual fields
+        fig_residuals, axs = plt.subplots(2, 2, figsize=(12, 10))
         
-    final_p_residual = np.abs(p_residual_field)
-    final_u_residual = np.abs(u_residual_field)
-    final_v_residual = np.abs(v_residual_field)
-    
-    nx, ny = mesh.get_dimensions()
-    dx, dy = mesh.get_cell_sizes()
-    
-    # --- Slice data and coordinates to get interior points only ---
-    # Pressure residuals (cell centers: 1 to nx-2, 1 to ny-2)
-    p_res_interior = final_p_residual[1:nx-1, 1:ny-1]
-    x_p_interior = np.linspace(dx/2, mesh.length - dx/2, nx)[1:nx-1] # Interior cell centers
-    y_p_interior = np.linspace(dy/2, mesh.height - dy/2, ny)[1:ny-1] # Interior cell centers
-
-    # U-momentum residuals (u-faces: i=1 to nx-1, cell centers j=1 to ny-2)
-    # Note: u_residual_field has shape (nx+1, ny)
-    u_res_interior = final_u_residual[1:nx, 1:ny-1] 
-    # Coordinates for u-faces (x) and corresponding cell centers (y)
-    x_u_interior = np.linspace(dx, mesh.length - dx, nx-1) # Interior u-face x-locations 
-    y_u_interior = np.linspace(dy*1.5, mesh.height - dy*1.5, ny-2) # y-centers for rows 1 to ny-2
-
-    # V-momentum residuals (cell centers i=1 to nx-2, v-faces j=1 to ny-1)
-    # Note: v_residual_field has shape (nx, ny+1)
-    v_res_interior = final_v_residual[1:nx-1, 1:ny]
-    # Coordinates for cell centers (x) and corresponding v-faces (y)
-    x_v_interior = np.linspace(dx*1.5, mesh.length - dx*1.5, nx-2) # x-centers for cols 1 to nx-2
-    y_v_interior = np.linspace(dy, mesh.height - dy, ny-1) # Interior v-face y-locations
-    # --- End slicing ---
-
-    # Create a figure with 2x3 subplots (linear scale top row, log scale bottom row)
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-    
-    # Internal helper function to plot a field on its native grid
-    def plot_residual_field_native(ax, data, x_coords, y_coords, field_title, log_scale=False):
-        label = '|Residual|' if not log_scale else 'log10(|Residual|)'
-        plot_data = np.abs(data)
-        
-        # Apply log transformation if log_scale is True
-        if log_scale:
-            # Add small value to avoid log(0)
-            plot_data = np.log10(plot_data + 1e-20)
-
-        M, N = data.shape
-        nx, ny = mesh.get_dimensions() # Get mesh dimensions here
+        # Get mesh dimensions
+        nx, ny = mesh.get_dimensions()
         dx, dy = mesh.get_cell_sizes()
         
-        valid_plot = True
-        if not (x_coords.size == M and y_coords.size == N):
-            print(f"Warning: Coordinate/Data mismatch for {field_title}.")
-            print(f"  Data shape: ({M}, {N})")
-            print(f"  X coords shape: {x_coords.shape}")
-            print(f"  Y coords shape: {y_coords.shape}")
-            valid_plot = False
-
-        # Plot using pcolormesh if coordinates and data are valid
-        if valid_plot:            
-            vmin = np.min(plot_data) if np.isfinite(np.min(plot_data)) else 0
-            vmax = np.max(plot_data) if np.isfinite(np.max(plot_data)) else 1
-            if vmin == vmax:
-                vmin = 0
-                vmax = vmin + 1e-6 if vmin > 0 else 1e-6
+        # Create x and y coordinates
+        x = np.linspace(dx/2, 1-dx/2, nx)
+        y = np.linspace(dy/2, 1-dy/2, ny)
+        X, Y = np.meshgrid(x, y, indexing='ij')
+        
+        # Interior points only (exclude boundary cells)
+        u_res_interior = u_residual_field[1:nx-1, 1:ny-1]
+        v_res_interior = v_residual_field[1:nx-1, 1:ny-1]
+        p_res_interior = p_residual_field[1:nx-1, 1:ny-1]
+        X_interior = X[1:nx-1, 1:ny-1]
+        Y_interior = Y[1:nx-1, 1:ny-1]
+        
+        # Calculate combined residual field
+        combined_res = np.sqrt(u_res_interior**2 + v_res_interior**2 + p_res_interior**2)
+        
+        # Define a helper function for plotting each residual field
+        def plot_residual_field(ax, data, X, Y, field_title, log_scale=False):
+            if log_scale:
+                # Add small value to avoid log(0)
+                data_log = np.log10(data + 1e-16)
                 
-            # Use shading='nearest' - expects coordinates to be centers matching data dimensions
-            X, Y = np.meshgrid(x_coords, y_coords, indexing='ij')
-            
-            # Check if meshgrid dimensions match data dimensions
-            if X.shape == data.shape:
-                # Use shading='nearest'. Data needs transposing for correct orientation if meshgrid is ij indexed.
-                img = ax.pcolormesh(X, Y, plot_data, cmap='coolwarm', shading='nearest', vmin=vmin, vmax=vmax)
-                plt.colorbar(img, ax=ax, label=label)
+                # Check if all values are the same (would cause warning)
+                if np.max(data_log) == np.min(data_log):
+                    # Add small random variation to prevent warning
+                    np.random.seed(0)  # For reproducibility
+                    variation = np.random.rand(*data_log.shape) * 1e-6
+                    data_log = data_log + variation
                 
-                # Calculate and display L2 norm
-                data_l2 = np.linalg.norm(np.abs(data), ord=2)
-                scale_type = "Log10 " if log_scale else ""
-                ax.set_title(f"{field_title}\n{scale_type}Absolute Residual (L2: {data_l2:.2e})")
-                
-                ax.set_aspect('equal', adjustable='box')
-                ax.set_xlabel('x (Interior)')
-                ax.set_ylabel('y (Interior)')
-                # Set limits slightly outside the centers for visibility
-                # Adjust limits to only show interior region
-                ax.set_xlim(dx, mesh.length - dx)
-                ax.set_ylim(dy, mesh.height - dy)
+                im = ax.pcolormesh(X, Y, data_log, cmap='viridis', shading='auto')
+                plt.colorbar(im, ax=ax, label=f'log10({field_title})')
             else:
-                ax.text(0.5, 0.5, f"Meshgrid/Data mismatch for {field_title}\nData: {data.shape}\nMeshgrid: {X.shape}", 
-                         ha='center', va='center', transform=ax.transAxes)
-                ax.set_title(field_title)
-        else:
-            ax.text(0.5, 0.5, f"Plotting failed for {field_title}", 
-                     ha='center', va='center', transform=ax.transAxes)
+                im = ax.pcolormesh(X, Y, data, cmap='viridis', shading='auto')
+                plt.colorbar(im, ax=ax, label=field_title)
+                
             ax.set_title(field_title)
-
-    # Call the plotting function for absolute residuals (top row)
-    plot_residual_field_native(axes[0, 0], p_res_interior, x_p_interior, y_p_interior, "Pressure Residual")
-    plot_residual_field_native(axes[0, 1], u_res_interior, x_u_interior, y_u_interior, "U-Momentum Residual")
-    plot_residual_field_native(axes[0, 2], v_res_interior, x_v_interior, y_v_interior, "V-Momentum Residual")
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_aspect('equal')
+        
+        # Plot each residual field
+        plot_residual_field(axs[0, 0], u_res_interior, X_interior, Y_interior, 'u-momentum residual', log_scale=True)
+        plot_residual_field(axs[0, 1], v_res_interior, X_interior, Y_interior, 'v-momentum residual', log_scale=True)
+        plot_residual_field(axs[1, 0], p_res_interior, X_interior, Y_interior, 'Pressure residual', log_scale=True)
+        plot_residual_field(axs[1, 1], combined_res, X_interior, Y_interior, 'Combined residual', log_scale=True)
     
-    # Call the plotting function for log of absolute residuals (bottom row)
-    plot_residual_field_native(axes[1, 0], p_res_interior, x_p_interior, y_p_interior, "Pressure Residual", log_scale=True)
-    plot_residual_field_native(axes[1, 1], u_res_interior, x_u_interior, y_u_interior, "U-Momentum Residual", log_scale=True)
-    plot_residual_field_native(axes[1, 2], v_res_interior, x_v_interior, y_v_interior, "V-Momentum Residual", log_scale=True)
+    else:  # Unstructured mesh residuals (1D arrays)
+        # Create figure for residual fields
+        fig_residuals, axs = plt.subplots(2, 2, figsize=(12, 10))
+        
+        # Get cell centers for plotting
+        if hasattr(mesh, 'mesh'):  # If using MeshAdapter
+            centers = mesh.mesh.get_cell_centers()
+        else:  # Direct use of the mesh
+            centers = mesh.get_cell_centers()
+        
+        # Extract x and y coordinates
+        x = centers[:, 0]
+        y = centers[:, 1]
+        
+        # Create a triangulation of the cell centers
+        triang = tri.Triangulation(x, y)
+        
+        # Exclude boundary cells for better visualization
+        # For unstructured meshes, we'll use a simple heuristic
+        if hasattr(mesh, 'mesh'):  # If using MeshAdapter
+            unstructured_mesh = mesh.mesh
+        else:  # Direct use of the mesh
+            unstructured_mesh = mesh
+            
+        owner_cells, neighbor_cells = unstructured_mesh.get_owner_neighbor()
+        
+        # Identify boundary cells (cells that have a face with no neighbor)
+        boundary_cells = set()
+        for face_idx, neighbor in enumerate(neighbor_cells):
+            if neighbor < 0:  # Boundary face
+                boundary_cells.add(owner_cells[face_idx])
+        
+        # Create a mask for interior cells
+        interior_mask = np.ones(len(x), dtype=bool)
+        for cell_idx in boundary_cells:
+            interior_mask[cell_idx] = False
+        
+        # Calculate combined residual field
+        combined_res = np.sqrt(u_residual_field**2 + v_residual_field**2 + p_residual_field**2)
+        
+        # Define a helper function for plotting each residual field
+        def plot_residual_field_unstructured(ax, data, triang, field_title, log_scale=False):
+            if log_scale:
+                # Add small value to avoid log(0)
+                data_log = np.log10(data + 1e-16)
+                
+                # Check if all values are the same (would cause warning)
+                if np.max(data_log) == np.min(data_log):
+                    # Add small random variation to prevent warning
+                    np.random.seed(0)  # For reproducibility
+                    variation = np.random.rand(len(data_log)) * 1e-6
+                    data_log = data_log + variation
+                
+                im = ax.tripcolor(triang, data_log, cmap='viridis', shading='gouraud')
+                plt.colorbar(im, ax=ax, label=f'log10({field_title})')
+            else:
+                im = ax.tripcolor(triang, data, cmap='viridis', shading='gouraud')
+                plt.colorbar(im, ax=ax, label=field_title)
+                
+            ax.set_title(field_title)
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_aspect('equal')
+        
+        # Plot each residual field
+        plot_residual_field_unstructured(axs[0, 0], u_residual_field, triang, 'u-momentum residual', log_scale=True)
+        plot_residual_field_unstructured(axs[0, 1], v_residual_field, triang, 'v-momentum residual', log_scale=True)
+        plot_residual_field_unstructured(axs[1, 0], p_residual_field, triang, 'Pressure residual', log_scale=True)
+        plot_residual_field_unstructured(axs[1, 1], combined_res, triang, 'Combined residual', log_scale=True)
     
+    # Add main title
     if title:
-        fig.suptitle(title + " (Absolute Residuals, Interior Points)", fontsize=16)
-        fig.subplots_adjust(top=0.92, hspace=0.3) # Adjust top spacing for suptitle and between rows
+        plt.suptitle(title, fontsize=16)
     
-    # Set row labels
-    axes[0, 0].annotate('Linear Scale', xy=(0, 0.5), xytext=(-axes[0, 0].yaxis.labelpad - 15, 0),
-                       xycoords='axes fraction', textcoords='offset points',
-                       ha='right', va='center', rotation=90, fontsize=12, fontweight='bold')
-    axes[1, 0].annotate('Log10 Scale', xy=(0, 0.5), xytext=(-axes[1, 0].yaxis.labelpad - 15, 0),
-                       xycoords='axes fraction', textcoords='offset points',
-                       ha='right', va='center', rotation=90, fontsize=12, fontweight='bold')
+    plt.tight_layout(rect=[0, 0, 1, 0.95])  # Leave room for the suptitle
     
-    plt.tight_layout(rect=[0, 0, 1, 0.92]) # Adjust layout rect to prevent suptitle overlap
-    
+    # Save figure if filename is provided
     if filename:
+        # Ensure output directory exists and get full path
         full_path = _ensure_output_directory(filename, output_dir)
-        plt.savefig(full_path, dpi=300, bbox_inches='tight')
-        print(f"Final residuals plot saved to {full_path}")
+        plt.savefig(full_path, dpi=150, bbox_inches='tight')
     
+    # Create history plot if residual history is provided
+    fig_history = None
+    if any(x is not None for x in [u_rel_norms, v_rel_norms, p_rel_norms]):
+        fig_history = plt.figure(figsize=(10, 6))
+        ax = plt.subplot(111)
+        
+        if u_rel_norms is not None:
+            ax.semilogy(range(1, len(u_rel_norms)+1), u_rel_norms, 'r-', linewidth=2, label='u-momentum')
+        
+        if v_rel_norms is not None:
+            ax.semilogy(range(1, len(v_rel_norms)+1), v_rel_norms, 'g-', linewidth=2, label='v-momentum')
+        
+        if p_rel_norms is not None:
+            ax.semilogy(range(1, len(p_rel_norms)+1), p_rel_norms, 'b-', linewidth=2, label='pressure')
+        
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel('Relative L2 Norm')
+        ax.set_title('Residual History')
+        ax.grid(True, which='both', linestyle='--', alpha=0.6)
+        ax.legend()
+        
+        # Save history figure if filename is provided
+        if history_filename:
+            # Ensure output directory exists and get full path
+            history_path = _ensure_output_directory(history_filename, output_dir)
+            plt.savefig(history_path, dpi=150, bbox_inches='tight')
+    
+    # Show plots if requested
+    if show:
+        plt.show()
+    else:
+        plt.close(fig_residuals)
+        if fig_history:
+            plt.close(fig_history)
+    
+    return (fig_residuals, fig_history)
+
+def plot_combined_results_unstructured(u, v, p, x, y, title=None, filename=None, show=True, Re=None,
+                                      output_dir=None, figsize=(15, 9)):
+    """
+    Plot combined results (velocity, pressure, streamlines) for unstructured mesh data.
+    
+    Parameters:
+    -----------
+    u : ndarray, shape (n_cells,)
+        x-velocity component at cell centers
+    v : ndarray, shape (n_cells,)
+        y-velocity component at cell centers
+    p : ndarray, shape (n_cells,)
+        Pressure field at cell centers
+    x : ndarray, shape (n_cells,)
+        x-coordinates of cell centers
+    y : ndarray, shape (n_cells,)
+        y-coordinates of cell centers
+    title : str, optional
+        Plot title
+    filename : str, optional
+        If provided, saves the figure to this filename
+    show : bool, optional
+        Whether to display the plot
+    Re : int, optional
+        Reynolds number for benchmark comparison
+    output_dir : str, optional
+        Directory where to save the output
+    figsize : tuple, optional
+        Figure size (width, height) in inches
+    
+    Returns:
+    --------
+    matplotlib.figure.Figure
+        The generated figure
+    """
+    # Create a Delaunay triangulation of the cell centers
+    triang = tri.Triangulation(x, y)
+    
+    # Calculate velocity magnitude
+    u_mag = np.sqrt(u**2 + v**2)
+    
+    # Create subplots
+    fig, axs = plt.subplots(2, 2, figsize=figsize)
+    
+    # Plot u-velocity component
+    u_plot = axs[0, 0].tripcolor(triang, u, cmap='RdBu_r', shading='gouraud')
+    axs[0, 0].set_title('u-velocity component')
+    plt.colorbar(u_plot, ax=axs[0, 0])
+    axs[0, 0].set_xlabel('x')
+    axs[0, 0].set_ylabel('y')
+    axs[0, 0].set_aspect('equal')
+    
+    # Plot v-velocity component
+    v_plot = axs[0, 1].tripcolor(triang, v, cmap='RdBu_r', shading='gouraud')
+    axs[0, 1].set_title('v-velocity component')
+    plt.colorbar(v_plot, ax=axs[0, 1])
+    axs[0, 1].set_xlabel('x')
+    axs[0, 1].set_ylabel('y')
+    axs[0, 1].set_aspect('equal')
+    
+    # Plot pressure
+    p_plot = axs[1, 0].tripcolor(triang, p, cmap='viridis', shading='gouraud')
+    axs[1, 0].set_title('Pressure')
+    plt.colorbar(p_plot, ax=axs[1, 0])
+    axs[1, 0].set_xlabel('x')
+    axs[1, 0].set_ylabel('y')
+    axs[1, 0].set_aspect('equal')
+    
+    # Plot velocity magnitude
+    mag_plot = axs[1, 1].tripcolor(triang, u_mag, cmap='plasma', shading='gouraud')
+    axs[1, 1].set_title('Velocity Magnitude')
+    plt.colorbar(mag_plot, ax=axs[1, 1])
+    axs[1, 1].set_xlabel('x')
+    axs[1, 1].set_ylabel('y')
+    axs[1, 1].set_aspect('equal')
+    
+    # Add streamlines or vectors on top of the velocity magnitude plot
+    # Use quiver for unstructured data
+    skip = max(1, len(x) // 1000)  # Skip some points for clarity
+    axs[1, 1].quiver(x[::skip], y[::skip], u[::skip], v[::skip], 
+                    color='white', alpha=0.8, scale=20, width=0.003)
+    
+    # Add main title if provided
+    if title:
+        plt.suptitle(title, fontsize=16)
+    
+    # Adjust layout
+    plt.tight_layout(rect=[0, 0, 1, 0.95])  # Leave room for the suptitle
+    
+    # Save figure if filename is provided
+    if filename:
+        # Ensure output directory exists and get full path
+        full_path = _ensure_output_directory(filename, output_dir)
+        plt.savefig(full_path, dpi=150, bbox_inches='tight')
+    
+    # Show plot if requested
     if show:
         plt.show()
     else:
         plt.close()
-    
-    # Create and save residual history plot if history data is provided
-    if u_rel_norms is not None and v_rel_norms is not None and p_rel_norms is not None and history_filename is not None:
-        # Plot relative residual history
-        plt.figure(figsize=(10, 5))
-        
-        # Get colors from coolwarm colormap
-        colors = [plt.cm.coolwarm(0.95), plt.cm.coolwarm(0.75), plt.cm.coolwarm(0.2)]  # Get colors at 0.8, 0.5, 0.2 positions
-        
-        # Plot the relative residual norms
-        plt.semilogy(range(len(u_rel_norms)), u_rel_norms, color=colors[0], label='u-momentum')  # Warm color
-        plt.semilogy(range(len(v_rel_norms)), v_rel_norms, color=colors[1], label='v-momentum')  # Neutral color
-        plt.semilogy(range(len(p_rel_norms)), p_rel_norms, color=colors[2], label='pressure')    # Cool color
-        plt.grid(True)
-        plt.title(f'Residual History')
-        plt.xlabel('Iteration')
-        plt.ylabel('Residual Norm')
-        plt.legend()
-        
-        # Add overall title if provided
-        if title:
-            reynolds_match = None
-            if isinstance(title, str):
-                import re
-                reynolds_match = re.search(r'Re\s*=\s*(\d+)', title)
-            
-            if reynolds_match:
-                reynolds = reynolds_match.group(1)
-                plt.suptitle(f'Residual History (Re={reynolds})', fontsize=16)
-            else:
-                plt.suptitle('Residual History', fontsize=16)
-                
-        # Adjust spacing between subplots
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
-        
-        # Save the plot
-        hist_full_path = _ensure_output_directory(history_filename, output_dir)
-        plt.savefig(hist_full_path, dpi=300, bbox_inches='tight')
-        print(f"Relative residual history plot saved to {hist_full_path}")
-        
-        if not show:
-            plt.close()
     
     return fig
