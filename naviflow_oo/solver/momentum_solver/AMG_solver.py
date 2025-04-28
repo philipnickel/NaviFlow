@@ -345,13 +345,12 @@ class AMGMomentumSolver(MomentumSolver):
         # Use original u field (flattened if needed) for relaxation term
         u_flat = u.flatten() if u.ndim > 1 else u
         if relaxed_a_p_full.shape != u_flat.shape:
-             raise ValueError(f"Shape mismatch for full relaxed source: relaxed_a_p_full {relaxed_a_p_full.shape} vs u_flat {u_flat.shape}")
+             raise ValueError("Unexpected relaxed_a_p_full dimensions")
         if source_unrelaxed.shape != relaxed_a_p_full.shape:
-             raise ValueError(f"Shape mismatch for full relaxed source: source_unrelaxed {source_unrelaxed.shape} vs relaxed_a_p_full {relaxed_a_p_full.shape}")
+             raise ValueError("Unexpected relaxed_source_full dimensions")
         relaxed_source_full = source_unrelaxed + (1.0 - alpha) * relaxed_a_p_full * u_flat
         
         # --- Build sparse system using FACE-BASED method for ALL cells ---
-        # This method is already mesh-agnostic
         A, b = self._build_sparse_matrix_face_based(
             mesh, relaxed_a_p_full, coeffs.get('a_nb', {}), relaxed_source_full, is_u=True
         )
@@ -362,7 +361,6 @@ class AMGMomentumSolver(MomentumSolver):
         # Ensure initial guess is flat
         u_initial_guess_flat = u_initial_guess.flatten()
         if u_initial_guess_flat.shape != b.shape:
-             # Try reshaping initial guess if possible (e.g., if it came in as 2D)
              if u_initial_guess.size == b.size:
                   u_initial_guess_flat = u_initial_guess.reshape(b.shape)
              else:
@@ -444,9 +442,9 @@ class AMGMomentumSolver(MomentumSolver):
         # Use original v field (flattened if needed) for relaxation term
         v_flat = v.flatten() if v.ndim > 1 else v
         if relaxed_a_p_full.shape != v_flat.shape:
-             raise ValueError(f"Shape mismatch for full relaxed source: relaxed_a_p_full {relaxed_a_p_full.shape} vs v_flat {v_flat.shape}")
+             raise ValueError("Unexpected relaxed_a_p_full dimensions")
         if source_unrelaxed.shape != relaxed_a_p_full.shape:
-             raise ValueError(f"Shape mismatch for full relaxed source: source_unrelaxed {source_unrelaxed.shape} vs relaxed_a_p_full {relaxed_a_p_full.shape}")
+             raise ValueError("Unexpected relaxed_source_full dimensions")
         relaxed_source_full = source_unrelaxed + (1.0 - alpha) * relaxed_a_p_full * v_flat
         
         # --- Build sparse system using FACE-BASED method for ALL cells ---

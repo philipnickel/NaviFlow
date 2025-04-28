@@ -53,7 +53,7 @@ class PyAMGSolver(PressureSolver):
         self.residual_history = []
         self.inner_iterations = []
         
-    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star):
+    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star, return_dict=True):
         """
         Solve the pressure correction equation using PyAMG.
         
@@ -67,11 +67,15 @@ class PyAMGSolver(PressureSolver):
             Momentum equation coefficients
         p_star : ndarray
             Current pressure field
+        return_dict : bool, optional
+             If True, returns residual_info dict.
             
         Returns:
         --------
         p_prime : ndarray
             Pressure correction field
+        residual_info : dict, optional
+            Dictionary with residual information if return_dict is True.
         """
         # Apply boundary conditions
         #p_star = self.apply_pressure_boundary_conditions(p_star)
@@ -84,16 +88,21 @@ class PyAMGSolver(PressureSolver):
         self.inner_iterations = []
         
         # Get right-hand side of pressure correction equation
-        b = get_rhs(nx, ny, dx, dy, rho, u_star, v_star)
+        # Ensure inputs are flattened if necessary for get_rhs (assuming it handles 1D/2D)
+        u_star_flat = u_star.flatten() if u_star.ndim > 1 else u_star
+        v_star_flat = v_star.flatten() if v_star.ndim > 1 else v_star
+        b = get_rhs(mesh, rho, u_star_flat, v_star_flat)
+        b_flat = b # get_rhs should return 1D
         
-        # Initial guess
-        x0 = np.zeros_like(b)
-        
-    
+        # Initial guess (flattened)
+        x0 = np.zeros_like(b_flat)
+            
         # Construct the coefficient matrix explicitly
-        A = get_coeff_mat(nx, ny, dx, dy, rho, d_u, d_v)
-        
-        
+        # Ensure inputs are flattened if necessary for get_coeff_mat
+        d_u_flat = d_u.flatten() if d_u.ndim > 1 else d_u
+        d_v_flat = d_v.flatten() if d_v.ndim > 1 else d_v
+        A = get_coeff_mat(mesh, rho, d_u_flat, d_v_flat)
+                
         # Setup PyAMG solver
         ml = pyamg.smoothed_aggregation_solver(
             A, 
@@ -102,18 +111,35 @@ class PyAMGSolver(PressureSolver):
         )
         
         # Solve using PyAMG
-        x = ml.solve(b, x0=x0, tol=self.tolerance, maxiter=self.max_iterations, 
+        # PyAMG solve returns flat array
+        x = ml.solve(b_flat, x0=x0, tol=self.tolerance, maxiter=self.max_iterations, 
                         residuals=self.residual_history, accel='cg')
         #print(f"Residual history: {self.residual_history}")
         self.inner_iterations.append(len(self.residual_history))
     
-        # Reshape to 2D
-        p_prime = x.reshape((nx, ny), order='F')
+        # Reshape solution to 2D (original expected output shape?)
+        # Or should it return flat like momentum solver?
+        # Let's return flat for consistency with mesh-agnostic approach
+        p_prime = x # Keep flat
+        # p_prime = x.reshape((nx, ny), order='F') # Old 2D return
 
-        # Enforce boundary conditions
-        #self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
+        # Enforce boundary conditions?
+        # self._enforce_pressure_boundary_conditions(p_prime, nx, ny)
         
-        return p_prime
+        if return_dict:
+            # Calculate residual info
+            r = b_flat - A.dot(x) # Use flat x (solution) and flat b (rhs)
+            r_norm = np.linalg.norm(r)
+            b_norm = np.linalg.norm(b_flat)
+            rel_norm = r_norm / max(b_norm, 1e-10)
+            residual_info = {
+                'rel_norm': rel_norm,
+                'field': r # Return 1D residual field
+            }
+            return p_prime, residual_info # Return dict
+        else:
+             # For backward compatibility if needed
+             return p_prime 
     
     def get_solver_info(self):
         """

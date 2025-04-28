@@ -35,12 +35,24 @@ class PowerLawDiscretization:
         """
         # Avoid division by zero and potential overflow
         with np.errstate(divide='ignore', invalid='ignore'):
-            peclet_term = 0.1 * np.abs(F / D)
-            # Ensure the base of the power is not negative to avoid large negative numbers leading to overflow
-            base = np.maximum(0.0, 1.0 - peclet_term)
-            result = np.where(np.abs(D) > 1e-10, base**5, 0.0)
-            # Handle potential NaNs resulting from 0/0 or inf/inf in peclet_term calculation
-            result = np.nan_to_num(result, nan=0.0) # Replace NaN with 0
+            # Calculate Peclet number safely
+            peclet_num = np.abs(F)
+            peclet_den = np.abs(D)
+            peclet_num = np.nan_to_num(peclet_num, nan=0.0)
+            peclet_den = np.nan_to_num(peclet_den, nan=1e-20) # Avoid division by zero
+            
+            peclet = peclet_num / peclet_den
+            
+            # Power-law formula: max(0, (1 - 0.1*Pe)**5)
+            # Clamp base before power to avoid large negative numbers causing issues
+            base = 1.0 - 0.1 * peclet
+            base_clipped = np.maximum(0.0, base)
+            
+            # Calculate result, handling cases where D is near zero separately
+            result = np.where(peclet_den > 1e-12, base_clipped**5, 0.0)
+            
+            # Ensure no NaNs remain 
+            result = np.nan_to_num(result, nan=0.0)
         return result
 
     def calculate_u_coefficients(self, mesh, fluid, u, v, p, bc_manager=None):
@@ -131,6 +143,8 @@ class PowerLawDiscretization:
                 # Boundary face
                 d_owner = face_centers[face_idx] - cell_centers[owner]
                 d_total = np.linalg.norm(d_owner) # Note: Moukalled uses distance normal to face here?
+            # Ensure d_total is not zero to avoid division issues
+            d_total = max(d_total, 1e-12)
             # if face_idx < 5: print(f"  d_total={d_total:.4f}") # DEBUG
 
             # Compute face velocity with direct access
@@ -330,6 +344,8 @@ class PowerLawDiscretization:
             else:
                 d_owner = face_centers[face_idx] - cell_centers[owner]
                 d_total = np.linalg.norm(d_owner)
+            # Ensure d_total is not zero to avoid division issues
+            d_total = max(d_total, 1e-12)
 
             # Compute face velocity with direct access
             if neighbor != -1 and neighbor < n_cells:

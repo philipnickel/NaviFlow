@@ -81,12 +81,33 @@ class BaseAlgorithm(ABC):
         """Apply boundary conditions to the fields."""
         self.profiler.start_section()
         
+        # Get mesh dimensions - needed for reshaping and BC application
         nx, ny = self.mesh.get_dimensions()
         
         # Use the boundary condition manager to apply velocity boundary conditions
-        self.u, self.v = self.bc_manager.apply_velocity_boundary_conditions(
-            self.u, self.v, nx, ny
+        # Reshape fields to 2D temporarily if they are 1D for compatibility with BC method
+        u_in = self.u
+        v_in = self.v
+        input_was_1d = False
+        if hasattr(self.u, 'ndim') and self.u.ndim == 1 and hasattr(self.v, 'ndim') and self.v.ndim == 1:
+            try:
+                u_in = self.u.reshape((nx, ny))
+                v_in = self.v.reshape((nx, ny))
+                input_was_1d = True
+            except ValueError:
+                print("Warning: Could not reshape 1D fields to 2D in apply_boundary_conditions. Using 1D fields directly.")
+        
+        u_bc_out, v_bc_out = self.bc_manager.apply_velocity_boundary_conditions(
+            u_in, v_in, nx, ny
         )
+        
+        # Flatten back to 1D if input was 1D and reshape succeeded
+        if input_was_1d:
+             self.u = u_bc_out.flatten()
+             self.v = v_bc_out.flatten()
+        else:
+             self.u = u_bc_out
+             self.v = v_bc_out
         
         self.profiler.end_section('boundary_condition_time')
     

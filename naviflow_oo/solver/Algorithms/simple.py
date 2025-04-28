@@ -75,12 +75,28 @@ class SimpleSolver(BaseAlgorithm):
         super().__init__(mesh, fluid, pressure_solver, momentum_solver, 
                          velocity_updater, boundary_conditions)
     
+    def initialize_fields(self):
+        """Initialize velocity and pressure fields as 1D arrays."""
+        # u_shape, v_shape, p_shape = self.mesh.get_field_shapes() # Old
+        n_cells = self.mesh.n_cells
+        
+        # Initialize fields as 1D arrays
+        self.u = np.zeros(n_cells)
+        self.v = np.zeros(n_cells)
+        self.p = np.zeros(n_cells)
+        
+        # Apply boundary conditions
+        # self._enforce_velocity_boundary_conditions()
+        # self._enforce_pressure_boundary_conditions()
+        self.apply_boundary_conditions() # Call the base class method
+    
     def solve(self, max_iterations=1000, tolerance=1e-6, save_profile=True, profile_dir='results/profiles', 
               track_infinity_norm=False, infinity_norm_interval=10, use_l2_norm=False):
         self.profiler.start()
-        nx, ny = self.mesh.get_dimensions()
-        p_star = self.p.copy()
-        p_prime = np.zeros((nx, ny))
+        # nx, ny = self.mesh.get_dimensions() # Not needed if fields are 1D
+        p_star = self.p.copy() # p is now 1D
+        # p_prime = np.zeros((nx, ny)) # Initialize p_prime as 1D later
+        p_prime = np.zeros_like(p_star) # Initialize as 1D
         
         # Initialize/reset residual histories - only store what's needed
         self.residual_history = []  # Overall convergence 
@@ -144,20 +160,37 @@ class SimpleSolver(BaseAlgorithm):
                     return_dict=True
                 )
                 
-                # Update pressure with relaxation
-                self.p = p_star + self.alpha_p * p_prime
-                self._enforce_pressure_boundary_conditions()
-                p_star = self.p.copy()
+                # --- Sanity Checks for p' --- 
+                if iteration < 4: # Check first few iterations
+                    if np.isnan(p_prime).any() or np.isinf(p_prime).any():
+                        print(f"Iteration {iteration}: !!! NaN/Inf detected in p_prime !!!")
+                    else: 
+                        print(f"Iteration {iteration}: p_prime min/max/mean = {p_prime.min():.2e} / {p_prime.max():.2e} / {p_prime.mean():.2e}")
+                # ----------------------------- 
+                
+                # Update pressure with relaxation (all 1D arrays)
+                self.p = p_star + self.alpha_p * p_prime 
+                # self._enforce_pressure_boundary_conditions() # Commented out: Assumes BCs handled by pressure solver matrix/pinning
+                p_star = self.p.copy() # p_star remains 1D
 
-                # Update velocities
+                # Update velocities -- SKIPPED FOR DEBUGGING
                 self.u, self.v = self.velocity_updater.update_velocity(
-                    self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
-                )
+                     self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
+                 )
    
+                # --- Sanity Checks for u, v --- 
+                if iteration < 4: # Check first few iterations
+                    if np.isnan(self.u).any() or np.isinf(self.u).any() or \
+                       np.isnan(self.v).any() or np.isinf(self.v).any():
+                        print(f"Iteration {iteration}: !!! NaN/Inf detected in updated u/v !!!")
+                    else:
+                        print(f"Iteration {iteration}: u min/max/mean = {self.u.min():.2e} / {self.u.max():.2e} / {self.u.mean():.2e}")
+                        print(f"Iteration {iteration}: v min/max/mean = {self.v.min():.2e} / {self.v.max():.2e} / {self.v.mean():.2e}")
+                # ------------------------------
 
                 # Extract relative norms for convergence check
                 u_rel_norm = u_res_info['rel_norm']
-                v_rel_norm = v_res_info['rel_norm']
+                v_rel_norm = v_res_norm = v_res_info['rel_norm']
                 p_rel_norm = p_res_info['rel_norm']
                 
                 # Save residual fields for final visualization
@@ -262,7 +295,7 @@ class SimpleSolver(BaseAlgorithm):
         self.profiler.start_section() # Start timing finalization
         if save_profile:
             os.makedirs(profile_dir, exist_ok=True)
-            filename = os.path.join(profile_dir, f"SIMPLE_Re{int(self.fluid.get_reynolds_number())}_mesh{nx}x{ny}_profile.h5")
+            filename = os.path.join(profile_dir, f"SIMPLE_Re{int(self.fluid.get_reynolds_number())}_mesh{self.mesh.n_cells}_profile.h5")
             print(f"Saved profile to {self.save_profiling_data(filename)}")
         self.profiler.end_section("Finalization") # End timing finalization
 
