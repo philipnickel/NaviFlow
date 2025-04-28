@@ -3,7 +3,7 @@ Structured mesh generation utilities.
 """
 
 import numpy as np
-from ..mesh.mesh import UniformStructuredMesh, NonUniformStructuredMesh
+from ..mesh.structured import StructuredUniform, StructuredNonUniform
 
 class StructuredMeshGenerator:
     """
@@ -30,10 +30,14 @@ class StructuredMeshGenerator:
             
         Returns:
         --------
-        mesh : UniformStructuredMesh
+        mesh : StructuredUniform
             The generated uniform structured mesh
         """
-        return UniformStructuredMesh(xmin, xmax, ymin, ymax, nx, ny, zmin, zmax, nz)
+        # Create evenly spaced nodes
+        x_nodes = np.linspace(xmin, xmax, nx)
+        y_nodes = np.linspace(ymin, ymax, ny)
+        
+        return StructuredUniform(x_nodes, y_nodes)
     
     @staticmethod
     def generate_nonuniform(x_coords, y_coords, z_coords=None):
@@ -51,7 +55,7 @@ class StructuredMeshGenerator:
             
         Returns:
         --------
-        mesh : NonUniformStructuredMesh
+        mesh : StructuredNonUniform
             The generated non-uniform structured mesh
         """
-        return NonUniformStructuredMesh(x_coords, y_coords, z_coords) 
+        return StructuredNonUniform(x_coords, y_coords) 

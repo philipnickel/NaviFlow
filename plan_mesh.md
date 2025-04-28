@@ -68,6 +68,18 @@ for face in mesh.faces:
     ...
 So solvers become mesh-agnostic!
 
+
+Note this: 
+✍️ Concretely, what you must do, file-by-file
+
+File	Action Required	Notes
+power_law.py	Rewrite calculate_u_coefficients and calculate_v_coefficients to use face-based vectorization	I'll show you skeleton below
+matrix_free_momentum_solver.py	Rewrite _matvec_u, _matvec_v, _create_sparse_matrix to use face connectivity (owner/neighbor)	
+direct_pressure_solver.py	Rewrite solve() to assemble pressure matrix face-based	
+helpers/get_coeff_mat.py	Rewrite get_coeff_mat() to build sparse matrix from faces	
+helpers/get_rhs.py	Rewrite get_rhs() to compute continuity defect from face mass fluxes
+
+
 Step 4: Boundary Conditions Generalization
 ➡️ Right now your boundary conditions probably assume structured grids (e.g., left, right, top, bottom).
 
