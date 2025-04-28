@@ -19,15 +19,15 @@ class VelocityUpdater(ABC):
         
         Parameters:
         -----------
-        mesh : StructuredMesh
+        mesh : Mesh
             The computational mesh
         u_star, v_star : ndarray
-            Intermediate velocity fields
+            Intermediate velocity fields (collocated at cell centers)
         p_prime : ndarray
-            Pressure correction field
+            Pressure correction field (collocated at cell centers)
         d_u, d_v : ndarray
             Momentum equation coefficients
-        boundary_conditions : dict
+        boundary_conditions : dict or BoundaryConditionManager
             Boundary conditions
             
         Returns:

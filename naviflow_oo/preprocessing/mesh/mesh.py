@@ -13,6 +13,12 @@ class Mesh(ABC):
     Serves as a common interface for all mesh types.
     """
     
+    def __init__(self):
+        """
+        Initialize the mesh with an empty boundary face mapping.
+        """
+        self.boundary_face_to_name = {}  # face index → boundary name
+    
     @abstractmethod
     def get_node_positions(self):
         """
@@ -99,6 +105,36 @@ class Mesh(ABC):
                 Neighbor cell indices for all faces (or -1 for boundary faces)
         """
         pass
+    
+    def get_boundary_name(self, face_idx):
+        """
+        Return boundary name ('top', 'bottom', 'left', 'right') if face is a boundary face.
+        
+        Parameters:
+        -----------
+        face_idx : int
+            Index of the face to check
+            
+        Returns:
+        --------
+        str or None
+            Name of the boundary if face is a boundary face, None otherwise
+        """
+        return self.boundary_face_to_name.get(face_idx, None)
+    
+    def get_field_shapes(self):
+        """
+        Return the field shapes for collocated (u, v, p) fields.
+        Base implementation that may be overridden by specific mesh types.
+
+        Returns:
+        --------
+        tuple
+            (u_shape, v_shape, p_shape)
+        """
+        # Default implementation for unstructured meshes
+        n_cells = self.n_cells
+        return n_cells, n_cells, n_cells
     
     @property
     @abstractmethod
@@ -193,6 +229,8 @@ class UnstructuredMesh(Mesh):
         cells : list of list
             Each cell is defined by a list of face indices
         """
+        super().__init__()
+        
         # Ensure we use only x and y coordinates for 2D mesh
         if nodes.shape[1] > 2:
             self._nodes = np.asarray(nodes)[:, :2]

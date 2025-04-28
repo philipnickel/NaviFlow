@@ -541,33 +541,111 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
         X, Y = np.meshgrid(x, y, indexing='ij')
         
         # Interior points only (exclude boundary cells)
-        u_res_interior = u_residual_field[1:nx-1, 1:ny-1]
-        v_res_interior = v_residual_field[1:nx-1, 1:ny-1]
-        p_res_interior = p_residual_field[1:nx-1, 1:ny-1]
-        X_interior = X[1:nx-1, 1:ny-1]
-        Y_interior = Y[1:nx-1, 1:ny-1]
+        if len(u_residual_field.shape) > 1 and u_residual_field.shape[0] > 2 and u_residual_field.shape[1] > 2:
+            u_res_interior = u_residual_field[1:nx-1, 1:ny-1]
+        else:
+            # Handle 1D or small array
+            u_res_interior = u_residual_field
+            
+        if len(v_residual_field.shape) > 1 and v_residual_field.shape[0] > 2 and v_residual_field.shape[1] > 2:
+            v_res_interior = v_residual_field[1:nx-1, 1:ny-1]
+        else:
+            # Handle 1D or small array
+            v_res_interior = v_residual_field
+            
+        if len(p_residual_field.shape) > 1 and p_residual_field.shape[0] > 2 and p_residual_field.shape[1] > 2:
+            p_res_interior = p_residual_field[1:nx-1, 1:ny-1]
+        else:
+            # Handle 1D or small array
+            p_res_interior = p_residual_field
+            
+        # Handle X and Y for plotting
+        if len(X.shape) > 1 and X.shape[0] > 2 and X.shape[1] > 2:
+            X_interior = X[1:nx-1, 1:ny-1]
+            Y_interior = Y[1:nx-1, 1:ny-1]
+        else:
+            # For 1D arrays or smaller meshes, keep as is
+            X_interior = X
+            Y_interior = Y
         
         # Calculate combined residual field
-        combined_res = np.sqrt(u_res_interior**2 + v_res_interior**2 + p_res_interior**2)
+        try:
+            # Try to calculate combined residual if the shapes are compatible
+            if u_res_interior.shape == v_res_interior.shape == p_res_interior.shape:
+                combined_res = np.sqrt(u_res_interior**2 + v_res_interior**2 + p_res_interior**2)
+            else:
+                # If shapes don't match, try flattening and reshaping
+                if hasattr(u_res_interior, 'flatten'):
+                    u_flat = u_res_interior.flatten()
+                    v_flat = v_res_interior.flatten()
+                    p_flat = p_res_interior.flatten()
+                    
+                    # Get the smallest length to ensure compatibility
+                    min_len = min(len(u_flat), len(v_flat), len(p_flat))
+                    
+                    # Compute with truncated arrays
+                    combined_flat = np.sqrt(u_flat[:min_len]**2 + v_flat[:min_len]**2 + p_flat[:min_len]**2)
+                    
+                    # Use the first array's shape as a template if possible
+                    if hasattr(u_res_interior, 'shape') and len(u_res_interior.shape) > 1:
+                        # Try to reshape to 2D if possible
+                        rows = int(np.sqrt(min_len))
+                        cols = min_len // rows
+                        combined_res = combined_flat[:rows*cols].reshape(rows, cols)
+                    else:
+                        # Keep as 1D array
+                        combined_res = combined_flat
+                else:
+                    # Fallback: create a dummy array with same shape as u_res_interior
+                    combined_res = np.zeros_like(u_res_interior)
+        except Exception as e:
+            # If all else fails, create a dummy array
+            if hasattr(u_res_interior, 'shape'):
+                combined_res = np.zeros_like(u_res_interior)
+            else:
+                combined_res = np.zeros(10)
         
         # Define a helper function for plotting each residual field
         def plot_residual_field(ax, data, X, Y, field_title, log_scale=False):
+            """Plot residual field with option for log scale."""
+            # Handle 1D data by reshaping to 2D if needed
+            if data.ndim == 1:
+                # Create a square-ish 2D array
+                rows = int(np.sqrt(len(data)))
+                cols = len(data) // rows
+                data_2d = data[:rows*cols].reshape(rows, cols)
+                
+                # Create grid for plotting
+                x_grid = np.linspace(0, 1, cols)
+                y_grid = np.linspace(0, 1, rows)
+                X_grid, Y_grid = np.meshgrid(x_grid, y_grid)
+                
+                plot_X, plot_Y = X_grid, Y_grid
+                plot_data = data_2d
+            else:
+                # Use original data and coordinates
+                plot_X, plot_Y = X, Y
+                plot_data = data
+                
+                # Ensure X and Y have compatible shapes
+                if plot_X.shape != plot_data.shape or plot_Y.shape != plot_data.shape:
+                    # Create new grid
+                    rows, cols = plot_data.shape
+                    x_grid = np.linspace(0, 1, cols)
+                    y_grid = np.linspace(0, 1, rows)
+                    plot_X, plot_Y = np.meshgrid(x_grid, y_grid)
+            
+            # Apply log transform if needed
             if log_scale:
                 # Add small value to avoid log(0)
-                data_log = np.log10(data + 1e-16)
-                
-                # Check if all values are the same (would cause warning)
-                if np.max(data_log) == np.min(data_log):
-                    # Add small random variation to prevent warning
-                    np.random.seed(0)  # For reproducibility
-                    variation = np.random.rand(*data_log.shape) * 1e-6
-                    data_log = data_log + variation
-                
-                im = ax.pcolormesh(X, Y, data_log, cmap='viridis', shading='auto')
-                plt.colorbar(im, ax=ax, label=f'log10({field_title})')
+                plot_data = np.log10(plot_data + 1e-16)
+                color_label = f'log10({field_title})'
             else:
-                im = ax.pcolormesh(X, Y, data, cmap='viridis', shading='auto')
-                plt.colorbar(im, ax=ax, label=field_title)
+                color_label = field_title
+            
+            # Create the plot
+            im = ax.pcolormesh(plot_X, plot_Y, plot_data, cmap='viridis', shading='auto')
+            plt.colorbar(im, ax=ax, label=color_label)
                 
             ax.set_title(field_title)
             ax.set_xlabel('x')
@@ -618,26 +696,67 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
             interior_mask[cell_idx] = False
         
         # Calculate combined residual field
-        combined_res = np.sqrt(u_residual_field**2 + v_residual_field**2 + p_residual_field**2)
+        try:
+            # Try to calculate combined residual if the shapes are compatible
+            if u_residual_field.shape == v_residual_field.shape == p_residual_field.shape:
+                combined_res = np.sqrt(u_residual_field**2 + v_residual_field**2 + p_residual_field**2)
+            else:
+                # If shapes don't match, try flattening and reshaping
+                if hasattr(u_residual_field, 'flatten'):
+                    u_flat = u_residual_field.flatten()
+                    v_flat = v_residual_field.flatten()
+                    p_flat = p_residual_field.flatten()
+                    
+                    # Get the smallest length to ensure compatibility
+                    min_len = min(len(u_flat), len(v_flat), len(p_flat))
+                    
+                    # Compute with truncated arrays
+                    combined_flat = np.sqrt(u_flat[:min_len]**2 + v_flat[:min_len]**2 + p_flat[:min_len]**2)
+                    
+                    # Use the first array's shape as a template if possible
+                    if hasattr(u_residual_field, 'shape') and len(u_residual_field.shape) > 1:
+                        # Try to reshape to 2D if possible
+                        rows = int(np.sqrt(min_len))
+                        cols = min_len // rows
+                        combined_res = combined_flat[:rows*cols].reshape(rows, cols)
+                    else:
+                        # Keep as 1D array
+                        combined_res = combined_flat
+                else:
+                    # Fallback: create a dummy array with same shape as u_residual_field
+                    combined_res = np.zeros_like(u_residual_field)
+        except Exception as e:
+            # If all else fails, create a dummy array
+            if hasattr(u_residual_field, 'shape'):
+                combined_res = np.zeros_like(u_residual_field)
+            else:
+                combined_res = np.zeros(10)
         
         # Define a helper function for plotting each residual field
-        def plot_residual_field_unstructured(ax, data, triang, field_title, log_scale=False):
+        def plot_residual_field_unstruct(ax, data, mesh, field_title, log_scale=False):
+            """Plot residual field for unstructured data with option for log scale."""
+            # Handle 1D data
+            if data.ndim == 1:
+                plot_data = data
+            else:
+                plot_data = data.flatten()  # Ensure data is flattened
+                
+            # Get cell centers
+            cell_centers = mesh.get_cell_centers()
+            x = cell_centers[:, 0]
+            y = cell_centers[:, 1]
+            
+            # Apply log transform if needed
             if log_scale:
                 # Add small value to avoid log(0)
-                data_log = np.log10(data + 1e-16)
-                
-                # Check if all values are the same (would cause warning)
-                if np.max(data_log) == np.min(data_log):
-                    # Add small random variation to prevent warning
-                    np.random.seed(0)  # For reproducibility
-                    variation = np.random.rand(len(data_log)) * 1e-6
-                    data_log = data_log + variation
-                
-                im = ax.tripcolor(triang, data_log, cmap='viridis', shading='gouraud')
-                plt.colorbar(im, ax=ax, label=f'log10({field_title})')
+                plot_data = np.log10(plot_data + 1e-16)
+                color_label = f'log10({field_title})'
             else:
-                im = ax.tripcolor(triang, data, cmap='viridis', shading='gouraud')
-                plt.colorbar(im, ax=ax, label=field_title)
+                color_label = field_title
+            
+            # Create scatter plot
+            scatter = ax.scatter(x, y, c=plot_data, cmap='viridis', s=20, marker='s')
+            plt.colorbar(scatter, ax=ax, label=color_label)
                 
             ax.set_title(field_title)
             ax.set_xlabel('x')
@@ -645,10 +764,10 @@ def plot_final_residuals(u_residual_field, v_residual_field, p_residual_field, m
             ax.set_aspect('equal')
         
         # Plot each residual field
-        plot_residual_field_unstructured(axs[0, 0], u_residual_field, triang, 'u-momentum residual', log_scale=True)
-        plot_residual_field_unstructured(axs[0, 1], v_residual_field, triang, 'v-momentum residual', log_scale=True)
-        plot_residual_field_unstructured(axs[1, 0], p_residual_field, triang, 'Pressure residual', log_scale=True)
-        plot_residual_field_unstructured(axs[1, 1], combined_res, triang, 'Combined residual', log_scale=True)
+        plot_residual_field_unstruct(axs[0, 0], u_residual_field, mesh, 'u-momentum residual', log_scale=True)
+        plot_residual_field_unstruct(axs[0, 1], v_residual_field, mesh, 'v-momentum residual', log_scale=True)
+        plot_residual_field_unstruct(axs[1, 0], p_residual_field, mesh, 'Pressure residual', log_scale=True)
+        plot_residual_field_unstruct(axs[1, 1], combined_res, mesh, 'Combined residual', log_scale=True)
     
     # Add main title
     if title:

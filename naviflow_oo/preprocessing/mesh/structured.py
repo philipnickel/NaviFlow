@@ -21,6 +21,8 @@ class StructuredMesh(Mesh):
         y_nodes : ndarray, shape (ny,)
             y-coordinates of grid points
         """
+        super().__init__()
+        
         self.x_nodes = np.asarray(x_nodes)
         self.y_nodes = np.asarray(y_nodes)
         
@@ -38,6 +40,30 @@ class StructuredMesh(Mesh):
         
         # Compute geometric properties
         self._compute_geometry()
+    
+    def get_dimensions(self):
+        """
+        Get the number of cells in x and y directions.
+        
+        Returns:
+        --------
+        tuple : (nx, ny)
+            Number of cells in each direction (nx-1, ny-1)
+        """
+        return self.nx - 1, self.ny - 1
+    
+    def get_field_shapes(self):
+        """
+        Return the field shapes for collocated (u, v, p) fields.
+
+        Returns:
+        --------
+        tuple
+            (u_shape, v_shape, p_shape)
+        """
+        nx, ny = self.get_dimensions()
+        shape = (nx, ny)  # Same for all in collocated arrangement
+        return shape, shape, shape
     
     def _generate_node_coordinates(self):
         """Generate coordinates for all nodes in the mesh."""
@@ -196,50 +222,60 @@ class StructuredMesh(Mesh):
             self._cells[cell_idx] = [west_face, east_face, south_face, north_face]
     
     def _compute_geometry(self):
-        """Compute geometric properties like owner and neighbor cells."""
+        """Compute owner/neighbor cells and identify boundary faces."""
         n_faces = len(self._faces)
+        n_cells = (self.nx - 1) * (self.ny - 1)
         n_x_faces = (self.nx-1) * self.ny
         
-        # Pre-allocate ownership arrays with -1 (boundary)
+        # NOTE: _face_normals, _face_areas, _face_centers are computed in _generate_face_indices
+        # NOTE: _cell_volumes, _cell_centers are computed in _generate_cell_indices
+        
+        # Initialize owners and neighbors
         self._owner_cells = np.full(n_faces, -1, dtype=int)
         self._neighbor_cells = np.full(n_faces, -1, dtype=int)
+        self.boundary_face_to_name = {} # Initialize boundary mapping
         
-        # Compute ownership for x-direction faces
-        # Generate indices for all vertical faces at once
-        i_indices, j_indices = np.meshgrid(
-            np.arange(self.nx-1), 
-            np.arange(self.ny), 
-            indexing='ij'
-        )
-        i_indices = i_indices.flatten()
-        j_indices = j_indices.flatten()
+        # Assign owner and neighbor cells for each face
+        # Also identify boundary faces and assign names
         
-        for face_idx, (i, j) in enumerate(zip(i_indices, j_indices)):
+        # Vertical faces: West-East direction
+        i_indices = np.arange(self.nx - 1)
+        j_indices = np.arange(self.ny)
+        i_grid, j_grid = np.meshgrid(i_indices, j_indices, indexing='ij')
+        i_indices = i_grid.flatten()
+        j_indices = j_grid.flatten()
+        
+        for idx, (i, j) in enumerate(zip(i_indices, j_indices)):
+            face_idx = idx
+            
             # Skip faces outside cell domain
             if j >= self.ny-1:
                 continue
                 
-            # The cell to the left (west) of this face is the owner
-            if i > 0 or j > 0:
-                cell_west = j * (self.nx-1) + i
-                self._owner_cells[face_idx] = cell_west
-            else:
-                # For the first cell, set it as the owner
-                self._owner_cells[face_idx] = 0
+            # The cell to the right (east) of this face is the owner
+            if i < self.nx-1 and j < self.ny-1:
+                cell_east = j * (self.nx-1) + i
+                self._owner_cells[face_idx] = cell_east
             
-            # The cell to the right (east) of this face is the neighbor
-            if i < self.nx-2 and j < self.ny-1:
-                cell_east = j * (self.nx-1) + (i+1)
-                self._neighbor_cells[face_idx] = cell_east
+            # The cell to the left (west) of this face is the neighbor
+            if i > 0 and j < self.ny-1:
+                cell_west = j * (self.nx-1) + (i-1)
+                self._neighbor_cells[face_idx] = cell_west
+            
+            # Identify boundary faces
+            if i == 0:
+                # Left boundary face
+                self.boundary_face_to_name[face_idx] = "left"
+            elif i == self.nx - 2:
+                # Right boundary face
+                self.boundary_face_to_name[face_idx] = "right"
         
-        # Compute ownership for y-direction faces
-        i_indices, j_indices = np.meshgrid(
-            np.arange(self.nx), 
-            np.arange(self.ny-1), 
-            indexing='ij'
-        )
-        i_indices = i_indices.flatten()
-        j_indices = j_indices.flatten()
+        # Horizontal faces: South-North direction
+        i_indices = np.arange(self.nx)
+        j_indices = np.arange(self.ny - 1)
+        i_grid, j_grid = np.meshgrid(i_indices, j_indices, indexing='ij')
+        i_indices = i_grid.flatten()
+        j_indices = j_grid.flatten()
         
         for idx, (i, j) in enumerate(zip(i_indices, j_indices)):
             face_idx = n_x_faces + idx
@@ -257,6 +293,14 @@ class StructuredMesh(Mesh):
             if i < self.nx-1 and j > 0:
                 cell_south = (j-1) * (self.nx-1) + i
                 self._neighbor_cells[face_idx] = cell_south
+            
+            # Identify boundary faces
+            if j == 0:
+                # Bottom boundary face
+                self.boundary_face_to_name[face_idx] = "bottom"
+            elif j == self.ny - 2:
+                # Top boundary face
+                self.boundary_face_to_name[face_idx] = "top"
     
     def get_node_positions(self):
         """Returns all node positions."""

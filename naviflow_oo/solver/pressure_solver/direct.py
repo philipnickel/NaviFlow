@@ -40,123 +40,81 @@ class DirectPressureSolver(PressureSolver):
     
     def solve(self, mesh, u_star, v_star, d_u, d_v, p_star, return_dict=True):
         """
-        Solve the pressure correction equation using a direct method.
+        Solve the pressure correction equation in a mesh-agnostic way.
         
         Parameters:
         -----------
         mesh : Mesh
-            The computational mesh (structured or unstructured)
+            The computational mesh
         u_star, v_star : ndarray
             Intermediate velocity fields
         d_u, d_v : ndarray
-            Momentum equation coefficients
+            Momentum equation coefficients (face-based)
         p_star : ndarray
             Current pressure field
-        return_dict : bool, optional
-            If True, returns a dictionary with complete residual information (default)
-            If False, returns separate residual values (deprecated)
-            
+        return_dict : bool
+            Return detailed info if True (default)
+        
         Returns:
         --------
         p_prime : ndarray
             Pressure correction field
         residual_info : dict
-            Dictionary with residual information: 
-            - 'rel_norm': l2(r)/max(l2(r))
-            - 'field': residual field
+            Residual info (optional)
         """
-        
+
         # Store the mesh for use in boundary conditions
         self.mesh = mesh
         self.p = p_star
         self.bc_manager = getattr(mesh, 'bc_manager', None)
         
-        # Fluid density - should come from a fluid properties object
-        rho = 1.0
+        rho = 1.0  # Assuming constant density (could generalize later)
 
-        # Check if we're working with a structured or unstructured mesh
-        if hasattr(mesh, 'get_dimensions') and hasattr(mesh, 'get_cell_sizes'):
-            # Handle structured mesh using the legacy approach
-            nx, ny = mesh.get_dimensions()
-            dx, dy = mesh.get_cell_sizes()
-            
-            # Get right-hand side of pressure correction equation
-            rhs = get_rhs_structured(nx, ny, dx, dy, rho, u_star, v_star)
+        # Build RHS
+        rhs = get_rhs(mesh, rho, u_star, v_star)
 
-            # Get coefficient matrix with boundary conditions already integrated
-            A = get_coeff_mat_structured(nx, ny, dx, dy, rho, d_u, d_v)
-            
-            # Solve the system
-            p_prime_flat = spsolve(A, rhs)
-            
-            # Apply zero gradient boundary conditions to the direct solution
-            # Calculate residual for tracking
-            Ax = A.dot(p_prime_flat)
-            r = rhs - Ax # This is the residual field (1D)
-            
-            # Reshape residual to 2D for interior point extraction
-            r_field_full = r.reshape((nx, ny), order='F')
-            
-            # Calculate L2 norm on interior points only - use more stable calculation
-            p_current_l2 = np.linalg.norm(r_field_full)
-            
-            # Keep track of the maximum L2 norm for relative scaling
-            if not hasattr(self, 'p_max_l2'):
-                self.p_max_l2 = p_current_l2
-            else:
-                self.p_max_l2 = max(self.p_max_l2, p_current_l2)
-            
-            # Calculate relative norm as l2(r)/l2(b) 
-            p_rel_norm = p_current_l2 / np.linalg.norm(rhs)
-            
-            # Track history of normalized residual
-            self.residual_history.append(p_rel_norm)
-            
-            # Reshape solution to 2D
-            p_prime = p_prime_flat.reshape((nx, ny), order='F')
-            
+        # Build Coefficient Matrix
+        A = get_coeff_mat(mesh, rho, d_u, d_v)
+
+        # Solve sparse linear system
+        p_prime_flat = spsolve(A, rhs)
+
+        # Track residual
+        residual_vector = rhs - A.dot(p_prime_flat)
+        residual_norm = np.linalg.norm(residual_vector)
+
+        # Normalize by RHS norm (for monitoring convergence)
+        if not hasattr(self, 'p_max_l2'):
+            self.p_max_l2 = residual_norm
         else:
-            # Handle mesh-agnostic approach using the new topology-based functions
-            # Get right-hand side of pressure correction equation
-            rhs = get_rhs(mesh, rho, u_star, v_star)
+            self.p_max_l2 = max(self.p_max_l2, residual_norm)
 
-            # Get coefficient matrix with boundary conditions already integrated
-            A = get_coeff_mat(mesh, rho, d_u, d_v)
-            
-            # Solve the system
-            p_prime_flat = spsolve(A, rhs)
-            
-            # Calculate residual for tracking
-            Ax = A.dot(p_prime_flat)
-            r = rhs - Ax # This is the residual field (1D)
-            
-            # Calculate L2 norm
-            p_current_l2 = np.linalg.norm(r)
-            
-            # Keep track of the maximum L2 norm for relative scaling
-            if not hasattr(self, 'p_max_l2'):
-                self.p_max_l2 = p_current_l2
-            else:
-                self.p_max_l2 = max(self.p_max_l2, p_current_l2)
-            
-            # Calculate relative norm as l2(r)/l2(b) 
-            p_rel_norm = p_current_l2 / np.linalg.norm(rhs)
-            
-            # Track history of normalized residual
-            self.residual_history.append(p_rel_norm)
-            
-            # For unstructured meshes, solution is already in the right format
+        rel_norm = residual_norm / np.linalg.norm(rhs)
+
+        # Track history
+        self.residual_history.append(rel_norm)
+
+        # Reshape if needed
+        if hasattr(p_star, 'shape'):
+            try:
+                # Try to reshape to match p_star
+                p_prime = p_prime_flat.reshape(p_star.shape)
+            except ValueError:
+                # If reshaping fails, keep it flat
+                p_prime = p_prime_flat
+        else:
             p_prime = p_prime_flat
-            r_field_full = r
-        
-        # Create the minimal residual information dictionary
+
+        # Package residual info
         residual_info = {
-            'rel_norm': p_rel_norm,  # l2(r)/max(l2(r))
-            'field': r_field_full    # Absolute residual field
+            'rel_norm': rel_norm,
+            'field': residual_vector
         }
-        
-        # Return the solution and residual info
-        return p_prime, residual_info
+
+        if return_dict:
+            return p_prime, residual_info
+        else:
+            return p_prime
  
         
     def get_solver_info(self):

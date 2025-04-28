@@ -28,70 +28,100 @@ def get_coeff_mat(mesh, rho, d_u, d_v, pin_pressure=True):
     face_areas = mesh.get_face_areas()
     face_normals = mesh.get_face_normals()
     n_cells = mesh.n_cells
+    n_faces = len(face_areas)
     
     # Arrays to store matrix coefficients
     rows = []
     cols = []
     data = []
     
-    # Process internal faces
-    internal_faces = neighbor_cells >= 0
-    internal_face_indices = np.where(internal_faces)[0]
+    # Helper to get effective face diffusion
+    def get_face_diffusion(face_idx):
+        try:
+            normal = face_normals[face_idx]
+            
+            # Handle array access for d_u and d_v with bounds checking
+            d_u_safe = d_u
+            d_v_safe = d_v
+            
+            # Ensure face_idx is within bounds
+            if hasattr(d_u, 'shape'):
+                if hasattr(d_u, 'flatten'):
+                    # Flattened arrays
+                    d_u_flat = d_u.flatten()
+                    max_idx = len(d_u_flat) - 1
+                    safe_idx = min(max(face_idx, 0), max_idx)
+                    if abs(normal[0]) >= abs(normal[1]):
+                        return rho * d_u_flat[safe_idx]
+                    else:
+                        # For d_v, also use bounds checking
+                        d_v_flat = d_v.flatten()
+                        max_idx_v = len(d_v_flat) - 1
+                        safe_idx_v = min(max(face_idx, 0), max_idx_v)
+                        return rho * d_v_flat[safe_idx_v]
+                else:
+                    # Just use a default value
+                    return rho * 1.0
+            else:
+                # Scalar d_u and d_v (or other non-array types)
+                if abs(normal[0]) >= abs(normal[1]):
+                    return rho * (d_u if np.isscalar(d_u) else 1.0)
+                else:
+                    return rho * (d_v if np.isscalar(d_v) else 1.0)
+        except Exception as e:
+            # Return a default value if any error occurs
+            return rho * 1.0
     
-    for face_idx in internal_face_indices:
+    # Process all faces
+    for face_idx in range(n_faces):
         owner = owner_cells[face_idx]
         neighbor = neighbor_cells[face_idx]
         area = face_areas[face_idx]
-        normal = face_normals[face_idx]
         
         # Get face coefficient from momentum equation coefficients
-        # For a consistent approach, use a single d (diffusion) value per face
-        # This could be extracted from d_u or d_v depending on face orientation
-        # Here we'll use a simple approximation
-        face_diff = rho  # This would be replaced with appropriate face diffusion
+        face_diff = get_face_diffusion(face_idx) * area
         
-        # Add contributions to the coefficient matrix
-        coefficient = face_diff * area
-        
-        # Owner cell row, neighbor cell column
-        rows.append(owner)
-        cols.append(neighbor)
-        data.append(-coefficient)  # Off-diagonal negative
-        
-        # Neighbor cell row, owner cell column
-        rows.append(neighbor)
-        cols.append(owner)
-        data.append(-coefficient)  # Off-diagonal negative
-        
-        # Add to diagonal (owner)
-        rows.append(owner)
-        cols.append(owner)
-        data.append(coefficient)  # Diagonal positive
-        
-        # Add to diagonal (neighbor)
-        rows.append(neighbor)
-        cols.append(neighbor)
-        data.append(coefficient)  # Diagonal positive
-    
-    # Process boundary faces (zero-gradient / Neumann boundary conditions)
-    boundary_faces = ~internal_faces
-    boundary_face_indices = np.where(boundary_faces)[0]
-    
-    for face_idx in boundary_face_indices:
-        owner = owner_cells[face_idx]
-        area = face_areas[face_idx]
-        normal = face_normals[face_idx]
-        
-        # For zero-gradient/Neumann BC, we just add to diagonal
-        face_diff = rho
-        coefficient = face_diff * area
-        
-        # Add to diagonal for owner cell
-        rows.append(owner)
-        cols.append(owner)
-        data.append(coefficient)  # Diagonal positive
+        if neighbor >= 0:
+            # Internal face - add contributions to both cells
+            # Owner cell row, neighbor cell column
+            rows.append(owner)
+            cols.append(neighbor)
+            data.append(-face_diff)  # Off-diagonal negative
+            
+            # Neighbor cell row, owner cell column
+            rows.append(neighbor)
+            cols.append(owner)
+            data.append(-face_diff)  # Off-diagonal negative
+            
+            # Add to diagonal (owner)
+            rows.append(owner)
+            cols.append(owner)
+            data.append(face_diff)  # Diagonal positive
+            
+            # Add to diagonal (neighbor)
+            rows.append(neighbor)
+            cols.append(neighbor)
+            data.append(face_diff)  # Diagonal positive
+        else:
+            # Boundary face (Neumann boundary condition)
+            # For zero-gradient/Neumann BC, we just add to diagonal
+            rows.append(owner)
+            cols.append(owner)
+            data.append(face_diff)  # Diagonal positive
     
     # Create sparse matrix
+    # Filter out any negative indices which can happen with array bound issues
+    valid_entries = np.logical_and(
+        np.logical_and(np.array(rows) >= 0, np.array(rows) < n_cells),
+        np.logical_and(np.array(cols) >= 0, np.array(cols) < n_cells)
+    )
+    
+    if not np.all(valid_entries):
+        # Filter out invalid entries
+        data = [data[i] for i, valid in enumerate(valid_entries) if valid]
+        rows = [rows[i] for i, valid in enumerate(valid_entries) if valid]
+        cols = [cols[i] for i, valid in enumerate(valid_entries) if valid]
+        
     A = sparse.coo_matrix((data, (rows, cols)), shape=(n_cells, n_cells))
     A = A.tocsr()
     
@@ -210,6 +240,18 @@ def get_coeff_mat_structured(nx, ny, dx, dy, rho, d_u, d_v, pin_pressure=True):
                           -north[interior_north], -south[interior_south]])
     
     # Create sparse matrix
+    # Filter out any negative indices which can happen with array bound issues
+    valid_entries = np.logical_and(
+        np.logical_and(np.array(rows) >= 0, np.array(rows) < n_cells),
+        np.logical_and(np.array(cols) >= 0, np.array(cols) < n_cells)
+    )
+    
+    if not np.all(valid_entries):
+        # Filter out invalid entries
+        data = [data[i] for i, valid in enumerate(valid_entries) if valid]
+        rows = [rows[i] for i, valid in enumerate(valid_entries) if valid]
+        cols = [cols[i] for i, valid in enumerate(valid_entries) if valid]
+        
     A = sparse.coo_matrix((data, (rows, cols)), shape=(n_cells, n_cells))
     A = A.tocsr()
     

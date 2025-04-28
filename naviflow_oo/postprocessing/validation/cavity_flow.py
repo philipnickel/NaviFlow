@@ -162,15 +162,26 @@ def calculate_divergence(u, v, dx, dy, use_numba=False):
     ndarray
         Divergence field
     """
-    imax, jmax = u.shape[0]-1, u.shape[1]
+    # Basic calculation of divergence from velocity components
+    imax, jmax = u.shape[0] - 1, u.shape[1]
     
-    # Fully vectorized implementation
+    # Create grid for vectorized calculation
     i_indices = np.arange(imax)
     j_indices = np.arange(jmax)
     i_grid, j_grid = np.meshgrid(i_indices, j_indices, indexing='ij')
     
-    divergence = (u[i_grid+1, j_grid] - u[i_grid, j_grid])/dx + \
-                 (v[i_grid, j_grid+1] - v[i_grid, j_grid])/dy
+    # Ensure we don't go out of bounds
+    valid_j = j_grid < min(jmax, v.shape[1] - 1)
+    
+    # Initialize divergence field
+    divergence = np.zeros((imax, jmax))
+    
+    # Calculate du/dx component everywhere
+    divergence = (u[i_grid+1, j_grid] - u[i_grid, j_grid]) / dx
+    
+    # Add dv/dy component where valid
+    if np.any(valid_j):
+        divergence[valid_j] += (v[i_grid[valid_j], j_grid[valid_j]+1] - v[i_grid[valid_j], j_grid[valid_j]]) / dy
     
     return divergence
 

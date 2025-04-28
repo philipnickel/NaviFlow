@@ -101,43 +101,92 @@ class UnstructuredUniform(UnstructuredMesh):
         # Initialize base class with the processed mesh data
         super().__init__(nodes, faces, cells)
 
+    def _compute_geometry(self):
+        """
+        Compute geometric properties and identify boundary faces.
+        Extends the parent class _compute_geometry method to identify boundary faces.
+        """
+        # Call the parent class method to compute basic geometric properties
+        super()._compute_geometry()
+        
+        # Get domain bounds
+        xmin = self._domain_bounds['xmin']
+        xmax = self._domain_bounds['xmax']
+        ymin = self._domain_bounds['ymin']
+        ymax = self._domain_bounds['ymax']
+        
+        # Small tolerance for floating point comparison
+        tol = 1e-10
+        
+        # Get face centers and normals
+        face_centers = self._face_centers
+        face_normals = self._face_normals
+        neighbors = self._neighbor_cells
+        
+        # Identify boundary faces (where neighbor = -1)
+        for face_idx in range(len(self._faces)):
+            if neighbors[face_idx] == -1:
+                # This is a boundary face
+                center = face_centers[face_idx]
+                normal = face_normals[face_idx]
+                
+                # Determine which boundary this face belongs to
+                if abs(center[0] - xmin) < tol:
+                    # Left boundary
+                    self.boundary_face_to_name[face_idx] = "left"
+                elif abs(center[0] - xmax) < tol:
+                    # Right boundary
+                    self.boundary_face_to_name[face_idx] = "right"
+                elif abs(center[1] - ymin) < tol:
+                    # Bottom boundary
+                    self.boundary_face_to_name[face_idx] = "bottom"
+                elif abs(center[1] - ymax) < tol:
+                    # Top boundary
+                    self.boundary_face_to_name[face_idx] = "top"
+
 
 class UnstructuredRefined(UnstructuredMesh):
     """
-    Class for unstructured meshes with local refinement.
-    
-    This mesh has varying element sizes with refinement in specific regions.
+    Generator for refined unstructured meshes for the lid-driven cavity.
+    Generates a rectangular domain with a mesh that is refined near walls,
+    especially near the top moving lid.
     """
     
     def __init__(self, mesh_size_walls, mesh_size_lid, mesh_size_center, 
                 xmin=0.0, xmax=1.0, ymin=0.0, ymax=1.0):
         """
-        Initialize an unstructured mesh with local refinement for lid-driven cavity problems.
+        Initialize a refined unstructured mesh for lid-driven cavity flow.
         
         Parameters:
         -----------
         mesh_size_walls : float
-            Mesh element size near the walls (bottom, left, right)
+            Characteristic mesh size near walls
         mesh_size_lid : float
-            Mesh element size near the lid (top boundary)
+            Characteristic mesh size near the lid (top)
         mesh_size_center : float
-            Mesh element size in the center of the domain
-        xmin : float, optional
-            Minimum x-coordinate, defaults to 0.0
-        xmax : float, optional
-            Maximum x-coordinate, defaults to 1.0
-        ymin : float, optional
-            Minimum y-coordinate, defaults to 0.0
-        ymax : float, optional
-            Maximum y-coordinate, defaults to 1.0
+            Characteristic mesh size at the center of the domain
+        xmin, xmax : float
+            Domain limits in the x direction
+        ymin, ymax : float
+            Domain limits in the y direction
         """
-        # Check dependencies
-        if "pygmsh" not in sys.modules or "meshio" not in sys.modules:
-            raise ImportError("UnstructuredRefined mesh requires 'pygmsh' and 'meshio' packages.")
+        # Store domain bounds for later use
+        self._domain_bounds = {
+            'xmin': xmin,
+            'xmax': xmax,
+            'ymin': ymin,
+            'ymax': ymax
+        }
         
-        # Calculate domain dimensions
+        # Get domain size
         length = xmax - xmin
         height = ymax - ymin
+        
+        # Ensure pygmsh is available
+        try:
+            import pygmsh
+        except ImportError:
+            raise ImportError("Pygmsh is required for this mesh generator. Please install it.")
         
         # Try a simple approach with explicit points that ensures connectivity
         with pygmsh.geo.Geometry() as geom:
@@ -240,6 +289,49 @@ class UnstructuredRefined(UnstructuredMesh):
         
         # Initialize base class with the processed mesh data
         super().__init__(nodes, faces, cells)
+
+    def _compute_geometry(self):
+        """
+        Compute geometric properties and identify boundary faces.
+        Extends the parent class _compute_geometry method to identify boundary faces.
+        """
+        # Call the parent class method to compute basic geometric properties
+        super()._compute_geometry()
+        
+        # Get domain bounds
+        xmin = self._domain_bounds['xmin']
+        xmax = self._domain_bounds['xmax']
+        ymin = self._domain_bounds['ymin']
+        ymax = self._domain_bounds['ymax']
+        
+        # Small tolerance for floating point comparison
+        tol = 1e-10
+        
+        # Get face centers and normals
+        face_centers = self._face_centers
+        face_normals = self._face_normals
+        neighbors = self._neighbor_cells
+        
+        # Identify boundary faces (where neighbor = -1)
+        for face_idx in range(len(self._faces)):
+            if neighbors[face_idx] == -1:
+                # This is a boundary face
+                center = face_centers[face_idx]
+                normal = face_normals[face_idx]
+                
+                # Determine which boundary this face belongs to
+                if abs(center[0] - xmin) < tol:
+                    # Left boundary
+                    self.boundary_face_to_name[face_idx] = "left"
+                elif abs(center[0] - xmax) < tol:
+                    # Right boundary
+                    self.boundary_face_to_name[face_idx] = "right"
+                elif abs(center[1] - ymin) < tol:
+                    # Bottom boundary
+                    self.boundary_face_to_name[face_idx] = "bottom"
+                elif abs(center[1] - ymax) < tol:
+                    # Top boundary
+                    self.boundary_face_to_name[face_idx] = "top"
 
 
 class Unstructured:

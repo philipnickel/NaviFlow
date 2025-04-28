@@ -111,7 +111,7 @@ class SimpleSolver(BaseAlgorithm):
 
 
         try:
-            while iteration <= max_iterations and total_res_check > tolerance:
+            while iteration <= max_iterations: #and total_res_check > tolerance:
                 # Store previous solution
                 self.u_old = self.u.copy()
                 self.v_old = self.v.copy()

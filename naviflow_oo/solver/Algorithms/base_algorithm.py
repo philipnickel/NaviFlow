@@ -67,14 +67,12 @@ class BaseAlgorithm(ABC):
     
     def initialize_fields(self):
         """Initialize velocity and pressure fields."""
-        nx, ny = self.mesh.get_dimensions()
+        u_shape, v_shape, p_shape = self.mesh.get_field_shapes()
         
-        # Initialize pressure field
-        self.p = np.zeros((nx, ny))
-        
-        # Initialize velocity fields (staggered grid)
-        self.u = np.zeros((nx+1, ny))
-        self.v = np.zeros((nx, ny+1))
+        # Initialize fields with proper shapes for collocated grid
+        self.u = np.zeros(u_shape)
+        self.v = np.zeros(v_shape)
+        self.p = np.zeros(p_shape)
         
         # Apply boundary conditions
         self.apply_boundary_conditions()

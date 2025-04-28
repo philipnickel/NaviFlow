@@ -1,57 +1,66 @@
 import numpy as np
 from ..velocity_solver.base_velocity_solver import VelocityUpdater
 from ...constructor.boundary_conditions import BoundaryConditionManager
+
 class StandardVelocityUpdater(VelocityUpdater):
     """
-    Standard implementation of velocity updater.
+    Standard implementation of velocity updater for collocated grids.
     Uses pressure correction to update velocities.
     """
     
     def update_velocity(self, mesh, u_star, v_star, p_prime, d_u, d_v, boundary_conditions):
         """
-        Update velocities based on pressure correction.
+        Update velocities based on pressure correction (collocated layout).
         
-        Parameters:
-        -----------
-        mesh : StructuredMesh
+        Parameters
+        ----------
+        mesh : Mesh
             The computational mesh
         u_star, v_star : ndarray
-            Intermediate velocity fields
+            Intermediate velocity fields (nx, ny)
         p_prime : ndarray
-            Pressure correction field
+            Pressure correction field (nx, ny)
         d_u, d_v : ndarray
-            Momentum equation coefficients
+            Momentum equation coefficients (nx, ny)
         boundary_conditions : dict or BoundaryConditionManager
             Boundary conditions
             
-        Returns:
-        --------
+        Returns
+        -------
         u, v : ndarray
             Updated velocity fields
         """
+        # Get cell sizes
+        dx, dy = mesh.get_cell_sizes()
+        
         # Get mesh dimensions
         nx, ny = mesh.get_dimensions()
-        
-        # For compatibility with existing code
-        imax, jmax = nx, ny
         
         # Initialize arrays with u_star and v_star values
         u = u_star.copy()
         v = v_star.copy()
         
-        # Vectorized u velocity update for interior nodes
-        i_range = np.arange(1, imax)
-        j_range = np.arange(1, jmax-1)
-        i_grid, j_grid = np.meshgrid(i_range, j_range, indexing='ij')
+        # Calculate pressure gradients using central differences
+        dpdx = np.zeros_like(p_prime)
+        dpdy = np.zeros_like(p_prime)
+
+        # Internal points: central differences
+        dpdx[1:-1, :] = (p_prime[2:, :] - p_prime[:-2, :]) / (2 * dx)
+        dpdy[:, 1:-1] = (p_prime[:, 2:] - p_prime[:, :-2]) / (2 * dy)
         
-        u[i_grid, j_grid] = u_star[i_grid, j_grid] + d_u[i_grid, j_grid] * (p_prime[i_grid-1, j_grid] - p_prime[i_grid, j_grid])
-        
-        # Vectorized v velocity update for interior nodes
-        i_range = np.arange(1, imax-1)
-        j_range = np.arange(1, jmax)
-        i_grid, j_grid = np.meshgrid(i_range, j_range, indexing='ij')
-        
-        v[i_grid, j_grid] = v_star[i_grid, j_grid] + d_v[i_grid, j_grid] * (p_prime[i_grid, j_grid-1] - p_prime[i_grid, j_grid])
+        # Boundary points: one-sided differences
+        # Left boundary
+        dpdx[0, :] = (p_prime[1, :] - p_prime[0, :]) / dx
+        # Right boundary
+        dpdx[-1, :] = (p_prime[-1, :] - p_prime[-2, :]) / dx
+        # Bottom boundary
+        dpdy[:, 0] = (p_prime[:, 1] - p_prime[:, 0]) / dy
+        # Top boundary
+        dpdy[:, -1] = (p_prime[:, -1] - p_prime[:, -2]) / dy
+
+        # Update velocities based on pressure gradients
+        u -= d_u * dpdx
+        v -= d_v * dpdy
         
         # Apply boundary conditions
         if isinstance(boundary_conditions, BoundaryConditionManager):
@@ -64,6 +73,6 @@ class StandardVelocityUpdater(VelocityUpdater):
                     bc_manager.set_condition(boundary, field_type, values)
         
         # Apply velocity boundary conditions
-        u, v = bc_manager.apply_velocity_boundary_conditions(u, v, imax, jmax)
+        u, v = bc_manager.apply_velocity_boundary_conditions(u, v, nx, ny)
         
         return u, v

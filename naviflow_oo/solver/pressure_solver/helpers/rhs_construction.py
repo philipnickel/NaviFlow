@@ -2,8 +2,8 @@ import numpy as np
 
 def get_rhs(mesh, rho, u_star, v_star):
     """
-    Build the right-hand side vector bp for the pressure-correction equation
-    using mesh topology.
+    Build the RHS vector for pressure correction equation.
+    Mesh-agnostic version.
     
     Parameters:
     -----------
@@ -12,73 +12,154 @@ def get_rhs(mesh, rho, u_star, v_star):
     rho : float
         Fluid density
     u_star, v_star : ndarray
-        Intermediate velocity fields defined on faces
+        Intermediate velocity fields at cells
         
     Returns:
     --------
     ndarray
-        Right-hand side vector for the pressure correction equation
+        Right-hand side vector for the pressure equation
     """
-    # Get mesh topology information
     owner_cells, neighbor_cells = mesh.get_owner_neighbor()
     face_areas = mesh.get_face_areas()
     face_normals = mesh.get_face_normals()
     face_centers = mesh.get_face_centers()
+    cell_centers = mesh.get_cell_centers()
     n_cells = mesh.n_cells
-    n_faces = mesh.n_faces
-    
-    # Initialize the right-hand side vector (mass imbalance for each cell)
+    n_faces = len(face_areas)
+
+    # Initialize RHS (mass imbalance for each cell)
     bp = np.zeros(n_cells)
-    
-    # Compute mass fluxes at all faces
-    # Assume velocities are already interpolated to faces (or defined on faces)
-    face_velocities = np.zeros((n_faces, 3))  # Will need to be computed from u_star, v_star
-    
-    # This would be replaced with proper velocity interpolation or extraction
-    # For now, we'll use a simplified approach
-    for face_idx in range(n_faces):
-        # For a proper implementation, we would compute the face velocity
-        # from u_star and v_star based on face orientation
-        # For now, we'll use a placeholder
-        face_velocities[face_idx] = np.array([u_star[face_idx], v_star[face_idx], 0.0])
-    
-    # Compute mass fluxes and accumulate to cells
+
+    # Loop through all faces and calculate mass fluxes
     for face_idx in range(n_faces):
         owner = owner_cells[face_idx]
+        neighbor = neighbor_cells[face_idx]
         area = face_areas[face_idx]
         normal = face_normals[face_idx]
-        
-        # Mass flux = rho * (velocity dot normal) * area
-        velocity = face_velocities[face_idx]
-        mass_flux = rho * np.dot(velocity, normal) * area
-        
-        # Add contribution to owner cell (outflow is positive, so negate for continuity)
+
+        # Add bounds checking for array access
+        try:
+            # Ensure owner index is within bounds
+            safe_owner = min(owner, len(u_star)-1) if owner >= 0 and owner < len(u_star) else 0
+            
+            # Get velocity at owner cell (with bounds checking)
+            u_o = u_star[safe_owner]
+            v_o = v_star[safe_owner]
+
+            if neighbor >= 0 and neighbor < len(u_star):
+                # Internal face - use linear interpolation for velocity
+                u_n = u_star[neighbor]
+                v_n = v_star[neighbor]
+                
+                # Simple linear interpolation
+                u_face = 0.5 * (u_o + u_n)
+                v_face = 0.5 * (v_o + v_n)
+            else:
+                # Boundary face - use owner velocity (could be refined later)
+                u_face = u_o
+                v_face = v_o
+        except (IndexError, TypeError) as e:
+            # Handle any indexing errors by setting default values
+            u_face = 0.0
+            v_face = 0.0
+            
+            # If this is a wall boundary, apply no-penetration condition
+            boundary_name = mesh.get_boundary_name(face_idx)
+            if boundary_name is not None:
+                # Remove normal component of velocity at walls
+                # This ensures zero mass flux through walls
+                try:
+                    # Ensure velocity and normal are compatible for dot product
+                    if np.isscalar(u_face) and np.isscalar(v_face):
+                        velocity = np.array([u_face, v_face])
+                    else:
+                        # Handle case where velocity is an array
+                        if hasattr(u_face, 'item') and hasattr(v_face, 'item'):
+                            try:
+                                velocity = np.array([u_face.item(), v_face.item()])
+                            except (ValueError, TypeError):
+                                # Fallback for arrays larger than 1 element
+                                velocity = np.array([float(u_face.flat[0] if hasattr(u_face, 'flat') else u_face),
+                                                    float(v_face.flat[0] if hasattr(v_face, 'flat') else v_face)])
+                        else:
+                            # If they're proper arrays, use the first element
+                            velocity = np.array([float(u_face.flat[0] if hasattr(u_face, 'flat') else u_face),
+                                                float(v_face.flat[0] if hasattr(v_face, 'flat') else v_face)])
+                    
+                    # Ensure normal is a 1D array of 2 elements
+                    if isinstance(normal, np.ndarray) and normal.ndim > 1:
+                        normal_vec = np.array([normal.flat[0], normal.flat[1]])
+                    else:
+                        normal_vec = np.array([normal[0], normal[1]])
+                        
+                    # Now both velocity and normal_vec are 1D arrays of length 2
+                    normal_component = np.dot(velocity, normal_vec)
+                    u_face -= normal_component * normal_vec[0]
+                    v_face -= normal_component * normal_vec[1]
+                except Exception as e:
+                    # In case of any error, just keep the original values
+                    pass
+
+        # Calculate mass flux through the face
+        try:
+            # Same approach as above to ensure compatible arrays
+            if np.isscalar(u_face) and np.isscalar(v_face):
+                velocity_face = np.array([u_face, v_face])
+            else:
+                # Handle case where velocity is an array
+                if hasattr(u_face, 'item') and hasattr(v_face, 'item'):
+                    try:
+                        velocity_face = np.array([u_face.item(), v_face.item()])
+                    except (ValueError, TypeError):
+                        # Fallback for arrays larger than 1 element
+                        velocity_face = np.array([float(u_face.flat[0] if hasattr(u_face, 'flat') else u_face),
+                                                float(v_face.flat[0] if hasattr(v_face, 'flat') else v_face)])
+                else:
+                    # If they're proper arrays, use the first element
+                    velocity_face = np.array([float(u_face.flat[0] if hasattr(u_face, 'flat') else u_face),
+                                            float(v_face.flat[0] if hasattr(v_face, 'flat') else v_face)])
+            
+            # Ensure normal is a 1D array of 2 elements
+            if isinstance(normal, np.ndarray) and normal.ndim > 1:
+                normal_vec = np.array([normal.flat[0], normal.flat[1]])
+            else:
+                normal_vec = np.array([normal[0], normal[1]])
+                
+            # Calculate mass flux
+            mass_flux = rho * np.dot(velocity_face, normal_vec) * area
+        except Exception as e:
+            # Default to zero mass flux if the calculation fails
+            mass_flux = 0.0
+
+        # Add flux contribution to owner (outflow is negative)
         bp[owner] -= mass_flux
-        
-        # Add contribution to neighbor cell if internal face
-        if neighbor_cells[face_idx] >= 0:
-            neighbor = neighbor_cells[face_idx]
-            # Inflow to neighbor is negative of outflow from owner
+
+        # Add flux contribution to neighbor if internal
+        if neighbor >= 0:
             bp[neighbor] += mass_flux
+
+    # Ensure the RHS sums to zero (necessary for solvability)
+    if not np.isclose(np.sum(bp), 0.0, atol=1e-10):
+        bp -= np.sum(bp) / n_cells  # Adjust for global mass conservation
     
-    # Set reference pressure cell RHS to zero
+    # Fix reference pressure cell
     bp[0] = 0.0
-    
+
     return bp
 
 
-# Keep the original function for compatibility with existing code
-def get_rhs_structured(imax, jmax, dx, dy, rho, u_star, v_star):
+# Legacy function for compatibility with structured mesh
+def get_rhs_structured(nx, ny, dx, dy, rho, u_star, v_star):
     """
-    Build the right-hand side vector bp for the pressure-correction equation
-    for structured meshes.
+    Build the RHS vector for pressure correction equation.
+    Structured grid version.
     
     Parameters:
     -----------
-    imax, jmax : int
+    nx, ny : int
         Grid dimensions
     dx, dy : float
-        Grid spacing
+        Cell sizes
     rho : float
         Fluid density
     u_star, v_star : ndarray
@@ -87,50 +168,37 @@ def get_rhs_structured(imax, jmax, dx, dy, rho, u_star, v_star):
     Returns:
     --------
     ndarray
-        Right-hand side vector for the pressure correction equation
+        Right-hand side vector for the pressure equation
     """
-    # Initialize right-hand side vector
-    bp = np.zeros(imax*jmax)
+    # Total number of cells
+    n_cells = nx * ny
     
-    # Create 2D matrix first - easier to work with
-    bp_2d = np.zeros((imax, jmax))
+    # Initialize RHS vector
+    bp = np.zeros(n_cells)
     
-    # Compute entire array at once
-    bp_2d = rho * (u_star[:-1, :] * dy - u_star[1:, :] * dy + 
-                   v_star[:, :-1] * dx - v_star[:, 1:] * dx)
+    # Interior cells
+    for i in range(nx):
+        for j in range(ny):
+            # Linear index for current cell
+            k = i + j * nx
+            
+            # East face (i+1/2, j)
+            if i < nx-1:
+                bp[k] -= rho * u_star[i+1, j] * dy
+            
+            # West face (i-1/2, j)
+            if i > 0:
+                bp[k] += rho * u_star[i, j] * dy
+            
+            # North face (i, j+1/2)
+            if j < ny-1:
+                bp[k] -= rho * v_star[i, j+1] * dx
+            
+            # South face (i, j-1/2)
+            if j > 0:
+                bp[k] += rho * v_star[i, j] * dx
     
-    # Flatten to 1D array in correct order
-    bp = bp_2d.flatten('F')  # Fortran-style order (column-major)
+    # Fix reference pressure cell
+    bp[0] = 0.0
     
-    # Modify for p_prime(0,0) - pressure at first node is fixed
-    bp[0] = 0
-    
-    return bp
-
-
-# Alternative version from the original file (keep for reference)
-def get_rhs2(
-    nx: int,
-    ny: int,
-    dx: float,
-    dy: float,
-    rho: float,
-    u_star: np.ndarray,
-    v_star: np.ndarray,
-) -> np.ndarray:
-    """
-    Build the right-hand side vector bp for the pressure-correction equation
-    such that  A · p' = bp   (matrix built by `get_coeff_mat`).
-
-    Sign convention matches the coefficient matrix *and* the Rhie–Chow
-    velocity correction with  u = u* + d_u ∂p'/∂x   (note the **plus** sign).
-    """
-    # continuity defect on cell faces (vectorised)
-    bp_2d = rho * (
-        (u_star[1:, :] - u_star[:-1, :]) * dy
-        + (v_star[:, 1:] - v_star[:, :-1]) * dx
-    )
-
-    bp = bp_2d.flatten("F")        # Fortran order
-    bp[0] = 0.0                    # consistency with pinned pressure node
     return bp

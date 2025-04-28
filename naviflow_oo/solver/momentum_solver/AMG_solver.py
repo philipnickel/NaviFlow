@@ -237,104 +237,81 @@ class AMGMomentumSolver(MomentumSolver):
 
         return matrix_csr, rhs, idx_map
 
-    def _calculate_unrelaxed_residual(self, u_star, a_e, a_w, a_n, a_s, a_p_unrelaxed, source_unrelaxed, nx, ny, is_u):
-        """Calculates the unrelaxed residual norm and field."""
-        if is_u:
-            imax, jmax = nx + 1, ny
-            shape = (imax, jmax)
-        else:
-            imax, jmax = nx, ny + 1
-            shape = (imax, jmax)
-
-        # Build the unrelaxed system to calculate residual: r_unrelaxed = b_unrelaxed - A_unrelaxed * x
-        matrix_unrelaxed, rhs_unrelaxed_flat, _ = self._build_sparse_matrix(
-             a_e, a_w, a_n, a_s, a_p_unrelaxed, source_unrelaxed, nx, ny, is_u=is_u
-        )
-        Ax_unrelaxed = matrix_unrelaxed @ u_star.flatten()
-        r_unrelaxed_flat = rhs_unrelaxed_flat - Ax_unrelaxed
-        r_unrelaxed_field = r_unrelaxed_flat.reshape(shape)
-
-        # Masking and normalization (using unrelaxed source field as the base)
-        # Use slicing to extract interior points ONLY
-        if is_u:
-            # Extract interior points for u (from 1:nx, 1:ny-1)
-            r_unrelaxed_interior = r_unrelaxed_field[1:nx, 1:ny-1]
-            b_unrelaxed_interior = source_unrelaxed[1:nx, 1:ny-1]
-        else:
-            # Extract interior points for v (from 1:nx-1, 1:ny)
-            r_unrelaxed_interior = r_unrelaxed_field[1:nx-1, 1:ny]
-            b_unrelaxed_interior = source_unrelaxed[1:nx-1, 1:ny]
-
-        # Calculate L2 norm of interior points only
-        r_unrelaxed_norm_val = np.linalg.norm(r_unrelaxed_interior)
-        b_unrelaxed_norm_val = np.linalg.norm(b_unrelaxed_interior)
-
-        # Calculate normalized residual norm
-        residual_norm_unrelaxed = r_unrelaxed_norm_val
+    def _build_sparse_matrix_face_based(self, mesh, a_p, a_nb, source, is_u=True):
+        """
+        Build a mesh-agnostic sparse matrix for momentum equations.
         
-        # Zero out boundaries in the returned field
-        r_unrelaxed_field_final = r_unrelaxed_field.copy()
-        if is_u:
-            r_unrelaxed_field_final[0, :] = 0.0
-            r_unrelaxed_field_final[1, :] = 0.0  # Adjacent
-            if nx > 1:
-                 r_unrelaxed_field_final[nx-1, :] = 0.0  # Adjacent
-            r_unrelaxed_field_final[nx, :] = 0.0
-            # Zero top/bottom boundaries as well in the returned field
-            r_unrelaxed_field_final[:, 0] = 0.0
-            r_unrelaxed_field_final[:, ny-1] = 0.0
-        else:  # is_v
-            r_unrelaxed_field_final[0, :] = 0.0
-            r_unrelaxed_field_final[nx-1, :] = 0.0
-            r_unrelaxed_field_final[:, 0] = 0.0
-            r_unrelaxed_field_final[:, 1] = 0.0  # Adjacent
-            if ny > 1:
-                 r_unrelaxed_field_final[:, ny-1] = 0.0  # Adjacent
-            r_unrelaxed_field_final[:, ny] = 0.0
+        Parameters
+        ----------
+        mesh : Mesh
+            Mesh object with owner/neighbor information.
+        a_p : ndarray
+            Diagonal coefficients for cells.
+        a_nb : dict
+            Dictionary with neighbor coefficients: keys 'east', 'west', 'north', 'south'.
+        source : ndarray
+            Source term.
+        is_u : bool
+            Whether solving for u (True) or v (False).
+        
+        Returns
+        -------
+        A_csr : csr_matrix
+            System matrix.
+        rhs : ndarray
+            Right-hand side vector.
+        """
+        from scipy.sparse import coo_matrix
 
-        return residual_norm_unrelaxed, r_unrelaxed_field_final
+        owners, neighbors = mesh.get_owner_neighbor()
+        face_areas = mesh.get_face_areas()
+        n_cells = mesh.n_cells
+        n_faces = mesh.n_faces
+
+        data = []
+        row = []
+        col = []
+
+        # Diagonal terms
+        for cell_idx in range(n_cells):
+            data.append(a_p[cell_idx])
+            row.append(cell_idx)
+            col.append(cell_idx)
+
+        # Off-diagonal neighbor terms
+        for face_idx in range(n_faces):
+            owner = owners[face_idx]
+            neighbor = neighbors[face_idx]
+
+            if neighbor != -1:
+                # Internal face → interaction between owner and neighbor
+                # Assume uniform treatment for now
+                coeff = a_nb.get('face', np.zeros(n_faces))[face_idx]  # if a_nb['face'] exists
+                if coeff == 0:  # fallback
+                    coeff = 0.5 * (a_p[owner] + a_p[neighbor])  # crude approximation
+
+                data.append(-coeff)
+                row.append(owner)
+                col.append(neighbor)
+
+                data.append(-coeff)
+                row.append(neighbor)
+                col.append(owner)
+
+        # Build sparse matrix
+        A = coo_matrix((data, (row, col)), shape=(n_cells, n_cells)).tocsr()
+
+        # Right-hand side
+        rhs = source.flatten()
+
+        return A, rhs
 
     def solve_u_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
-        Solve the u-momentum equation using Algebraic Multigrid.
-        
-        Parameters:
-        -----------
-        mesh : StructuredMesh
-            The computational mesh
-        fluid : FluidProperties
-            Fluid properties
-        u, v : ndarray
-            Current velocity fields
-        p : ndarray
-            Current pressure field
-        relaxation_factor : float, optional
-            Relaxation factor for under-relaxation
-        boundary_conditions : dict or BoundaryConditionManager, optional
-            Boundary conditions
-        return_dict : bool, optional
-            If True, returns residual information in a dictionary format (default).
-            If False, returns separate residual values (deprecated).
-            
-        Returns:
-        --------
-        u_star : ndarray
-            Intermediate u-velocity field
-        d_u : ndarray
-            Momentum equation coefficient
-        residual_info : dict
-            Dictionary with residual information: 
-            - 'rel_norm': l2(r)/max(l2(r))
-            - 'field': residual field
+        Solve the u-momentum equation using AMG for a collocated grid.
         """
-        nx, ny = mesh.get_dimensions()
-        imax, jmax = nx, ny
         alpha = relaxation_factor
-        # Use current u as initial guess
-        u_initial_guess = u.copy()
-        d_u = np.zeros((imax+1, jmax))
 
-        # Ensure we have a BC manager instance
         if isinstance(boundary_conditions, BoundaryConditionManager):
             bc_manager = boundary_conditions
         else:
@@ -344,124 +321,96 @@ class AMGMomentumSolver(MomentumSolver):
                     for field_type, values in conditions.items():
                         bc_manager.set_condition(boundary, field_type, values)
 
-        # Apply BCs to u and v *before* coefficient calculation
-        u_bc, v_bc = bc_manager.apply_velocity_boundary_conditions(u.copy(), v.copy(), imax, jmax)
+        u_initial_guess = u.copy()
+        n_cells = mesh.n_cells
 
-        # Calculate coefficients using velocities with BCs applied
-        coeffs = self.discretization_scheme.calculate_u_coefficients(mesh, fluid, u_bc, v_bc, p, bc_manager)
-        u_a_e = coeffs['a_e']
-        u_a_w = coeffs['a_w']
-        u_a_n = coeffs['a_n']
-        u_a_s = coeffs['a_s']
-        u_a_p_unrelaxed = coeffs['a_p']
-        u_source_unrelaxed = coeffs['source']
+        # Pass original u,v to discretization; BCs handled by discretization scheme (Practice B)
+        # u_bc, v_bc = bc_manager.apply_velocity_boundary_conditions(...) # Removed
 
-        # Apply under-relaxation to coefficients
-        safe_ap_unrelaxed = np.where(np.abs(u_a_p_unrelaxed) > 1e-12, u_a_p_unrelaxed, 1e-12)
-        self.u_a_p = safe_ap_unrelaxed / alpha 
-        u_source = u_source_unrelaxed + (1 - alpha) * self.u_a_p * u_bc
+        coeffs = self.discretization_scheme.calculate_u_coefficients(mesh, fluid, u, v, p, bc_manager)
+        # Assume coeffs are returned as 1D arrays of size n_cells
+        a_p_unrelaxed = coeffs['a_p']
+        source_unrelaxed = coeffs['source']
+        if a_p_unrelaxed.size != n_cells or source_unrelaxed.size != n_cells:
+             raise ValueError(f"Coefficient array sizes ({a_p_unrelaxed.size}, {source_unrelaxed.size}) mismatch n_cells ({n_cells})")
 
-        # Store unrelaxed coefficients for residual calculation later
-        self.u_a_e = u_a_e
-        self.u_a_w = u_a_w
-        self.u_a_n = u_a_n
-        self.u_a_s = u_a_s
-        self.u_a_p_unrelaxed = u_a_p_unrelaxed
-        self.u_source_unrelaxed = u_source_unrelaxed
+        self.u_a_p_unrelaxed = a_p_unrelaxed 
+        self.u_source_unrelaxed = source_unrelaxed
 
-        # Build the sparse matrix system using RELAXED coefficients
-        self.u_matrix, self.u_rhs, idx_map = self._build_sparse_matrix(
-            u_a_e, u_a_w, u_a_n, u_a_s, self.u_a_p,
-            u_source,
-            nx, ny, is_u=True
+        # --- Prepare full relaxed coefficients (1D arrays) ---
+        safe_ap_full = np.where(np.abs(a_p_unrelaxed) > 1e-12, a_p_unrelaxed, 1e-12)
+        relaxed_a_p_full = safe_ap_full / alpha
+        
+        # Calculate relaxed source (all 1D arrays)
+        # Use original u field (flattened if needed) for relaxation term
+        u_flat = u.flatten() if u.ndim > 1 else u
+        if relaxed_a_p_full.shape != u_flat.shape:
+             raise ValueError(f"Shape mismatch for full relaxed source: relaxed_a_p_full {relaxed_a_p_full.shape} vs u_flat {u_flat.shape}")
+        if source_unrelaxed.shape != relaxed_a_p_full.shape:
+             raise ValueError(f"Shape mismatch for full relaxed source: source_unrelaxed {source_unrelaxed.shape} vs relaxed_a_p_full {relaxed_a_p_full.shape}")
+        relaxed_source_full = source_unrelaxed + (1.0 - alpha) * relaxed_a_p_full * u_flat
+        
+        # --- Build sparse system using FACE-BASED method for ALL cells ---
+        # This method is already mesh-agnostic
+        A, b = self._build_sparse_matrix_face_based(
+            mesh, relaxed_a_p_full, coeffs.get('a_nb', {}), relaxed_source_full, is_u=True
+        )
+        
+        # --- Solve using AMG --- 
+        ml = pyamg.smoothed_aggregation_solver(A)
+        
+        # Ensure initial guess is flat
+        u_initial_guess_flat = u_initial_guess.flatten()
+        if u_initial_guess_flat.shape != b.shape:
+             # Try reshaping initial guess if possible (e.g., if it came in as 2D)
+             if u_initial_guess.size == b.size:
+                  u_initial_guess_flat = u_initial_guess.reshape(b.shape)
+             else:
+                  raise ValueError(f"Shape mismatch for solver: initial guess {u_initial_guess_flat.shape} (orig: {u_initial_guess.shape}) vs rhs {b.shape}")
+
+        u_full_flat = ml.solve(
+            b, 
+            x0=u_initial_guess_flat, 
+            tol=self.tolerance, 
+            maxiter=self.max_iterations
         )
 
-        # Create the AMG solver hierarchy
-        ml = pyamg.smoothed_aggregation_solver(self.u_matrix)
+        # --- Return 1D solution --- 
+        # Reshaping is left to the caller
+        u_star = u_full_flat 
 
-        # Solve the RELAXED system Ax = b, using initial guess
-        u_flat = ml.solve(self.u_rhs, x0=u_initial_guess.flatten(), tol=self.tolerance, maxiter=self.max_iterations)
+        # --- d_u calculation (1D) ---
+        d_u = np.zeros(n_cells) # Return 1D array
+        # Use Vp / aP definition
+        cell_volumes = mesh.get_cell_volumes()
+        if hasattr(self, 'u_a_p_unrelaxed') and self.u_a_p_unrelaxed is not None:
+            temp_ap_unrelaxed = self.u_a_p_unrelaxed # Assumed 1D
+            if temp_ap_unrelaxed.size == d_u.size and cell_volumes.size == d_u.size:
+                valid_ap_mask = np.abs(temp_ap_unrelaxed) > 1e-12
+                # d_u = Vp / aP_u
+                d_u[valid_ap_mask] = cell_volumes[valid_ap_mask] / temp_ap_unrelaxed[valid_ap_mask]
+            else:
+                print(f"Warning: Size mismatch for d_u calculation: a_p {temp_ap_unrelaxed.size}, vol {cell_volumes.size}, d_u {d_u.size}")
 
-        # Reshape result back to 2D
-        u_star = u_flat.reshape((imax+1, jmax))
+        # Residual info
+        r = b - A @ u_full_flat
+        norm_r = np.linalg.norm(r)
+        norm_b = np.linalg.norm(b)
+        rel_norm = norm_r / max(norm_b, 1e-10)
 
-        # Apply boundary conditions explicitly AFTER the solve
-        u_star, _ = bc_manager.apply_velocity_boundary_conditions(u_star, v.copy(), imax, jmax)
-        
-        # Calculate d_u (using the RELAXED a_p)
-        d_u.fill(np.nan)
-        valid_ap_mask = np.abs(self.u_a_p) > 1e-12
-        dy = mesh.get_cell_sizes()[1]
-        d_u[valid_ap_mask] = dy / self.u_a_p[valid_ap_mask]
-
-        # Calculate residual norm and field using unrelaxed system
-        _, u_residual_field = self._calculate_unrelaxed_residual(
-            u_star, self.u_a_e, self.u_a_w, self.u_a_n, self.u_a_s,
-            self.u_a_p_unrelaxed, self.u_source_unrelaxed, nx, ny, is_u=True
-        )
-
-        # Calculate L2 norm of the interior residual field
-        u_interior_residual = u_residual_field[1:nx, 1:ny-1]
-        u_current_l2 = np.linalg.norm(u_interior_residual)
-        
-        # Keep track of the maximum L2 norm for relative scaling
-        if not hasattr(self, 'u_max_l2'):
-            self.u_max_l2 = u_current_l2
-        else:
-            self.u_max_l2 = max(self.u_max_l2, u_current_l2)
-        
-        # Calculate relative norm
-        u_rel_norm = u_current_l2 / np.linalg.norm(u_source_unrelaxed)
-        
-        # Create the minimal residual information dictionary
         residual_info = {
-            'rel_norm': u_rel_norm,  # l2(r)/max(l2(r))
-            'field': u_residual_field  # Absolute residual field
+            'rel_norm': rel_norm,
+            'field': r # Return 1D residual field from full system
         }
 
         return u_star, d_u, residual_info
-
+    
     def solve_v_momentum(self, mesh, fluid, u, v, p, relaxation_factor=0.7, boundary_conditions=None, return_dict=True):
         """
-        Solve the v-momentum equation using Algebraic Multigrid.
-        
-        Parameters:
-        -----------
-        mesh : StructuredMesh
-            The computational mesh
-        fluid : FluidProperties
-            Fluid properties
-        u, v : ndarray
-            Current velocity fields
-        p : ndarray
-            Current pressure field
-        relaxation_factor : float, optional
-            Relaxation factor for under-relaxation
-        boundary_conditions : dict or BoundaryConditionManager, optional
-            Boundary conditions
-        return_dict : bool, optional
-            If True, returns residual information in a dictionary format (default).
-            If False, returns separate residual values (deprecated).
-            
-        Returns:
-        --------
-        v_star : ndarray
-            Intermediate v-velocity field
-        d_v : ndarray
-            Momentum equation coefficient
-        residual_info : dict
-            Dictionary with residual information: 
-            - 'rel_norm': l2(r)/max(l2(r))
-            - 'field': residual field
+        Solve the v-momentum equation using AMG for a collocated grid.
         """
-        nx, ny = mesh.get_dimensions()
-        imax, jmax = nx, ny
         alpha = relaxation_factor
-        # Use current v as initial guess
-        v_initial_guess = v.copy()
-        d_v = np.zeros((imax, jmax+1))
 
-        # Ensure we have a BC manager instance
         if isinstance(boundary_conditions, BoundaryConditionManager):
             bc_manager = boundary_conditions
         else:
@@ -471,82 +420,82 @@ class AMGMomentumSolver(MomentumSolver):
                     for field_type, values in conditions.items():
                         bc_manager.set_condition(boundary, field_type, values)
 
-        # Apply BCs to u and v *before* coefficient calculation
-        u_bc, v_bc = bc_manager.apply_velocity_boundary_conditions(u.copy(), v.copy(), imax, jmax)
+        v_initial_guess = v.copy()
+        n_cells = mesh.n_cells
 
-        # Calculate coefficients using velocities with BCs applied
-        coeffs = self.discretization_scheme.calculate_v_coefficients(mesh, fluid, u_bc, v_bc, p, bc_manager)
-        v_a_e = coeffs['a_e']
-        v_a_w = coeffs['a_w']
-        v_a_n = coeffs['a_n']
-        v_a_s = coeffs['a_s']
-        v_a_p_unrelaxed = coeffs['a_p']
-        v_source_unrelaxed = coeffs['source']
+        # Pass original u,v to discretization; BCs handled by discretization scheme (Practice B)
+        # u_bc, v_bc = bc_manager.apply_velocity_boundary_conditions(...) # Removed
 
-        # Apply under-relaxation to coefficients
-        safe_ap_unrelaxed_v = np.where(np.abs(v_a_p_unrelaxed) > 1e-12, v_a_p_unrelaxed, 1e-12)
-        self.v_a_p = safe_ap_unrelaxed_v / alpha
-        if v_bc.shape != self.v_a_p.shape:
-             v_source = v_source_unrelaxed + (1 - alpha) * self.v_a_p * v_bc
-        else:
-             v_source = v_source_unrelaxed + (1 - alpha) * self.v_a_p * v_bc
+        coeffs = self.discretization_scheme.calculate_v_coefficients(mesh, fluid, u, v, p, bc_manager)
+        # Assume coeffs are returned as 1D arrays of size n_cells
+        a_p_unrelaxed = coeffs['a_p']
+        source_unrelaxed = coeffs['source']
+        if a_p_unrelaxed.size != n_cells or source_unrelaxed.size != n_cells:
+             raise ValueError(f"Coefficient array sizes ({a_p_unrelaxed.size}, {source_unrelaxed.size}) mismatch n_cells ({n_cells})")
 
-        # Store unrelaxed coefficients for residual calculation later
-        self.v_a_e = v_a_e
-        self.v_a_w = v_a_w
-        self.v_a_n = v_a_n
-        self.v_a_s = v_a_s
-        self.v_a_p_unrelaxed = v_a_p_unrelaxed
-        self.v_source_unrelaxed = v_source_unrelaxed
+        self.v_a_p_unrelaxed = a_p_unrelaxed 
+        self.v_source_unrelaxed = source_unrelaxed
 
-        # Build the sparse matrix system using RELAXED coefficients
-        self.v_matrix, self.v_rhs, idx_map = self._build_sparse_matrix(
-            v_a_e, v_a_w, v_a_n, v_a_s, self.v_a_p,
-            v_source,
-            nx, ny, is_u=False
+        # --- Prepare full relaxed coefficients (1D arrays) ---
+        safe_ap_full = np.where(np.abs(a_p_unrelaxed) > 1e-12, a_p_unrelaxed, 1e-12)
+        relaxed_a_p_full = safe_ap_full / alpha
+        
+        # Calculate relaxed source (all 1D arrays)
+        # Use original v field (flattened if needed) for relaxation term
+        v_flat = v.flatten() if v.ndim > 1 else v
+        if relaxed_a_p_full.shape != v_flat.shape:
+             raise ValueError(f"Shape mismatch for full relaxed source: relaxed_a_p_full {relaxed_a_p_full.shape} vs v_flat {v_flat.shape}")
+        if source_unrelaxed.shape != relaxed_a_p_full.shape:
+             raise ValueError(f"Shape mismatch for full relaxed source: source_unrelaxed {source_unrelaxed.shape} vs relaxed_a_p_full {relaxed_a_p_full.shape}")
+        relaxed_source_full = source_unrelaxed + (1.0 - alpha) * relaxed_a_p_full * v_flat
+        
+        # --- Build sparse system using FACE-BASED method for ALL cells ---
+        A, b = self._build_sparse_matrix_face_based(
+             mesh, relaxed_a_p_full, coeffs.get('a_nb', {}), relaxed_source_full, is_u=False
         )
 
-        # Create the AMG solver hierarchy
-        ml = pyamg.smoothed_aggregation_solver(self.v_matrix)
+        # --- Solve using AMG --- 
+        ml = pyamg.smoothed_aggregation_solver(A)
+        
+        # Ensure initial guess is flat
+        v_initial_guess_flat = v_initial_guess.flatten()
+        if v_initial_guess_flat.shape != b.shape:
+             if v_initial_guess.size == b.size:
+                  v_initial_guess_flat = v_initial_guess.reshape(b.shape)
+             else:
+                  raise ValueError(f"Shape mismatch for solver: initial guess {v_initial_guess_flat.shape} (orig: {v_initial_guess.shape}) vs rhs {b.shape}")
 
-        # Solve the RELAXED system Ax = b, using initial guess
-        v_flat = ml.solve(self.v_rhs, x0=v_initial_guess.flatten(), tol=self.tolerance, maxiter=self.max_iterations)
-
-        # Reshape result back to 2D
-        v_star = v_flat.reshape((imax, jmax+1))
-
-        # Apply boundary conditions explicitly AFTER the solve
-        _, v_star = bc_manager.apply_velocity_boundary_conditions(u.copy(), v_star, imax, jmax)
-
-        # Calculate d_v (using the RELAXED a_p)
-        d_v.fill(np.nan)
-        valid_ap_mask = np.abs(self.v_a_p) > 1e-12
-        dx = mesh.get_cell_sizes()[0]
-        d_v[valid_ap_mask] = dx / self.v_a_p[valid_ap_mask]
-
-        # Calculate residual norm and field using unrelaxed system
-        _, v_residual_field = self._calculate_unrelaxed_residual(
-            v_star, self.v_a_e, self.v_a_w, self.v_a_n, self.v_a_s,
-            self.v_a_p_unrelaxed, self.v_source_unrelaxed, nx, ny, is_u=False
+        v_full_flat = ml.solve(
+             b, 
+             x0=v_initial_guess_flat, 
+             tol=self.tolerance, 
+             maxiter=self.max_iterations
         )
 
-        # Calculate L2 norm of the interior residual field
-        v_interior_residual = v_residual_field[1:nx-1, 1:ny]
-        v_current_l2 = np.linalg.norm(v_interior_residual)
-        
-        # Keep track of the maximum L2 norm for relative scaling
-        if not hasattr(self, 'v_max_l2'):
-            self.v_max_l2 = v_current_l2
-        else:
-            self.v_max_l2 = max(self.v_max_l2, v_current_l2)
-        
-        # Calculate relative norm
-        v_rel_norm = v_current_l2 / np.linalg.norm(v_source_unrelaxed)
-        
-        # Create the minimal residual information dictionary
+        # --- Return 1D solution --- 
+        v_star = v_full_flat
+
+        # --- d_v calculation (1D) ---
+        d_v = np.zeros(n_cells) # Return 1D array
+        # Use Vp / aP definition
+        cell_volumes = mesh.get_cell_volumes()
+        if hasattr(self, 'v_a_p_unrelaxed') and self.v_a_p_unrelaxed is not None:
+            temp_ap_unrelaxed = self.v_a_p_unrelaxed # Assumed 1D
+            if temp_ap_unrelaxed.size == d_v.size and cell_volumes.size == d_v.size:
+                 valid_ap_mask = np.abs(temp_ap_unrelaxed) > 1e-12
+                 # d_v = Vp / aP_v
+                 d_v[valid_ap_mask] = cell_volumes[valid_ap_mask] / temp_ap_unrelaxed[valid_ap_mask]
+            else:
+                print(f"Warning: Size mismatch for d_v calculation: a_p {temp_ap_unrelaxed.size}, vol {cell_volumes.size}, d_v {d_v.size}")
+
+        r = b - A @ v_full_flat
+        norm_r = np.linalg.norm(r)
+        norm_b = np.linalg.norm(b)
+        rel_norm = norm_r / max(norm_b, 1e-10)
+
         residual_info = {
-            'rel_norm': v_rel_norm,  # l2(r)/max(l2(r))
-            'field': v_residual_field  # Absolute residual field
+            'rel_norm': rel_norm,
+            'field': r # Return 1D residual field from full system
         }
 
         return v_star, d_v, residual_info
