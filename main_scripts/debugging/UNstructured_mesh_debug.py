@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from naviflow_oo.preprocessing.mesh.unstructured import UnstructuredUniform
 
 def verify_unstructured_mesh():
-    MESH_SIZE_CENTER_UNIFORM = 0.5
+    MESH_SIZE_CENTER_UNIFORM = 0.2
     XMIN = 0
     XMAX = 1
     YMIN = 0

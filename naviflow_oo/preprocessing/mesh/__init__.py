@@ -19,7 +19,7 @@ from .structured_mesh import StructuredMesh
 # Keep unstructured imports
 from .unstructured import (
     UnstructuredUniform,
-    UnstructuredRefined,
-    Unstructured  # Kept for backwards compatibility
+    UnstructuredRefined
+    # Unstructured class removed as it was deprecated
 )
 from .plot_utils import plot_mesh, plot_structured_mesh, plot_unstructured_mesh 

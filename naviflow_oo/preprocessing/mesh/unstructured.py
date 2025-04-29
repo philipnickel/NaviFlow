@@ -13,7 +13,7 @@ except ImportError:
     pass  # We'll check again when needed and raise appropriate error messages
 
 from .mesh import UnstructuredMesh
-from .mesh_generators.unstructured_mesh import UnstructuredMeshGenerator
+#from .mesh_generators.unstructured_mesh import UnstructuredMeshGenerator
 
 
 class UnstructuredUniform(UnstructuredMesh):
@@ -109,14 +109,15 @@ class UnstructuredUniform(UnstructuredMesh):
         # Initialize base class with the processed mesh data
         super().__init__(nodes, faces, cells)
 
-    def _compute_geometry(self):
+    def _identify_boundary_faces(self, original_normals):
         """
-        Compute geometric properties and identify boundary faces.
-        Extends the parent class _compute_geometry method to identify boundary faces.
-        """
-        # Call the parent class method to compute basic geometric properties
-        super()._compute_geometry()
+        Identify and name boundary faces based on their position.
         
+        Parameters:
+        -----------
+        original_normals : ndarray, shape (F, 2)
+            The original face normals before any adjustments
+        """
         # Get domain bounds
         xmin = self._domain_bounds['xmin']
         xmax = self._domain_bounds['xmax']
@@ -126,31 +127,29 @@ class UnstructuredUniform(UnstructuredMesh):
         # Small tolerance for floating point comparison
         tol = 1e-10
         
-        # Get face centers and normals
-        face_centers = self._face_centers
-        face_normals = self._face_normals
-        neighbors = self._neighbor_cells
-        
         # Identify boundary faces (where neighbor = -1)
         for face_idx in range(len(self._faces)):
-            if neighbors[face_idx] == -1:
+            if self._neighbor_cells[face_idx] == -1:
                 # This is a boundary face
-                center = face_centers[face_idx]
-                normal = face_normals[face_idx]
+                center = self._face_centers[face_idx]
                 
                 # Determine which boundary this face belongs to
                 if abs(center[0] - xmin) < tol:
                     # Left boundary
                     self.boundary_face_to_name[face_idx] = "left"
+                    self._face_normals[face_idx] = np.array([-1.0, 0.0])
                 elif abs(center[0] - xmax) < tol:
                     # Right boundary
                     self.boundary_face_to_name[face_idx] = "right"
+                    self._face_normals[face_idx] = np.array([1.0, 0.0])
                 elif abs(center[1] - ymin) < tol:
                     # Bottom boundary
                     self.boundary_face_to_name[face_idx] = "bottom"
+                    self._face_normals[face_idx] = np.array([0.0, -1.0])
                 elif abs(center[1] - ymax) < tol:
                     # Top boundary
                     self.boundary_face_to_name[face_idx] = "top"
+                    self._face_normals[face_idx] = np.array([0.0, 1.0])
 
 
 class UnstructuredRefined(UnstructuredMesh):
@@ -298,14 +297,15 @@ class UnstructuredRefined(UnstructuredMesh):
         # Initialize base class with the processed mesh data
         super().__init__(nodes, faces, cells)
 
-    def _compute_geometry(self):
+    def _identify_boundary_faces(self, original_normals):
         """
-        Compute geometric properties and identify boundary faces.
-        Extends the parent class _compute_geometry method to identify boundary faces.
-        """
-        # Call the parent class method to compute basic geometric properties
-        super()._compute_geometry()
+        Identify and name boundary faces based on their position.
         
+        Parameters:
+        -----------
+        original_normals : ndarray, shape (F, 2)
+            The original face normals before any adjustments
+        """
         # Get domain bounds
         xmin = self._domain_bounds['xmin']
         xmax = self._domain_bounds['xmax']
@@ -315,150 +315,26 @@ class UnstructuredRefined(UnstructuredMesh):
         # Small tolerance for floating point comparison
         tol = 1e-10
         
-        # Get face centers and normals
-        face_centers = self._face_centers
-        face_normals = self._face_normals
-        neighbors = self._neighbor_cells
-        
         # Identify boundary faces (where neighbor = -1)
         for face_idx in range(len(self._faces)):
-            if neighbors[face_idx] == -1:
+            if self._neighbor_cells[face_idx] == -1:
                 # This is a boundary face
-                center = face_centers[face_idx]
-                normal = face_normals[face_idx]
+                center = self._face_centers[face_idx]
                 
                 # Determine which boundary this face belongs to
                 if abs(center[0] - xmin) < tol:
                     # Left boundary
                     self.boundary_face_to_name[face_idx] = "left"
+                    self._face_normals[face_idx] = np.array([-1.0, 0.0])
                 elif abs(center[0] - xmax) < tol:
                     # Right boundary
                     self.boundary_face_to_name[face_idx] = "right"
+                    self._face_normals[face_idx] = np.array([1.0, 0.0])
                 elif abs(center[1] - ymin) < tol:
                     # Bottom boundary
                     self.boundary_face_to_name[face_idx] = "bottom"
+                    self._face_normals[face_idx] = np.array([0.0, -1.0])
                 elif abs(center[1] - ymax) < tol:
                     # Top boundary
                     self.boundary_face_to_name[face_idx] = "top"
-
-
-class Unstructured:
-    """
-    Utility class for creating unstructured meshes.
-    
-    This class provides factory methods to create different types of unstructured meshes.
-    It serves as a bridge between UnstructuredUniform and UnstructuredRefined.
-    
-    Note: This class is deprecated and maintained for backward compatibility.
-    Please use UnstructuredUniform and UnstructuredRefined directly.
-    """
-    
-    @staticmethod
-    def create_uniform(mesh_size, length=1.0, height=1.0, origin=(0.0, 0.0), xmin=None, xmax=None, ymin=None, ymax=None):
-        """
-        Create a uniform unstructured mesh. (Deprecated)
-        
-        Parameters:
-        -----------
-        mesh_size : float
-            Characteristic mesh element size
-        length : float, optional
-            Length of the domain in x-direction, defaults to 1.0
-        height : float, optional
-            Height of the domain in y-direction, defaults to 1.0
-        origin : tuple of float, optional
-            Origin coordinates (x_origin, y_origin), defaults to (0.0, 0.0)
-        xmin : float, optional
-            Minimum x-coordinate, overrides origin[0] if provided
-        xmax : float, optional
-            Maximum x-coordinate, overrides length if provided with xmin
-        ymin : float, optional
-            Minimum y-coordinate, overrides origin[1] if provided
-        ymax : float, optional
-            Maximum y-coordinate, overrides height if provided with ymin
-            
-        Returns:
-        --------
-        UnstructuredUniform
-            A uniform unstructured mesh with the specified parameters
-        """
-        # Handle alternative specification methods
-        x_origin, y_origin = origin
-        
-        if xmin is None:
-            xmin = x_origin
-        if ymin is None:
-            ymin = y_origin
-            
-        if xmax is None:
-            xmax = xmin + length
-        if ymax is None:
-            ymax = ymin + height
-            
-        return UnstructuredUniform(
-            mesh_size=mesh_size, 
-            xmin=xmin, 
-            xmax=xmax,
-            ymin=ymin, 
-            ymax=ymax
-        )
-    
-    @staticmethod
-    def create_refined_cavity(mesh_size_walls, mesh_size_lid, mesh_size_center, 
-                              length=1.0, height=1.0, origin=(0.0, 0.0),
-                              xmin=None, xmax=None, ymin=None, ymax=None,
-                              dist_min_lid=0.05, dist_max_lid=0.25,
-                              dist_min_walls=0.05, dist_max_walls=0.4):
-        """
-        Create a refined unstructured mesh for lid-driven cavity problems. (Deprecated)
-        
-        Parameters:
-        -----------
-        mesh_size_walls : float
-            Mesh element size near the walls (bottom, left, right)
-        mesh_size_lid : float
-            Mesh element size near the lid (top boundary)
-        mesh_size_center : float
-            Mesh element size in the center of the domain
-        length : float, optional
-            Length of the domain in x-direction, defaults to 1.0
-        height : float, optional
-            Height of the domain in y-direction, defaults to 1.0
-        origin : tuple of float, optional
-            Origin coordinates (x_origin, y_origin), defaults to (0.0, 0.0)
-        xmin : float, optional
-            Minimum x-coordinate, overrides origin[0] if provided
-        xmax : float, optional
-            Maximum x-coordinate, overrides length if provided with xmin
-        ymin : float, optional
-            Minimum y-coordinate, overrides origin[1] if provided
-        ymax : float, optional
-            Maximum y-coordinate, overrides height if provided with ymin
-            
-        Returns:
-        --------
-        UnstructuredRefined
-            A refined unstructured mesh suitable for lid-driven cavity simulations
-        """
-        # Handle alternative specification methods
-        x_origin, y_origin = origin
-        
-        if xmin is None:
-            xmin = x_origin
-        if ymin is None:
-            ymin = y_origin
-            
-        if xmax is None:
-            xmax = xmin + length
-        if ymax is None:
-            ymax = ymin + height
-            
-        return UnstructuredRefined(
-            mesh_size_walls=mesh_size_walls,
-            mesh_size_lid=mesh_size_lid,
-            mesh_size_center=mesh_size_center,
-            xmin=xmin,
-            xmax=xmax,
-            ymin=ymin,
-            ymax=ymax
-        ) 
+                    self._face_normals[face_idx] = np.array([0.0, 1.0]) 

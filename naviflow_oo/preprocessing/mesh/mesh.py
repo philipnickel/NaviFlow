@@ -18,6 +18,8 @@ class Mesh(ABC):
         Initialize the mesh with an empty boundary face mapping.
         """
         self.boundary_face_to_name = {}  # face index → boundary name
+        self._face_distances = None
+        self._face_interpolation_factors = None
     
     @abstractmethod
     def get_node_positions(self):
@@ -136,6 +138,130 @@ class Mesh(ABC):
         n_cells = self.n_cells
         return n_cells, n_cells, n_cells
     
+    def _finalize_geometry(self):
+        """
+        Finalize mesh geometry by adjusting face normals and computing interpolation factors.
+        This method is called after mesh-specific geometry computation is complete.
+        """
+        self._adjust_face_normals_by_owner()
+        self._compute_interpolation_factors()
+    
+    def _adjust_face_normals_by_owner(self):
+        """
+        Adjust face normals to ensure they point outward from the owner cell.
+        For internal faces, the normal should point from owner to neighbor.
+        For boundary faces, the normal should point outward from the domain.
+        """
+        face_centers = self.get_face_centers()
+        cell_centers = self.get_cell_centers()
+        face_normals = self.get_face_normals()
+        owner_cells, neighbor_cells = self.get_owner_neighbor()
+        
+        for face_idx in range(self.n_faces):
+            owner_idx = owner_cells[face_idx]
+            if owner_idx == -1:
+                continue  # skip invalid faces
+
+            # Ensure normal points outward from owner
+            # Vector from owner center to face center
+            vec = face_centers[face_idx] - cell_centers[owner_idx]
+            
+            # Check if vector has non-zero length before dot product
+            if np.linalg.norm(vec) > 1e-12:
+                dot = np.dot(face_normals[face_idx], vec)
+                if dot < -1e-9: # Allow for small numerical inaccuracies
+                    face_normals[face_idx] *= -1.0
+            # else: Handle coincident owner and face centers? Maybe log a warning.
+            #     print(f"Warning: Owner cell {owner_idx} center coincides with face {face_idx} center.")
+    
+    def _compute_interpolation_factors(self):
+        """
+        Compute geometric factors needed for face value interpolation.
+        This function is called after the mesh geometry has been computed.
+        """
+        self._face_distances = np.zeros(self.n_faces)
+        self._face_interpolation_factors = np.zeros((self.n_faces, 2)) # Stores [g_C, g_F]
+
+        owner_cells, neighbor_cells = self.get_owner_neighbor()
+        face_centers = self.get_face_centers()
+        cell_centers = self.get_cell_centers()
+
+        for face_idx in range(self.n_faces):
+            owner_idx = owner_cells[face_idx]
+            neighbor_idx = neighbor_cells[face_idx]
+
+            Cf = face_centers[face_idx]
+            Cc = cell_centers[owner_idx]
+
+            if neighbor_idx != -1:
+                # Internal face
+                Cn = cell_centers[neighbor_idx]
+                vec_CN = Cn - Cc
+                dist_CN = np.linalg.norm(vec_CN)
+                if dist_CN < 1e-12:
+                    # Handle coincident cell centers (should ideally not happen)
+                    g_C = 0.5
+                    g_F = 0.5
+                    dist_CfC = 0.0 # Or handle as error
+                else:
+                    vec_e = vec_CN / dist_CN
+                    dist_CfC = np.dot(Cf - Cc, vec_e)
+                    g_F = dist_CfC / dist_CN
+                    g_C = 1.0 - g_F
+                    # Clamp weights to avoid extrapolation issues, though ideally handled upstream
+                    g_F = np.clip(g_F, 0.0, 1.0)
+                    g_C = 1.0 - g_F
+                self._face_distances[face_idx] = dist_CN
+            else:
+                # Boundary face
+                # Distance is from cell center Cc to face center Cf
+                # Interpolation weights are 1 for owner, 0 for neighbor
+                vec_CfC = Cf - Cc
+                dist_CfC = np.linalg.norm(vec_CfC)
+                g_C = 1.0
+                g_F = 0.0
+                # Store distance from cell center to boundary face center
+                # May need adjustment based on BC application
+                self._face_distances[face_idx] = dist_CfC
+
+            self._face_interpolation_factors[face_idx, 0] = g_C
+            self._face_interpolation_factors[face_idx, 1] = g_F
+    
+    def get_face_interpolation_factors(self, face_idx):
+        """
+        Returns the interpolation factors (weights) for a given face.
+        These factors are used to interpolate values from adjacent cell centers
+        to the face center: phi_f = g_C * phi_C + g_F * phi_F
+        where C is the owner cell and F is the neighbor cell.
+
+        Parameters:
+        -----------
+        face_idx : int
+            Index of the face
+
+        Returns:
+        --------
+        tuple : (g_C, g_F)
+            Interpolation weights for the owner (C) and neighbor (F) cells.
+            For boundary faces, g_F is typically 0 and g_C is 1.
+        """
+        if face_idx < 0 or face_idx >= self.n_faces:
+            raise IndexError(f"Face index {face_idx} out of bounds (0-{self.n_faces-1})")
+        return self._face_interpolation_factors[face_idx, 0], self._face_interpolation_factors[face_idx, 1]
+
+    def get_face_distances(self):
+        """
+        Returns the distances relevant for gradient calculations across faces.
+        - For internal faces: Distance between owner and neighbor cell centers (d_CF).
+        - For boundary faces: Distance between owner cell center and face center (d_Cf).
+
+        Returns:
+        --------
+        ndarray : shape (F,)
+            Distances for all faces.
+        """
+        return self._face_distances
+    
     @property
     @abstractmethod
     def n_cells(self):
@@ -244,12 +370,35 @@ class UnstructuredMesh(Mesh):
         self._compute_geometry()
     
     def _compute_geometry(self):
-        """Compute geometric properties of the mesh."""
-        n_cells = len(self._cells)
-        n_faces = len(self._faces)
-        n_nodes = len(self._nodes)
+        """
+        Compute all geometric properties of the mesh.
+        This method delegates to specific subtasks and finalizes with shared base class logic.
+        """
+        # Calculate face and cell geometries
+        self._compute_face_geometry()
+        self._compute_cell_geometry()
         
-        # Compute face centers and normals
+        # Establish owner-neighbor relationships
+        self._assign_owner_neighbor()
+        
+        # Store original normal directions for boundary identification
+        # This is important because the _finalize_geometry may change them
+        original_normals = np.copy(self._face_normals)
+        
+        # Identify boundary faces - must be done after _assign_owner_neighbor
+        # But before _finalize_geometry, which may change the normals
+        self._identify_boundary_faces(original_normals)
+        
+        # Finalize with shared logic from base class
+        self._finalize_geometry()
+    
+    def _compute_face_geometry(self):
+        """
+        Compute face centers, normals, and areas.
+        """
+        n_faces = len(self._faces)
+        
+        # Initialize arrays
         self._face_centers = np.zeros((n_faces, 2))
         self._face_normals = np.zeros((n_faces, 2))
         self._face_areas = np.zeros(n_faces)
@@ -276,11 +425,14 @@ class UnstructuredMesh(Mesh):
                 else:
                     self._face_normals[i] = np.array([0.0, 0.0]) # Or handle degenerate faces differently
                 self._face_areas[i] = length
+    
+    def _compute_cell_geometry(self):
+        """
+        Compute cell centers and volumes.
+        """
+        n_cells = len(self._cells)
         
-        # Store initial normals temporarily
-        initial_normals = np.copy(self._face_normals)
-        
-        # Compute cell centers (using nodes) and volumes (using face centers - TODO revisit)
+        # Initialize arrays
         self._cell_centers = np.zeros((n_cells, 2))
         self._cell_volumes = np.zeros(n_cells)
         
@@ -297,13 +449,7 @@ class UnstructuredMesh(Mesh):
             else:
                  self._cell_centers[i] = np.array([np.nan, np.nan]) # Handle empty cells if they occur
 
-            # For a 2D cell, volume (area) can be computed using node coordinates (Shoelace formula)
-            # Re-implement using nodes for potentially better accuracy
-            x_nodes = cell_nodes[:, 0]
-            y_nodes = cell_nodes[:, 1]
-            # We need nodes in order. This requires more complex polygon reconstruction.
-            # Sticking with face center average for volume for now, but center uses nodes.
-            # TODO: Revisit volume calculation using ordered nodes if needed.
+            # For a 2D cell, calculate volume (area)
             if len(cell) > 0:
                 cell_face_centers = self._face_centers[cell]
                 x_face_centers = cell_face_centers[:, 0]
@@ -311,11 +457,20 @@ class UnstructuredMesh(Mesh):
                 self._cell_volumes[i] = 0.5 * np.abs(np.dot(x_face_centers, np.roll(y_face_centers, 1)) - np.dot(y_face_centers, np.roll(x_face_centers, 1)))
             else:
                 self._cell_volumes[i] = 0.0
+    
+    def _assign_owner_neighbor(self):
+        """
+        Assign owner and neighbor cells for each face.
+        The owner cell is the first cell encountered for a face.
+        The neighbor cell is the second cell encountered (if any).
+        """
+        n_faces = len(self._faces)
         
-        # --- Pass 1: Assign Owner/Neighbor based on connectivity --- 
+        # Initialize arrays
         self._owner_cells = np.full(n_faces, -1, dtype=int)
         self._neighbor_cells = np.full(n_faces, -1, dtype=int)
 
+        # First pass: assign owners and neighbors based on connectivity
         for cell_idx, cell_faces in enumerate(self._cells):
             for face_idx in cell_faces:
                 if self._owner_cells[face_idx] == -1:
@@ -324,86 +479,34 @@ class UnstructuredMesh(Mesh):
                 elif self._neighbor_cells[face_idx] == -1: 
                     # Second cell encountering this face becomes the neighbor
                     self._neighbor_cells[face_idx] = cell_idx
-                # else: # Should not happen for triangular 2D meshes (max 2 cells per face)
-                #    pass
-
-        # --- Pass 2: Correct Normal Orientation based on Owner --- 
-        # Ensure final stored normals point outward from the assigned owner cell
-        for face_idx in range(n_faces):
-            owner_idx = self._owner_cells[face_idx]
-            initial_normal = initial_normals[face_idx]
-            
-            if owner_idx != -1:
-                # Calculate vector from owner center to face center
-                vec_owner_to_face = self._face_centers[face_idx] - self._cell_centers[owner_idx]
-                
-                # Check if owner center and face center are coincident
-                if np.linalg.norm(vec_owner_to_face) > 1e-12:
-                    dot_product = np.dot(initial_normal, vec_owner_to_face)
-                    
-                    if dot_product < -1e-9: # Initial normal points inward from owner
-                        # Flip the normal for final storage
-                        self._face_normals[face_idx] = -initial_normal
-                    else:
-                        # Initial normal points outward (or perpendicular), keep it
-                        self._face_normals[face_idx] = initial_normal
-                else:
-                    # Coincident centers, keep initial normal orientation (arbitrary)
-                    self._face_normals[face_idx] = initial_normal
-            else:
-                 # No owner assigned (e.g., orphan face - shouldn't happen in valid mesh)
-                 # Keep the initial normal orientation
-                 self._face_normals[face_idx] = initial_normal
-                            
-        # Compute geometric quantities for interpolation
-        self._compute_interpolation_factors()
     
-    def _compute_interpolation_factors(self):
-        """Compute geometric factors needed for face value interpolation."""
-        self._face_distances = np.zeros(self.n_faces)
-        self._face_interpolation_factors = np.zeros((self.n_faces, 2)) # Stores [g_C, g_F]
-
+    def _identify_boundary_faces(self, original_normals):
+        """
+        Identify boundary faces based on neighbor cell relationships.
+        This is a base implementation that can be overridden by specific mesh types.
+        
+        Parameters:
+        -----------
+        original_normals : ndarray, shape (F, 2)
+            The original face normals before any adjustments
+        """
+        # Base implementation just identifies boundaries, without naming them
         for face_idx in range(self.n_faces):
-            owner_idx = self._owner_cells[face_idx]
-            neighbor_idx = self._neighbor_cells[face_idx]
-
-            Cf = self._face_centers[face_idx]
-            Cc = self._cell_centers[owner_idx]
-
-            if neighbor_idx != -1:
-                # Internal face
-                Cn = self._cell_centers[neighbor_idx]
-                vec_CN = Cn - Cc
-                dist_CN = np.linalg.norm(vec_CN)
-                if dist_CN < 1e-12:
-                    # Handle coincident cell centers (should ideally not happen)
-                    g_C = 0.5
-                    g_F = 0.5
-                    dist_CfC = 0.0 # Or handle as error
-                else:
-                    vec_e = vec_CN / dist_CN
-                    dist_CfC = np.dot(Cf - Cc, vec_e)
-                    g_F = dist_CfC / dist_CN
-                    g_C = 1.0 - g_F
-                    # Clamp weights to avoid extrapolation issues, though ideally handled upstream
-                    g_F = np.clip(g_F, 0.0, 1.0)
-                    g_C = 1.0 - g_F
-                self._face_distances[face_idx] = dist_CN
-            else:
-                # Boundary face
-                # Distance is from cell center Cc to face center Cf
-                # Interpolation weights are 1 for owner, 0 for neighbor
-                vec_CfC = Cf - Cc
-                dist_CfC = np.linalg.norm(vec_CfC)
-                g_C = 1.0
-                g_F = 0.0
-                # Store distance from cell center to boundary face center
-                # May need adjustment based on BC application
-                self._face_distances[face_idx] = dist_CfC
-
-            self._face_interpolation_factors[face_idx, 0] = g_C
-            self._face_interpolation_factors[face_idx, 1] = g_F
-
+            if self._neighbor_cells[face_idx] == -1:
+                # This is a boundary face
+                owner_idx = self._owner_cells[face_idx]
+                if owner_idx != -1:
+                    # Calculate vector from owner center to face center
+                    vec_owner_to_face = self._face_centers[face_idx] - self._cell_centers[owner_idx]
+                    
+                    # Check if owner center and face center are coincident
+                    if np.linalg.norm(vec_owner_to_face) > 1e-12:
+                        dot_product = np.dot(original_normals[face_idx], vec_owner_to_face)
+                        
+                        if dot_product < -1e-9: # Initial normal points inward from owner
+                            # Flip the normal for final storage
+                            self._face_normals[face_idx] = -original_normals[face_idx]
+    
     def get_node_positions(self):
         """Returns all node positions."""
         return self._nodes
@@ -432,41 +535,6 @@ class UnstructuredMesh(Mesh):
         """Returns owner and neighbor cell indices for all faces."""
         return self._owner_cells, self._neighbor_cells
     
-    def get_face_interpolation_factors(self, face_idx):
-        """
-        Returns the interpolation factors (weights) for a given face.
-        These factors are used to interpolate values from adjacent cell centers
-        to the face center: phi_f = g_C * phi_C + g_F * phi_F
-        where C is the owner cell and F is the neighbor cell.
-
-        Parameters:
-        -----------
-        face_idx : int
-            Index of the face
-
-        Returns:
-        --------
-        tuple : (g_C, g_F)
-            Interpolation weights for the owner (C) and neighbor (F) cells.
-            For boundary faces, g_F is typically 0 and g_C is 1.
-        """
-        if face_idx < 0 or face_idx >= self.n_faces:
-            raise IndexError(f"Face index {face_idx} out of bounds (0-{self.n_faces-1})")
-        return self._face_interpolation_factors[face_idx, 0], self._face_interpolation_factors[face_idx, 1]
-
-    def get_face_distances(self):
-        """
-        Returns the distances relevant for gradient calculations across faces.
-        - For internal faces: Distance between owner and neighbor cell centers (d_CF).
-        - For boundary faces: Distance between owner cell center and face center (d_Cf).
-
-        Returns:
-        --------
-        ndarray : shape (F,)
-            Distances for all faces.
-        """
-        return self._face_distances
-
     @property
     def n_cells(self):
         """Returns the number of cells in the mesh."""

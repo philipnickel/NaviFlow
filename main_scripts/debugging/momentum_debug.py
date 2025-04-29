@@ -1,12 +1,12 @@
 import numpy as np
 from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
-from naviflow_oo.preprocessing.mesh.structured import StructuredUniform
+from naviflow_oo.preprocessing.mesh.structured_mesh import StructuredMesh
 from naviflow_oo.constructor.properties.fluid import FluidProperties  # Assuming a Fluid class is available
 
 
 def test_lid_driven_cavity_amg():
     # Create structured 10x10 mesh (10x10 cells -> 11x11 nodes)
-    mesh = StructuredUniform(n_cells_x=10, n_cells_y=10, xmin=0, xmax=1, ymin=0, ymax=1)
+    mesh = StructuredMesh(n_cells_x=10, n_cells_y=10, xmin=0, xmax=1, ymin=0, ymax=1, is_uniform=True)
     owners, neighbors = mesh.get_owner_neighbor()
     invalid_owners = [i for i, o in enumerate(owners) if o < 0 or o >= mesh.n_cells]
     if invalid_owners:
@@ -55,5 +55,5 @@ def test_lid_driven_cavity_amg():
 if __name__ == '__main__':
     test_lid_driven_cavity_amg()
     # Recreate the mesh to print its dimensions based on the new parameters
-    #mesh = StructuredUniform(n_cells_x=10, n_cells_y=10, xmin=0, xmax=1, ymin=0, ymax=1)
+    #mesh = StructuredMesh(n_cells_x=10, n_cells_y=10, xmin=0, xmax=1, ymin=0, ymax=1, is_uniform=True)
     #print(f"Mesh dimensions: {mesh.n_cells} cells, {mesh.n_faces} faces, {mesh.n_nodes} nodes")
