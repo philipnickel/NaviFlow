@@ -8,7 +8,8 @@ from ...constructor.boundary_conditions import BoundaryConditionManager
 
 class StandardVelocityUpdater(VelocityUpdater):
     """
-    Implementation of a standard velocity updater that handles 1D arrays consistently.
+    Implementation of a standard velocity updater using face-based pressure correction.
+    Handles 1D arrays consistently.
     """
     
     def __init__(self):
@@ -19,7 +20,10 @@ class StandardVelocityUpdater(VelocityUpdater):
         
     def update_velocity(self, mesh, u_star, v_star, p_prime, d_u, d_v, boundary_conditions=None):
         """
-        Update velocity fields based on pressure correction (consistently using 1D arrays).
+        Update velocity fields based on pressure correction using face pressure differences.
+        Consistent with standard SIMPLE formulation.
+        u = u* - d_u * grad(p')_x * Vp  (approximated via face summation)
+        v = v* - d_v * grad(p')_y * Vp  (approximated via face summation)
         
         Parameters
         ----------
@@ -30,7 +34,8 @@ class StandardVelocityUpdater(VelocityUpdater):
         p_prime : ndarray
             Pressure correction field (1D array of size n_cells)
         d_u, d_v : ndarray
-            Inverse diagonal coefficients (1D arrays of size n_cells)
+            Momentum diagonal coefficients (1D arrays of size n_cells)
+            Assumed definition: d_u = Vp / aP_u_unrelaxed.
         boundary_conditions : BoundaryConditionManager, optional
             Boundary conditions manager
         
@@ -47,96 +52,74 @@ class StandardVelocityUpdater(VelocityUpdater):
         d_v_flat = d_v.flatten() if d_v.ndim > 1 else d_v
         
         n_cells = mesh.n_cells
+        n_faces = mesh.n_faces
+        owners, neighbors = mesh.get_owner_neighbor()
+        face_areas = mesh.get_face_areas()
+        face_normals = mesh.get_face_normals()
+        cell_volumes = mesh.get_cell_volumes() # Needed if d_u/d_v don't include Vp
+        
         # Initialize new velocity fields as copies of the intermediate fields
         u_new = u_star_flat.copy()
         v_new = v_star_flat.copy()
         
-        # Calculate pressure gradients - mesh-agnostic approach
-        is_structured = hasattr(mesh, 'get_dimensions')
+        # --- Velocity Update using Face Pressure Summation --- 
+        # grad(p')_x * Vp is approximated by Sum_faces( p'_face * normal_x * Area_face )
         
-        if is_structured:
-            # Structured mesh - calculate gradients using central differences
-            nx, ny = mesh.get_dimensions()
-            dx, dy = mesh.get_cell_sizes()
+        # Initialize gradient * volume terms
+        grad_p_prime_x_vol = np.zeros(n_cells)
+        grad_p_prime_y_vol = np.zeros(n_cells)
+        
+        for face_idx in range(n_faces):
+            owner = owners[face_idx]
+            neighbor = neighbors[face_idx]
+            area = face_areas[face_idx]
+            normal = face_normals[face_idx]
             
-            # Temporarily reshape to 2D for central difference calculation
-            p_prime_2d = p_prime_flat.reshape(nx, ny) if p_prime_flat.size == nx*ny else None
-            
-            if p_prime_2d is not None:
-                # Initialize gradient arrays
-                dpdx = np.zeros(n_cells)
-                dpdy = np.zeros(n_cells)
+            # Ensure owner is valid
+            if owner < 0 or owner >= n_cells:
+                continue
                 
-                # Reshape index arrays for vectorized computation
-                i_indices = np.arange(nx*ny) // ny
-                j_indices = np.arange(nx*ny) % ny
-                
-                # Calculate central differences for interior cells
-                # East-West gradient (dP/dx)
-                mask_interior_x = (i_indices > 0) & (i_indices < nx-1)
-                i_valid_x = i_indices[mask_interior_x]
-                j_valid_x = j_indices[mask_interior_x]
-                
-                # Use vectorized indexing to calculate east-west gradients
-                if mask_interior_x.any():
-                    east_indices = np.ravel_multi_index((i_valid_x+1, j_valid_x), (nx, ny))
-                    west_indices = np.ravel_multi_index((i_valid_x-1, j_valid_x), (nx, ny))
-                    flat_indices = np.ravel_multi_index((i_valid_x, j_valid_x), (nx, ny))
-                    
-                    # Central difference formula: dP/dx ≈ (P_east - P_west)/(2Δx)
-                    dpdx[flat_indices] = (p_prime_flat[east_indices] - p_prime_flat[west_indices]) / (2*dx)
-                
-                # North-South gradient (dP/dy)
-                mask_interior_y = (j_indices > 0) & (j_indices < ny-1)
-                i_valid_y = i_indices[mask_interior_y]
-                j_valid_y = j_indices[mask_interior_y]
-                
-                # Use vectorized indexing to calculate north-south gradients
-                if mask_interior_y.any():
-                    north_indices = np.ravel_multi_index((i_valid_y, j_valid_y+1), (nx, ny))
-                    south_indices = np.ravel_multi_index((i_valid_y, j_valid_y-1), (nx, ny))
-                    flat_indices = np.ravel_multi_index((i_valid_y, j_valid_y), (nx, ny))
-                    
-                    # Central difference formula: dP/dy ≈ (P_north - P_south)/(2Δy)
-                    dpdy[flat_indices] = (p_prime_flat[north_indices] - p_prime_flat[south_indices]) / (2*dy)
+            # Interpolate p' to face center
+            if neighbor >= 0 and neighbor < n_cells:
+                # Internal face: Linear interpolation
+                # dist_own = np.linalg.norm(mesh.get_face_centers()[face_idx] - mesh.get_cell_centers()[owner])
+                # dist_nei = np.linalg.norm(mesh.get_cell_centers()[neighbor] - mesh.get_face_centers()[face_idx])
+                # weight_own = dist_nei / (dist_own + dist_nei)
+                # weight_nei = dist_own / (dist_own + dist_nei)
+                # p_prime_face = weight_own * p_prime_flat[owner] + weight_nei * p_prime_flat[neighbor]
+                # --- Use simple average for now --- 
+                p_prime_face = 0.5 * (p_prime_flat[owner] + p_prime_flat[neighbor])
             else:
-                # Fall back to forward/backward differences if reshape failed
-                dpdx = np.zeros(n_cells)
-                dpdy = np.zeros(n_cells)
-                print("Warning: Could not reshape pressure field for central difference gradient.")
-        else:
-            # Unstructured mesh - more complex gradient calculation
-            # This is a simplified placeholder - use mesh interpolation methods when available
-            dpdx = np.zeros(n_cells)
-            dpdy = np.zeros(n_cells)
+                # Boundary face: Assume zero Neumann gradient (dp'/dn = 0) -> p'_face = p'_owner
+                p_prime_face = p_prime_flat[owner]
             
-            # Here we should use mesh-agnostic gradient calculation
-            # For now, just warn that this needs implementation
-            print("Warning: Unstructured mesh gradient calculation not fully implemented.")
+            # Accumulate pressure force term (p' * normal * Area) for the owner cell
+            pressure_force_x_face = p_prime_face * normal[0] * area
+            pressure_force_y_face = p_prime_face * normal[1] * area
             
-        # Update velocities using consistent 1D arrays
-        u_new -= d_u_flat * dpdx
-        v_new -= d_v_flat * dpdy
+            grad_p_prime_x_vol[owner] += pressure_force_x_face
+            grad_p_prime_y_vol[owner] += pressure_force_y_face
             
-        # Apply boundary conditions if provided
+            # If internal face, also add contribution to neighbor (force is opposite)
+            if neighbor >= 0 and neighbor < n_cells:
+                grad_p_prime_x_vol[neighbor] -= pressure_force_x_face
+                grad_p_prime_y_vol[neighbor] -= pressure_force_y_face
+
+        # Perform the velocity update: u = u* - d_u * (Sum P'_f Nx Af) = u* - d_u * (gradP'_x * Vol)
+        # Ensure d_u/d_v are defined as Vp/aP before using this directly.
+        # If d_u/d_v are 1/aP, need to multiply by Vp here.
+        # Let's assume d_u = Vp/aP based on AMGSolver implementation.
+        u_new -= d_u_flat * grad_p_prime_x_vol
+        v_new -= d_v_flat * grad_p_prime_y_vol
+            
+        # Apply boundary conditions if provided (using the passed manager)
         if boundary_conditions is not None:
-            if is_structured:
-                # For structured mesh, temporarily reshape to apply BCs
-                u_2d = u_new.reshape(nx, ny) if u_new.size == nx*ny else None
-                v_2d = v_new.reshape(nx, ny) if v_new.size == nx*ny else None
-                
-                if u_2d is not None and v_2d is not None:
-                    # Apply BCs in 2D
-                    u_bc, v_bc = boundary_conditions.apply_velocity_boundary_conditions(
-                        u_2d, v_2d, nx, ny
-                    )
-                    # Flatten back to 1D
-                    u_new = u_bc.flatten()
-                    v_new = v_bc.flatten()
-                else:
-                    print("Warning: Could not reshape velocity fields for BC application.")
-            else:
-                # For unstructured mesh, BC application needs to be implemented
-                print("Warning: Unstructured mesh boundary conditions not fully implemented.")
+             # Apply boundary conditions directly to the corrected 1D fields
+             # Ensure the BC application method exists in the manager
+             if hasattr(boundary_conditions, 'apply_velocity_boundary_conditions_to_flat'):
+                 u_new, v_new = boundary_conditions.apply_velocity_boundary_conditions_to_flat(u_new, v_new, mesh)
+             else:
+                 print("Warning: BoundaryConditionManager does not have 'apply_velocity_boundary_conditions_to_flat' method.")
+                 # Potentially fall back to structured assumption if needed, but ideally should be unified.
                 
         return u_new, v_new

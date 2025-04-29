@@ -2,7 +2,7 @@ import numpy as np
 from scipy.sparse import diags, csr_matrix
 from scipy.sparse.linalg import LinearOperator, gmres, bicgstab, spilu
 from .base_momentum_solver import MomentumSolver
-from .discretization import power_law, quick, second_order_upwind
+from .discretization import power_law, quick, upwind
 from ...constructor.boundary_conditions import BoundaryConditionManager
 
 __all__ = ["MatrixFreeMomentumSolver"]
@@ -36,7 +36,7 @@ class MatrixFreeMomentumSolver(MomentumSolver):
         schemes = {
             "power_law": power_law.PowerLawDiscretization,
             "quick": quick.QUICKDiscretization,
-            "second_order_upwind": second_order_upwind.SecondOrderUpwindDiscretization,
+            "second_order_upwind": upwind.SecondOrderUpwindDiscretization,
         }
         try:
             self.discretization_scheme = schemes[discretization_scheme]()

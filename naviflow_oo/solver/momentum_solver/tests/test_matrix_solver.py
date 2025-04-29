@@ -11,8 +11,8 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
 from naviflow_oo.solver.momentum_solver.matrix_momentum_solver import MatrixMomentumSolver
-from naviflow_oo.mesh.structured_mesh import StructuredMesh
-from naviflow_oo.fluid.fluid_properties import FluidProperties
+from naviflow_oo.preprocessing.mesh.structured import StructuredUniform
+from naviflow_oo.constructor.properties.fluid import FluidProperties
 from naviflow_oo.constructor.boundary_conditions import BoundaryConditionManager
 
 
@@ -24,10 +24,10 @@ class TestMatrixMomentumSolver(unittest.TestCase):
         self.ny = 10
         self.lx = 1.0
         self.ly = 1.0
-        self.mesh = StructuredMesh(self.nx, self.ny, self.lx, self.ly)
+        self.mesh = StructuredUniform(self.nx, self.ny, self.lx, self.ly)
         
         # Set fluid properties
-        self.fluid = FluidProperties(density=1.0, viscosity=0.01)
+        self.fluid = FluidProperties(density=1.0, reynolds_number=100, characteristic_velocity=1.0)
         
         # Initialize fields
         imax, jmax = self.nx, self.ny

@@ -21,7 +21,6 @@ from naviflow_oo.preprocessing.mesh import (
     UnstructuredUniform,
     UnstructuredRefined
 )
-from naviflow_oo.preprocessing.mesh_generators.utils import create_tanh_clustered_nodes
 
 # --- Configuration ---
 # Domain dimensions (unit square)
@@ -29,7 +28,7 @@ XMIN, XMAX = 0.0, 1.0
 YMIN, YMAX = 0.0, 1.0
 
 # Mesh parameters
-N_POINTS = 50  # Number of points for structured grid 
+N_POINTS = 5  # Number of points for structured grid 
 MESH_SIZE_CENTER_UNIFORM = 0.032 # Target for uniform unstructured 
 # Refined unstructured parameters
 MESH_SIZE_WALLS = 0.02  # Moderate refinement near stationary walls/corners

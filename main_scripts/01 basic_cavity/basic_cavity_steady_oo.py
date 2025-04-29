@@ -18,15 +18,15 @@ from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
 from naviflow_oo.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
 from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_oo.postprocessing.visualization import plot_final_residuals
-
+from naviflow_oo.solver.pressure_solver import DirectPressureSolver
 # Start timing
 start_time = time.time()
 # 1. Set up simulation parameters
 nx, ny = 2**5-1, 2**5-1 # Grid size
 reynolds = 100             # Reynolds number
 alpha_p = 0.1              # Pressure relaxation factor (Reduced)
-alpha_u = 0.5              # Velocity relaxation factor (Reduced)
-max_iterations = 1     # Maximum number of iterations
+alpha_u = 0.5              # Velocity relaxation factor (Reduced further for stability)
+max_iterations = 10     # Maximum number of iterations
 tolerance = 1e-10
 
 
@@ -47,10 +47,10 @@ print(f"Reynolds number: {fluid.get_reynolds_number()}")
 print(f"Calculated viscosity: {fluid.get_viscosity()}")
 
 # 4. Create solvers
-pressure_solver = MeshAgnosticDirectPressureSolver()
+pressure_solver = DirectPressureSolver()
 
 # Use the new AMG solver
-momentum_solver = AMGMomentumSolver(discretization_scheme='power_law', tolerance=1e-7, max_iterations=10000)
+momentum_solver = AMGMomentumSolver(discretization_scheme='upwind', tolerance=1e-7, max_iterations=10000)
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm
@@ -65,10 +65,10 @@ algorithm = SimpleSolver(
 )
 
 # 6. Set boundary conditions
-algorithm.set_boundary_condition('top', 'velocity', {'u': 1.0, 'v': 0.0})
-algorithm.set_boundary_condition('bottom', 'wall')
-algorithm.set_boundary_condition('left', 'wall')
-algorithm.set_boundary_condition('right', 'wall')
+# algorithm.set_boundary_condition('top', 'velocity', {'u': 1.0, 'v': 0.0})
+# algorithm.set_boundary_condition('bottom', 'wall')
+# algorithm.set_boundary_condition('left', 'wall')
+# algorithm.set_boundary_condition('right', 'wall')
 
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')

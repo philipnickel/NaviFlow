@@ -4,7 +4,7 @@ Unstructured mesh generation utilities.
 
 import numpy as np
 import os
-from ..mesh.mesh import UnstructuredMesh
+from ..mesh import UnstructuredMesh
 
 class UnstructuredMeshGenerator:
     """

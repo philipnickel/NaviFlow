@@ -1,6 +1,6 @@
 import numpy as np
 from .base_momentum_solver import MomentumSolver
-from .discretization import power_law, quick, second_order_upwind
+from .discretization import power_law, quick, upwind
 from ...constructor.boundary_conditions import BoundaryConditionManager
 
 # PETSc import
@@ -52,7 +52,7 @@ class MatrixFreeMomentumSolverPETSc(MomentumSolver):
         schemes = {
             "power_law": power_law.PowerLawDiscretization,
             "quick": quick.QUICKDiscretization,
-            "second_order_upwind": second_order_upwind.SecondOrderUpwindDiscretization,
+            "second_order_upwind": upwind.SecondOrderUpwindDiscretization,
         }
         try:
             self.discretization_scheme = schemes[discretization_scheme]()

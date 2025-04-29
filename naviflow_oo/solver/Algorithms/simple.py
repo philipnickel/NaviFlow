@@ -133,20 +133,47 @@ class SimpleSolver(BaseAlgorithm):
                 self.v_old = self.v.copy()
                 self.p_old = self.p.copy()
 
+                # --- Pre-momentum solve sanity ---
+                if np.isnan(self.p).any() or np.isinf(self.p).any():
+                    raise ValueError(f"[{iteration}] NaN/Inf detected in pressure field p before momentum solve")
+
+                # --- New debug print to catch bad input early ---
+                print(f"[{iteration}] Checking fields before u-momentum:")
+                print(f"  u min/max/mean: {self.u.min():.2e} / {self.u.max():.2e} / {self.u.mean():.2e}")
+                print(f"  v min/max/mean: {self.v.min():.2e} / {self.v.max():.2e} / {self.v.mean():.2e}")
+                print(f"  p min/max/mean: {p_star.min():.2e} / {p_star.max():.2e} / {p_star.mean():.2e}")
+                if np.isnan(self.u).any() or np.isinf(self.u).any():
+                    raise ValueError(f"[{iteration}] NaN/Inf detected in input u field BEFORE solving u-momentum")
+                if np.isnan(self.v).any() or np.isinf(self.v).any():
+                    raise ValueError(f"[{iteration}] NaN/Inf detected in input v field BEFORE solving u-momentum")
+                if np.isnan(p_star).any() or np.isinf(p_star).any():
+                    raise ValueError(f"[{iteration}] NaN/Inf detected in input p_star field BEFORE solving u-momentum")
+                # --------------------------------------------------
+
                 # Solve momentum equations
                 u_star, d_u, u_res_info = self.momentum_solver.solve_u_momentum(
                     self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
-                    boundary_conditions=self.bc_manager,
                     return_dict=True
                 )
+
+                # --- Post-u momentum sanity ---
+                if np.isnan(u_star).any() or np.isinf(u_star).any() or np.isnan(d_u).any() or np.isinf(d_u).any():
+                    raise ValueError(f"[{iteration}] NaN/Inf detected in u_star or d_u after u momentum solve")
+                if (d_u <= 0).any():
+                    raise ValueError(f"[{iteration}] Negative or zero diagonal entry detected in d_u")
 
                 v_star, d_v, v_res_info = self.momentum_solver.solve_v_momentum(
                     self.mesh, self.fluid, self.u, self.v, p_star,
                     relaxation_factor=self.alpha_u,
-                    boundary_conditions=self.bc_manager,
                     return_dict=True
                 )
+
+                # --- Post-v momentum sanity ---
+                if np.isnan(v_star).any() or np.isinf(v_star).any() or np.isnan(d_v).any() or np.isinf(d_v).any():
+                    raise ValueError(f"[{iteration}] NaN/Inf detected in v_star or d_v after v momentum solve")
+                if (d_v <= 0).any():
+                    raise ValueError(f"[{iteration}] Negative or zero diagonal entry detected in d_v")
 
                 # Save intermediate fields for pressure equation
                 self._tmp_u_star = u_star
@@ -154,11 +181,24 @@ class SimpleSolver(BaseAlgorithm):
                 self._tmp_d_u = d_u
                 self._tmp_d_v = d_v
 
-                # Solve pressure correction equation
-                p_prime, p_res_info = self.pressure_solver.solve(
-                    self.mesh, u_star, v_star, d_u , d_v , p_star, 
-                    return_dict=True
-                )
+                # Solve pressure correction equation using solve_pressure_correction
+
+                if hasattr(self.pressure_solver, 'solve_pressure_correction'):
+                    p_prime, p_res_info = self.pressure_solver.solve_pressure_correction(
+                        self.mesh, self.fluid, u_star, v_star, d_u, d_v, 
+                        relaxation_factor=self.alpha_p, boundary_conditions=self.bc_manager
+                    )
+                else:
+                    # Fall back to original solve method - pass bc_manager here too
+                    p_prime, p_res_info = self.pressure_solver.solve(
+                        self.mesh, u_star, v_star, d_u, d_v, p_star, 
+                        bc_manager=self.bc_manager, # Add bc_manager argument
+                        return_dict=True
+                    )
+                
+                # --- Post-pressure correction sanity ---
+                if np.isnan(p_prime).any() or np.isinf(p_prime).any():
+                    raise ValueError(f"[{iteration}] NaN/Inf detected in pressure correction p_prime")
                 
                 # --- Sanity Checks for p' --- 
                 if iteration < 4: # Check first few iterations
@@ -172,11 +212,25 @@ class SimpleSolver(BaseAlgorithm):
                 self.p = p_star + self.alpha_p * p_prime 
                 # self._enforce_pressure_boundary_conditions() # Commented out: Assumes BCs handled by pressure solver matrix/pinning
                 p_star = self.p.copy() # p_star remains 1D
-
-                # Update velocities -- SKIPPED FOR DEBUGGING
+                
+                # Update velocities
                 self.u, self.v = self.velocity_updater.update_velocity(
                      self.mesh, u_star, v_star, p_prime, d_u, d_v, self.bc_manager
-                 )
+                )
+                
+                # --- Post-velocity update sanity ---
+                if np.isnan(self.u).any() or np.isinf(self.u).any() or \
+                   np.isnan(self.v).any() or np.isinf(self.v).any():
+                    raise ValueError(f"[{iteration}] NaN/Inf detected in updated velocities u or v")
+                
+                # --- Mass balance check (optional) ---
+                try:
+                    rhs = get_rhs(self.mesh, self.fluid.get_density(), self.u, self.v, p=self.p, d_u=self._tmp_d_u, d_v=self._tmp_d_v) 
+                    mass_residual = np.linalg.norm(rhs, ord=2)
+                    if iteration < 4:
+                        print(f"Iteration {iteration}: Mass residual norm (RHS) = {mass_residual:.3e}")
+                except Exception as e:
+                    print(f"[{iteration}] Mass residual check failed: {e}")
    
                 # --- Sanity Checks for u, v --- 
                 if iteration < 4: # Check first few iterations
@@ -190,7 +244,7 @@ class SimpleSolver(BaseAlgorithm):
 
                 # Extract relative norms for convergence check
                 u_rel_norm = u_res_info['rel_norm']
-                v_rel_norm = v_res_norm = v_res_info['rel_norm']
+                v_rel_norm = v_res_info['rel_norm']
                 p_rel_norm = p_res_info['rel_norm']
                 
                 # Save residual fields for final visualization

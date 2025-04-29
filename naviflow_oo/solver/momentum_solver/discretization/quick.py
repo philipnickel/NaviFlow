@@ -16,6 +16,8 @@ equations (2-D, uniform grid).
 from __future__ import annotations
 import numpy as np
 from ....constructor.boundary_conditions import BoundaryConditionManager
+# from .base_discretization import MomentumDiscretization # Removed import
+# import scipy.sparse as sparse # Removed import
 
 
 # ─────────── helpers ────────────
@@ -24,7 +26,12 @@ def _c_neg(F): return np.maximum(-F, 0.0)         # negative part
 
 
 # ─────────── discretisation class ────────────
+# class QuickDiscretization(MomentumDiscretization): # Reverted class definition
 class QUICKDiscretization:
+    # """Implements the QUICK discretization scheme.""" # Removed docstring
+
+    # Removed the discretize method added previously
+
     # =======================  u-momentum  ========================= #
     def calculate_u_coefficients(self, mesh, fluid, u, v, p,
                                  bc: BoundaryConditionManager | None = None):

@@ -13,7 +13,7 @@ except ImportError:
     pass  # We'll check again when needed and raise appropriate error messages
 
 from .mesh import UnstructuredMesh
-from ..mesh_generators.unstructured_mesh import UnstructuredMeshGenerator
+from .mesh_generators.unstructured_mesh import UnstructuredMeshGenerator
 
 
 class UnstructuredUniform(UnstructuredMesh):
@@ -43,6 +43,14 @@ class UnstructuredUniform(UnstructuredMesh):
         # Check dependencies
         if "pygmsh" not in sys.modules or "meshio" not in sys.modules:
             raise ImportError("UnstructuredUniform mesh requires 'pygmsh' and 'meshio' packages.")
+        
+        # Store domain bounds
+        self._domain_bounds = {
+            'xmin': xmin,
+            'xmax': xmax,
+            'ymin': ymin,
+            'ymax': ymax
+        }
         
         # Calculate domain dimensions
         length = xmax - xmin

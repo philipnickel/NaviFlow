@@ -6,7 +6,7 @@ import numpy as np
 from .base_momentum_solver import MomentumSolver
 from .discretization import power_law
 from .discretization import quick
-from .discretization import second_order_upwind
+from .discretization import upwind
 from ...constructor.boundary_conditions import BoundaryConditionManager
 from scipy import sparse  # Still needed for CSR matrix construction
 
@@ -81,9 +81,9 @@ class MatrixMomentumSolver(MomentumSolver):
         elif discretization_scheme == 'quick':
             self.discretization_scheme = quick.QUICKDiscretization()
         elif discretization_scheme == 'upwind':
-            self.discretization_scheme = second_order_upwind.UpwindDiscretization()
+            self.discretization_scheme = upwind.UpwindDiscretization()
         elif discretization_scheme == 'second_order_upwind':
-            self.discretization_scheme = second_order_upwind.SecondOrderUpwindDiscretization()
+            self.discretization_scheme = upwind.SecondOrderUpwindDiscretization()
         else:
             raise ValueError(f"Unsupported discretization scheme: {discretization_scheme}. "
                            "Available options: 'power_law', 'quick', 'upwind', 'second_order_upwind'")

@@ -286,3 +286,57 @@ class BoundaryConditionManager:
                 boundary_types[boundary] = 'wall'  # Default to wall
                 
         return boundary_types 
+
+    def apply_velocity_boundary_conditions_to_flat(self, u_flat, v_flat, mesh):
+        """
+        Apply velocity boundary conditions directly to flattened (1D) velocity arrays.
+        Uses mesh information to find boundary cell indices.
+
+        Parameters:
+        -----------
+        u_flat, v_flat : ndarray
+            Flattened 1D velocity arrays.
+        mesh : Mesh
+            Mesh object providing boundary information.
+
+        Returns:
+        --------
+        u_flat, v_flat : ndarray
+            Updated flattened velocity arrays.
+        """
+        if not hasattr(mesh, 'get_boundary_cell_indices'):
+            print("Error: Mesh object does not support get_boundary_cell_indices.")
+            # Fallback or raise error - for now, return unmodified
+            return u_flat, v_flat
+            
+        # Apply specified boundary conditions
+        for location_key, conditions in self.conditions.items():
+            # Find indices for this boundary location
+            try:
+                boundary_indices = mesh.get_boundary_cell_indices(location_key)
+                if boundary_indices is None or boundary_indices.size == 0:
+                    # print(f"Warning: No indices found for boundary '{location_key}'.")
+                    continue # Skip if no cells found for this boundary
+            except Exception as e:
+                print(f"Warning: Could not get indices for boundary '{location_key}': {e}")
+                continue
+
+            # Ensure indices are within bounds
+            valid_indices = boundary_indices[boundary_indices < u_flat.size]
+            valid_indices = valid_indices[valid_indices < v_flat.size]
+            if valid_indices.size == 0:
+                continue
+
+            # Apply conditions based on type
+            for bc_type_key, values in conditions.items():
+                if bc_type_key == 'velocity':
+                    u_val = values.get('u', 0.0)
+                    v_val = values.get('v', 0.0)
+                    u_flat[valid_indices] = u_val
+                    v_flat[valid_indices] = v_val
+                elif bc_type_key == 'wall':
+                    u_flat[valid_indices] = 0.0
+                    v_flat[valid_indices] = 0.0
+                # Add other types like inflow/outflow if needed
+                
+        return u_flat, v_flat 

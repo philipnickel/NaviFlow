@@ -6,8 +6,8 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from ..pressure_solver.base_pressure_solver import PressureSolver
-from ..pressure_solver.helpers.coeff_matrix import get_coeff_mat, get_coeff_mat_structured
-from ..pressure_solver.helpers.rhs_construction import get_rhs, get_rhs_structured
+from ..pressure_solver.helpers.coeff_matrix import get_coeff_mat
+from ..pressure_solver.helpers.rhs_construction import get_rhs
 from ..pressure_solver.helpers.pressure_corrections import pres_correct
 
 class DirectPressureSolver(PressureSolver):
@@ -38,7 +38,7 @@ class DirectPressureSolver(PressureSolver):
         self.p_a_p = None
         self.p_source = None
     
-    def solve(self, mesh, u_star, v_star, d_u, d_v, p_star, return_dict=True):
+    def solve(self, mesh, u_star, v_star, d_avg, p_star, bc_manager=None, return_dict=True):
         """
         Solve the pressure correction equation in a mesh-agnostic way.
         
@@ -48,10 +48,12 @@ class DirectPressureSolver(PressureSolver):
             The computational mesh
         u_star, v_star : ndarray
             Intermediate velocity fields
-        d_u, d_v : ndarray
-            Momentum equation coefficients (face-based)
+        d_avg : ndarray
+            Average momentum equation coefficient (V/a_p) (face-based)
         p_star : ndarray
             Current pressure field
+        bc_manager : BoundaryConditionManager, optional
+            Boundary conditions manager passed from the algorithm.
         return_dict : bool
             Return detailed info if True (default)
         
@@ -66,17 +68,48 @@ class DirectPressureSolver(PressureSolver):
         # Store the mesh for use in boundary conditions
         self.mesh = mesh
         self.p = p_star
-        self.bc_manager = getattr(mesh, 'bc_manager', None)
+        # Use the passed bc_manager directly
+        # bc_manager = getattr(mesh, 'bc_manager', None) # Remove attempt to get from mesh
+        # if bc_manager is None:
+        #     print("Warning: bc_manager not found for get_rhs in DirectPressureSolver. Boundary fluxes might be incorrect.")
         
         rho = 1.0  # Assuming constant density (could generalize later)
 
-        # Build RHS
-        rhs = get_rhs(mesh, rho, u_star, v_star)
+        # Build RHS - internal face contributions only
+        rhs = get_rhs(mesh, rho, u_star, v_star, p_star, d_avg, bc_manager=bc_manager)
 
-        # Build Coefficient Matrix
-        A = get_coeff_mat(mesh, rho, d_u, d_v)
+        # Build Coefficient Matrix - Implicit zero Neumann assumption
+        A = get_coeff_mat(mesh, rho, d_avg)
 
-        # Solve sparse linear system
+        # --- Apply Boundary Conditions Explicitly --- 
+        # (Simplified: Assume all boundaries are walls, m_star_b = 0, m_prime_b = 0)
+        # In this case, no further modification to A or rhs is needed 
+        # because get_coeff_mat already handled the zero Neumann implicitly 
+        # and m_star_b = 0 means no boundary flux added to rhs.
+        
+        needs_pinning = True # Since all BCs are Neumann for p'
+        
+        # --- Handle Singularity / Pin Pressure --- 
+        if needs_pinning:
+            pin_idx = 0 # Choose cell 0 as reference
+            if mesh.n_cells > pin_idx:
+                # Check if RHS sums to zero (compatibility condition)
+                mass_imbalance = np.sum(rhs)
+                if abs(mass_imbalance) > 1e-9: # Use a tolerance
+                     print(f"Warning: RHS sum is {mass_imbalance:.4g}, expected zero for all-Neumann problem before pinning.")
+                     # Optional: Adjust RHS to enforce sum = 0
+                     # rhs -= mass_imbalance / mesh.n_cells 
+                     
+                A = A.tolil() 
+                A[pin_idx, :] = 0   # Zero out the row
+                # A[:, pin_idx] = 0 # Optional: zero column for symmetry (but modifies other eqns)
+                A[pin_idx, pin_idx] = 1.0   # Set diagonal to 1
+                rhs[pin_idx] = 0.0 # Set corresponding RHS to 0
+                A = A.tocsr()
+            else:
+                print("Warning: Cannot pin pressure, mesh has too few cells.")
+        
+        # --- Solve sparse linear system ---
         p_prime_flat = spsolve(A, rhs)
 
         # Track residual

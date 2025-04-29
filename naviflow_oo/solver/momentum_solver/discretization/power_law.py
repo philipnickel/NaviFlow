@@ -144,7 +144,9 @@ class PowerLawDiscretization:
                 d_owner = face_centers[face_idx] - cell_centers[owner]
                 d_total = np.linalg.norm(d_owner) # Note: Moukalled uses distance normal to face here?
             # Ensure d_total is not zero to avoid division issues
-            d_total = max(d_total, 1e-12)
+            # Clip d_total to prevent division by very small numbers
+            if d_total < 1e-6:
+                d_total = 1e-6
             # if face_idx < 5: print(f"  d_total={d_total:.4f}") # DEBUG
 
             # Compute face velocity with direct access
@@ -250,11 +252,6 @@ class PowerLawDiscretization:
             pressure_force_term = p_face * nx_comp * area # Use nx_comp from dot product section
             source[owner] -= pressure_force_term # Pressure force term
 
-            # Add pressure contribution to source term (- integral P*ny dA)
-            p_face = 0.5 * (p_own + p_nei) if neighbor != -1 else p_own # Simple average
-            pressure_force_term = p_face * ny_comp * area # Use ny_comp from dot product section
-            source[owner] -= pressure_force_term # Pressure force term
-
         # print(f"--- End Discretization Debug --- \n") # DEBUG
         return {
             'a_p': a_p,
@@ -345,7 +342,9 @@ class PowerLawDiscretization:
                 d_owner = face_centers[face_idx] - cell_centers[owner]
                 d_total = np.linalg.norm(d_owner)
             # Ensure d_total is not zero to avoid division issues
-            d_total = max(d_total, 1e-12)
+            # Clip d_total to prevent division by very small numbers
+            if d_total < 1e-6:
+                d_total = 1e-6
 
             # Compute face velocity with direct access
             if neighbor != -1 and neighbor < n_cells:
@@ -436,15 +435,10 @@ class PowerLawDiscretization:
             area = face_areas[face_idx]
             # -------------------------------------------------------------
             
-            # Add pressure contribution to source term (- integral P*nx dA)
-            p_face = 0.5 * (p_own + p_nei) if neighbor != -1 else p_own # Simple average for face pressure
-            pressure_force_term = p_face * nx_comp * area # Use nx_comp from dot product section
-            source[owner] -= pressure_force_term # Pressure force term
-
             # Add pressure contribution to source term (- integral P*ny dA)
             p_face = 0.5 * (p_own + p_nei) if neighbor != -1 else p_own # Simple average
             pressure_force_term = p_face * ny_comp * area # Use ny_comp from dot product section
-            source[owner] -= pressure_force_term # Pressure force term
+            source[owner] -= pressure_force_term # Correct Pressure force term for v-momentum
 
         return {
             'a_p': a_p,
