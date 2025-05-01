@@ -1,1 +1,1 @@
-# Placeholder for abstract solver interface 
+# Placeholder for abstract solver interface

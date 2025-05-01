@@ -1,1 +1,1 @@
-# Placeholder for custom linear solver implementation (e.g., matrix-free) 
+# Placeholder for custom linear solver implementation (e.g., matrix-free)

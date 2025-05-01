@@ -1,1 +1,0 @@
-# Placeholder for mesh data structures and operations 

@@ -1,1 +1,1 @@
-# Placeholder tests for residual calculations 
+# Placeholder tests for residual calculations

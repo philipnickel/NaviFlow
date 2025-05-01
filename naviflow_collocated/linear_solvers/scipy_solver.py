@@ -1,1 +1,1 @@
-# Placeholder for SciPy linear solver implementation 
+# Placeholder for SciPy linear solver implementation

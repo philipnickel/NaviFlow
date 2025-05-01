@@ -1,1 +1,1 @@
-# Placeholder for logging utility 
+# Placeholder for logging utility

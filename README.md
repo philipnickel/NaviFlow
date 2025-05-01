@@ -1,41 +1,15 @@
-# Naviflow
+# NaviFlow Collocated Solver
 
-Code for bachelors project 'Finite Volume based CFD for Lid Driven Cavity Flow'
+A modular, HPC-ready SIMPLE CFD solver.
 
-Naviflow is a Python package for solving the lid-driven cavity problem using the finite volume method.
+## Structure
 
-Functions are in the naviflow folder.
+- `naviflow_collocated/`: Core solver implementation
+- `tests/`: Unit and integration tests
+- `experiments/`: Simulation setups and results
+- `shared_configs/`: Reusable configuration snippets
+- `docs/`: Project documentation
 
-## Object-Oriented Architecture (naviflow_oo)
+## Usage
 
-The object-oriented version of Naviflow is organized into three main components:
-
-### 1. Preprocessing
-- **Mesh Generation**: Create and manage computational grids
-- **Field Initialization**: Set up initial conditions for all fields
-- **Boundary Conditions**: Define and apply boundary conditions
-
-### 2. Solver
-- **Solvers**: Implement numerical methods for different equation types
-- **Algorithms**: Coordinate the solution process (SIMPLE, etc.)
-
-### 3. Postprocessing
-- **Visualization**: Generate plots and visualizations of results
-- **Validation**: Verify solution accuracy and conservation properties
-
-### 4. Case Management
-- Orchestrates the entire simulation process
-- Connects preprocessing, solver, and postprocessing components
-
-## Main scripts 
-
-Main scripts are in the main folder.
-
-## Installation
-
-To install Naviflow, run the following command in root directory:
-
-```bash
-pip install -e .
-```
-
+See `docs/usage.md`. 

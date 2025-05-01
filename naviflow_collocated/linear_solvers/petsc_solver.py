@@ -1,1 +1,1 @@
-# Placeholder for PETSc linear solver implementation 
+# Placeholder for PETSc linear solver implementation

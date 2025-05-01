@@ -93,9 +93,12 @@ project_root/
 │               ├── lid_031_unstr_refined.msh
 │               └── ...
 ├── naviflow_collocated/          # Core solver implementation (modular, OOP)
+      -- mesh 
+          -- base.py 
+          -- structured.py
+          -- unstructured.py
 │   ├── core/
 │   │   ├── simple_loop.py
-│   │   ├── mesh.py
 │   │   ├── fields.py
 │   │   ├── solver_interface.py
 │   │   └── rhie_chow.py

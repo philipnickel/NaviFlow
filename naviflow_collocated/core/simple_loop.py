@@ -1,1 +1,1 @@
-# Placeholder for SIMPLE algorithm loop 
+# Placeholder for SIMPLE algorithm loop

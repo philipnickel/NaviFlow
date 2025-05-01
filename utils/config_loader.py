@@ -1,1 +1,1 @@
-# Placeholder for YAML configuration loading 
+# Placeholder for YAML configuration loading

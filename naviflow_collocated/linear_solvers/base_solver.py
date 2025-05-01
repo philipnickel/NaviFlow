@@ -1,1 +1,1 @@
-# Placeholder for base linear solver class 
+# Placeholder for base linear solver class
