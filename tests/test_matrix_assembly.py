@@ -202,3 +202,23 @@ def test_convection_dominant_behavior(mesh_instance):
     assert l2_error < tolerance, (
         f"Convection-dominant solution error too high: {l2_error:.3e} (tol = {tolerance:.3e})"
     )
+
+
+"""
+🧪 Recommended Tests to Add
+	1.	Stencil Extraction on a Small Mesh:
+	•	Use a 3x3 structured mesh.
+	•	Assemble the diffusion matrix.
+	•	Confirm:
+	•	A[i, j] = μ*A/d if j is neighbor of i
+	•	A[i, i] = -Σ_off_diagonals
+	•	Matrix is symmetric
+	2.	Convective Upwind Matrix Inspection:
+	•	Use a uniform rightward flow.
+	•	Assemble matrix with upwind convection.
+	•	Confirm:
+	•	Each face adds +ρuA to upwind diagonal, -ρuA to downwind off-diagonal
+	•	All coefficients are non-negative
+	•	Matrix is not symmetric
+
+"""

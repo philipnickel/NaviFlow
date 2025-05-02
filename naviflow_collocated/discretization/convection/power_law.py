@@ -35,13 +35,20 @@ def compute_powerlaw_convection_face_coeffs(
     # ------ NOTE the leading minus sign ------------------------------
     m_f = -rho * np.dot(face_velocity[i_face], n_f) * A_f  # mass flux
 
-    # If no mass flux, convection coefficients are zero
-    if abs(m_f) < 1e-20:
-        return 0.0, 0.0, 0.0, 0.0
-
     # diffusive conductance for power-law weight
     Gamma_f = 0.5 * (Gamma[C] + Gamma[F])
     D_f = Gamma_f * A_f / d_mag
+
+    # If no mass flux, convection contribution is zero, scheme defaults to central
+    if abs(m_f) < 1e-20:
+        fP = 1.0  # Default to central differencing (fP=1)
+        D_fp = D_f * fP
+        # Convection terms are zero
+        diag_C = 0.0 + D_fp
+        off_C = 0.0 - D_fp
+        diag_F = 0.0 + D_fp
+        off_F = 0.0 - D_fp
+        return diag_C, off_C, diag_F, off_F
 
     # Peclet number calculation
     if abs(D_f) < 1e-12:

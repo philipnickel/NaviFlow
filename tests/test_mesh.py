@@ -83,3 +83,15 @@ def test_mesh_geometry_suite(mesh_instance, subtests):
                         )
                 else:
                     assert np.array_equal(orig, reloaded), f"Mismatch in field '{attr}'"
+
+    with subtests.test("cell_face_ownership"):
+        owners, _ = mesh_instance.get_owner_neighbor()
+        n_cells = mesh_instance.n_cells
+        face_counts = np.bincount(owners, minlength=n_cells)
+        assert np.all(face_counts > 0), "One or more cells own no faces"
+
+    with subtests.test("nondegenerate_cell_geometry"):
+        centers = mesh_instance.get_cell_centers()
+        volumes = mesh_instance.get_cell_volumes()
+        assert np.all(volumes > 1e-10), "Some cells have nearly-zero volume"
+        assert np.all(np.isfinite(centers)), "Some cell centers are NaN or inf"
