@@ -11,13 +11,13 @@ from naviflow_collocated.mesh.unstructured import (
 @pytest.fixture
 def mesh_instance(request):
     if request.param == "structured_uniform":
-        return StructuredMesh(16, 16, is_uniform=True)
+        return StructuredMesh(15, 15, is_uniform=True)
     elif request.param == "structured_clustered":
-        return StructuredMesh(16, 16, refine=True)
+        return StructuredMesh(15, 15, refine=True)
     elif request.param == "unstructured_uniform":
-        return UnstructuredUniform(mesh_size=0.1)
+        return UnstructuredUniform(mesh_size=0.05)
     elif request.param == "unstructured_refined":
-        return UnstructuredRefined(0.04, 0.02, 0.1)
+        return UnstructuredRefined(0.06, 0.04, 0.1)
     else:
         raise ValueError(f"Unknown mesh type: {request.param}")
 

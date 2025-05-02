@@ -1,23 +1,15 @@
 # SIMPLE Solver: Incremental Implementation Checklist
 
-## Phase 0: Mesh Geometry
-- [ ] Validate cell volumes, face areas > 0
-- [ ] Ensure consistent face normals and topology
-- [ ] Boundary patch classification (e.g., lid)
-
-## Phase 1: Fields
-- [ ] Allocate cell-centered fields: `u`, `v`, `p`
-- [ ] Initialize internal and boundary values
-- [ ] Assert all values are finite (no NaNs, Infs)
-
-## Phase 2: Diffusion Operator
+## Phase 2: Diffusion Operator - Probably done!
 - [ ] Central differencing diffusion stencil
 - [ ] Check matrix symmetry and diagonal dominance
 - [ ] Solve Laplace problem for benchmark (manufactured sol.)
 
-## Phase 3: Momentum Assembly (no pressure yet)
-- [ ] Upwind convection (Power Law)
-- [ ] Compute `aP`, `aN`, `Su` from face loop
+## Phase 3: Momentum Assembly (no pressure yet) Current step!
+- [ ] Upwind convection (Power Law). Remember to create tests to test convection in isolation. Take a look at the discretization tests. 
+- [ ] Compute `aP`, `aN`, `Su` from face loop. 
+- [ ] Test matrix assembly using only convection
+- [ ] Test matrix assembly using both diffussion and convection
 - [ ] Momentum residuals decrease on stand-alone solve
 
 ## Phase 4: Pressure Correction Equation

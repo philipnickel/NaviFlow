@@ -3,7 +3,8 @@ all: lint format check test
 
 # Run full test suite with verbose output and generate HTML report
 test:
-	pytest -v tests/ --html=report.html --self-contained-html
+	pytest -q tests/ --html=report.html --self-contained-html
+
 
 # Run linter (Ruff) on all source and test code
 lint:
@@ -28,4 +29,4 @@ env:
 	conda env export --no-builds | grep -v "prefix:" > environment.yaml
 
 # Mark targets as phony (not real files)
-.PHONY: all test lint format check clean env
+.PHONY: all test test-nv lint format check clean env

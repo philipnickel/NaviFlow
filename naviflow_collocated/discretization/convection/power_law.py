@@ -3,33 +3,63 @@ from numba import njit
 
 
 @njit
-def power_law_weight(Pe):
-    Pe = max(min(Pe, 1e3), -1e3)
-    return max(0.0, (1.0 - 0.1 * abs(Pe)) ** 5)
-
-
-@njit
-def compute_convection_face(
+def compute_powerlaw_convection_face_coeffs(
     i_face,
-    phi,
-    density,
-    velocity,
-    face_areas,
+    cell_centers,
+    face_centers,
     face_normals,
+    face_areas,
     owner_cells,
     neighbor_cells,
+    rho_f,
+    face_velocity,
+    Gamma,
 ):
-    i_owner = owner_cells[i_face]
-    i_neigh = neighbor_cells[i_face]
+    """Per-face power-law *row* contributions (unsymmetric)."""
+    C = owner_cells[i_face]
+    F = neighbor_cells[i_face]
+    if F == -1:
+        # physical boundary – handled elsewhere
+        return 0.0, 0.0, 0.0, 0.0
 
-    flux_vector = velocity[i_face] * face_areas[i_face]  # Vector flux
-    flux = np.dot(flux_vector, face_normals[i_face])  # Scalar flux
+    # geometry
+    d_vec = cell_centers[F] - cell_centers[C]
+    d_mag = np.sqrt(np.dot(d_vec, d_vec))
+    if d_mag < 1e-20:
+        return 0.0, 0.0, 0.0, 0.0
 
-    phi_upwind = phi[i_owner] if flux >= 0 else phi[i_neigh]
-    phi_downwind = phi[i_neigh] if flux >= 0 else phi[i_owner]
+    A_f = face_areas[i_face]
+    n_f = face_normals[i_face]
+    rho = rho_f
 
-    Pe = flux / (1e-20 + abs(phi_downwind - phi_upwind))  # Avoid division by zero
-    w = power_law_weight(Pe)
+    # ------ NOTE the leading minus sign ------------------------------
+    m_f = -rho * np.dot(face_velocity[i_face], n_f) * A_f  # mass flux
 
-    interpolated_phi = phi_upwind + w * (phi_downwind - phi_upwind)
-    return flux * interpolated_phi
+    # If no mass flux, convection coefficients are zero
+    if abs(m_f) < 1e-20:
+        return 0.0, 0.0, 0.0, 0.0
+
+    # diffusive conductance for power-law weight
+    Gamma_f = 0.5 * (Gamma[C] + Gamma[F])
+    D_f = Gamma_f * A_f / d_mag
+
+    # Peclet number calculation
+    if abs(D_f) < 1e-12:
+        P = np.inf * np.sign(m_f)
+    else:
+        P = m_f / D_f
+
+    fP = max(0.0, (1.0 - 0.1 * np.abs(P)) ** 5)  # Patankar (Restored)
+
+    D_fp = D_f * fP  # Effective diffusion (Restored)
+
+    # --- owner row (C) ------------------------------------------------
+    diag_C = (m_f if m_f > 0.0 else 0.0) + D_fp
+    off_C = (m_f if m_f < 0.0 else 0.0) - D_fp  # minus → coefficient in matrix
+
+    # --- neighbour row (F) -------------------------------------------
+    m_F = -m_f  # flux sign seen from F
+    diag_F = (m_F if m_F > 0.0 else 0.0) + D_fp
+    off_F = (m_F if m_F < 0.0 else 0.0) - D_fp
+
+    return diag_C, off_C, diag_F, off_F

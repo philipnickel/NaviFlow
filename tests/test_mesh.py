@@ -56,7 +56,6 @@ def test_mesh_geometry_suite(mesh_instance, subtests):
             path = Path(tmpdir) / "test_plot.pdf"
             mesh_instance.savePlot(str(path), title="Save Test")
             assert path.exists() and path.stat().st_size > 0
-
     with subtests.test("serialization_roundtrip"):
         from naviflow_collocated.mesh.mesh_data import (
             mesh_to_data,
@@ -72,11 +71,15 @@ def test_mesh_geometry_suite(mesh_instance, subtests):
             save_mesh_data(path, data)
             loaded = load_mesh_data(path)
 
-            # Ensure all array fields are equal
+            # Ensure all fields are equal
             for attr in data.__annotations__:
                 orig = getattr(data, attr)
                 reloaded = getattr(loaded, attr)
                 if isinstance(orig, dict):
-                    assert orig == reloaded
+                    assert orig.keys() == reloaded.keys()
+                    for k in orig:
+                        assert np.array_equal(orig[k], reloaded[k]), (
+                            f"Mismatch in dict field '{attr}' at key '{k}'"
+                        )
                 else:
-                    assert np.allclose(orig, reloaded, atol=1e-12)
+                    assert np.array_equal(orig, reloaded), f"Mismatch in field '{attr}'"
