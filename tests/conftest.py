@@ -2,7 +2,7 @@
 
 import pytest
 from naviflow_collocated.mesh.structured import StructuredMesh
-from naviflow_collocated.mesh.unstructured import (
+from naviflow_collocated.mesh.unstructured_LEGACY import (
     # UnstructuredUniform,
     UnstructuredRefined,
 )
@@ -17,7 +17,7 @@ def mesh_instance(request):
     # elif request.param == "unstructured_uniform":
     #    return UnstructuredUniform(mesh_size=0.05)
     elif request.param == "unstructured_refined":
-        return UnstructuredRefined(0.06, 0.04, 0.1)
+        return UnstructuredRefined(0.03, 0.02, 0.01)
     else:
         raise ValueError(f"Unknown mesh type: {request.param}")
 

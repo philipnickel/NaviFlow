@@ -273,6 +273,7 @@ class Mesh(ABC):
         """
         return self._face_distances
 
+
     @property
     @abstractmethod
     def n_cells(self):

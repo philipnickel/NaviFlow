@@ -1,319 +1,165 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import pygmsh
-from .base import Mesh
+# import pygmsh # No longer needed
+import gmsh # Import gmsh API
+from .mesh_data import MeshData2D
+# Import necessary functions (adjusted to relative imports)
+from .structured_uniform import calculate_face_normals, build_owner_neighbor 
+from numba import njit, prange
 
+def generate(L=1.0, obstacle_radius=0.1, output_filename=None):
+    """Generate unstructured mesh with a circular obstacle using gmsh API"""
+    model_name = "unstructured_gmsh"
+    if gmsh.isInitialized():
+        try:
+            gmsh.model.setCurrent(model_name)
+        except: # Model might not exist yet
+             gmsh.model.add(model_name)
+    else:
+        gmsh.initialize()
+        gmsh.model.add(model_name)
+    
+    # Use OpenCASCADE kernel for boolean ops
+    gmsh.model.occ.addRectangle(0, 0, 0, 2.2*L, 0.41*L, tag=1)
+    obstacle = gmsh.model.occ.addDisk(0.2*L, 0.2*L, 0, obstacle_radius, obstacle_radius, tag=2)
+    
+    # Perform boolean difference
+    # gmsh.model.occ.cut returns list of (dim, tag) pairs for the result, and a list of lists for the mapping
+    cut_result, _ = gmsh.model.occ.cut([(2, 1)], [(2, obstacle)], removeObject=True, removeTool=True)
+    # Assuming the main surface keeps tag 1 or is the first entry in cut_result
+    surface_tag = cut_result[0][1]
+    
+    # Boundary layer refinement using gmsh API is complex, involves fields.
+    # Skipping for this refactor, but can be added later if needed.
+    # print("Boundary layer field not implemented in this gmsh api refactor.")
+    
+    # Synchronize before adding physical groups
+    gmsh.model.occ.synchronize()
+    
+    # Tag boundaries - need to get the boundary entities after the cut
+    # Get boundary of the final surface
+    boundary_entities = gmsh.model.getBoundary([(2, surface_tag)], combined=False, oriented=False, recursive=False)
+    obstacle_curves = []
+    channel_curves = []
+    eps = 1e-6
+    # Get bounding box of the original obstacle to identify its curves
+    # Note: Original obstacle tag '2' is gone due to removeTool=True
+    # We need to find the curve loop corresponding to the hole.
+    # Alternative: Find curves near the obstacle center.
+    center_x, center_y, center_z = 0.2*L, 0.2*L, 0
+    curves_around_obstacle = gmsh.model.getEntitiesInBoundingBox(
+        center_x - obstacle_radius - eps, center_y - obstacle_radius - eps, -eps,
+        center_x + obstacle_radius + eps, center_y + obstacle_radius + eps, eps,
+        dim=1 # Curves
+    )
+    obstacle_curve_tags = [c[1] for c in curves_around_obstacle]
+    # Assuming other boundary curves belong to the channel walls
+    all_curve_tags = [c[1] for c in boundary_entities]
+    channel_curve_tags = list(set(all_curve_tags) - set(obstacle_curve_tags))
 
-class UnstructuredMesh(Mesh):
-    def __init__(self, nodes, faces, cells):
-        super().__init__()
-        self._nodes = (
-            np.asarray(nodes)[:, :2] if nodes.shape[1] > 2 else np.asarray(nodes)
-        )
-        self._faces = faces
-        self._cells = cells
-        self._compute_geometry()
+    # Add physical groups
+    if obstacle_curve_tags:
+        gmsh.model.addPhysicalGroup(1, obstacle_curve_tags, tag=1, name="cylinder")
+    if channel_curve_tags:
+        gmsh.model.addPhysicalGroup(1, channel_curve_tags, tag=2, name="walls")
+    gmsh.model.addPhysicalGroup(2, [surface_tag], tag=3, name="fluid_domain")
 
-    def _compute_geometry(self):
-        self._compute_face_geometry()
-        self._compute_cell_geometry()
-        self._assign_owner_neighbor()
-        original_normals = np.copy(self._face_normals)
-        self._identify_boundary_faces(original_normals)
-        self._finalize_geometry()
+    # Generate mesh
+    gmsh.model.mesh.generate(2)
 
-    def _compute_face_geometry(self):
-        n_faces = len(self._faces)
-        self._face_centers = np.zeros((n_faces, 2))
-        self._face_normals = np.zeros((n_faces, 2))
-        self._face_areas = np.zeros(n_faces)
+    # Save mesh if filename provided
+    if output_filename:
+        try:
+            gmsh.write(output_filename)
+            print(f"Mesh saved to {output_filename}")
+        except Exception as e:
+            print(f"Error saving mesh to {output_filename}: {e}")
 
-        for i, face in enumerate(self._faces):
-            face_nodes = self._nodes[face]
-            self._face_centers[i] = np.mean(face_nodes, axis=0)
-            if len(face) >= 2:
-                dx, dy = (
-                    face_nodes[-1, 0] - face_nodes[0, 0],
-                    face_nodes[-1, 1] - face_nodes[0, 1],
-                )
-                length = np.hypot(dx, dy)
-                if length > 1e-12:
-                    self._face_normals[i] = np.array([dy / length, -dx / length])
-                self._face_areas[i] = length
+    # Extract mesh data using gmsh API
+    node_tags, coords, _ = gmsh.model.mesh.getNodes()
+    points = np.array(coords).reshape(-1, 3)[:, :2] # Keep only x, y
+    node_map = {int(tag): i for i, tag in enumerate(node_tags)}
 
-    def _compute_cell_geometry(self):
-        n_cells = len(self._cells)
-        self._cell_centers = np.zeros((n_cells, 2))
-        self._cell_volumes = np.zeros(n_cells)
+    # Get triangles (elementType 2)
+    elem_types, elem_tags_list, elem_node_tags_list = gmsh.model.mesh.getElements(2, surface_tag)
+    tri_tags_gmsh = []
+    tri_nodes_gmsh = []
+    if 2 in elem_types:
+        idx = list(elem_types).index(2)
+        tri_tags_gmsh = elem_tags_list[idx]
+        tri_nodes_gmsh = elem_node_tags_list[idx]
 
-        for i, cell in enumerate(self._cells):
-            cell_node_indices = set()
-            for face_idx in cell:
-                cell_node_indices.update(self._faces[face_idx])
-            cell_nodes = self._nodes[list(cell_node_indices)]
-            self._cell_centers[i] = (
-                np.mean(cell_nodes, axis=0)
-                if cell_nodes.size
-                else np.array([np.nan, np.nan])
+    cells = np.array([node_map[int(tag)] for tag in tri_nodes_gmsh], dtype=np.int64).reshape(-1, 3)
+
+    # Get all boundary edges and their physical tags
+    all_edge_nodes_list = []
+    all_edge_tags_list = []
+    edge_tag_to_phys_tag = {}
+    curves = gmsh.model.getEntities(1)
+    for dim, tag in curves:
+        phys_tags = gmsh.model.getPhysicalGroupsForEntity(dim, tag)
+        if phys_tags:
+            physical_tag = phys_tags[0] 
+            e_types, e_tags_nested, e_node_tags_nested = gmsh.model.mesh.getElements(dim, tag)
+            if 1 in e_types: 
+                 idx = list(e_types).index(1)
+                 e_tags = e_tags_nested[idx]
+                 e_node_tags = e_node_tags_nested[idx]
+                 all_edge_tags_list.extend(e_tags)
+                 all_edge_nodes_list.extend(e_node_tags)
+                 for edge_tag in e_tags:
+                     edge_tag_to_phys_tag[int(edge_tag)] = physical_tag
+                     
+    edges_np = np.array([node_map[int(tag)] for tag in all_edge_nodes_list], dtype=np.int64).reshape(-1, 2)
+    all_edge_tags_np = np.array(all_edge_tags_list, dtype=np.int64)
+
+    # Calculate geometric properties
+    cell_centers_np = np.array([np.mean(points[cell], axis=0) for cell in cells])
+    face_centers_np = np.array([np.mean(points[edge], axis=0) for edge in edges_np])
+    face_areas_np = np.array([np.linalg.norm(points[edge[1]] - points[edge[0]]) for edge in edges_np])
+    cell_volumes_np = calculate_cell_volumes(points, cells) # Use existing function
+
+    # Build connectivity
+    owner, neighbor = build_owner_neighbor(cells, edges_np) # Pass numpy array
+
+    # Identify boundary faces and types
+    boundary_faces_indices = np.where(neighbor == -1)[0]
+    boundary_gmsh_edge_tags = all_edge_tags_np[boundary_faces_indices]
+    boundary_types = np.array([edge_tag_to_phys_tag.get(int(t), 0) for t in boundary_gmsh_edge_tags], dtype=np.int64)
+
+    # gmsh.finalize() # Don't finalize if called from tester.py
+    
+    return MeshData2D(
+        cell_volumes=cell_volumes_np,
+        face_areas=face_areas_np,
+        face_normals=calculate_face_normals(points, edges_np),
+        face_centers=face_centers_np,
+        cell_centers=cell_centers_np,
+        owner_cells=owner,
+        neighbor_cells=neighbor,
+        boundary_faces=boundary_faces_indices,
+        boundary_types=boundary_types,
+        boundary_values=np.zeros((len(edges_np), 2)), # Placeholder
+        boundary_patches=np.zeros(len(edges_np), dtype=np.int64), # Placeholder
+        face_interp_factors=np.full(len(edges_np), 0.5), # Placeholder
+        d_CF=np.zeros((len(edges_np), 2)), # Placeholder
+        non_ortho_correction=np.zeros((len(edges_np), 2)), # Placeholder
+        is_structured=False,
+        is_orthogonal=False, 
+        is_conforming=True
+    )
+
+@njit
+def calculate_cell_volumes(points, cells):
+    volumes = np.empty(len(cells))
+    for i in prange(len(cells)):
+        # Assuming triangle cells
+        if len(cells[i]) == 3:
+            a, b, c = cells[i]
+            vol = 0.5 * np.abs(
+                (points[b][0] - points[a][0])*(points[c][1] - points[a][1]) -
+                (points[c][0] - points[a][0])*(points[b][1] - points[a][1])
             )
-            if len(cell) > 0:
-                cell_face_centers = self._face_centers[cell]
-                x, y = cell_face_centers[:, 0], cell_face_centers[:, 1]
-                self._cell_volumes[i] = 0.5 * np.abs(
-                    np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))
-                )
-
-    def _assign_owner_neighbor(self):
-        n_faces = len(self._faces)
-        self._owner_cells = np.full(n_faces, -1, dtype=int)
-        self._neighbor_cells = np.full(n_faces, -1, dtype=int)
-        cell_face_counts = np.zeros(self.n_cells, dtype=int)
-
-        for cell_idx, cell_faces in enumerate(self._cells):
-            if not cell_faces:
-                raise ValueError(f"Cell {cell_idx} has no associated faces.")
-            for face_idx in cell_faces:
-                cell_face_counts[cell_idx] += 1
-                if self._owner_cells[face_idx] == -1:
-                    self._owner_cells[face_idx] = cell_idx
-                elif self._neighbor_cells[face_idx] == -1:
-                    self._neighbor_cells[face_idx] = cell_idx
-
-        if np.any(cell_face_counts == 0):
-            raise ValueError("One or more cells own no faces.")
-
-    def _identify_boundary_faces(self, original_normals):
-        for face_idx in range(self.n_faces):
-            if self._neighbor_cells[face_idx] == -1:
-                owner_idx = self._owner_cells[face_idx]
-                if owner_idx != -1:
-                    vec = self._face_centers[face_idx] - self._cell_centers[owner_idx]
-                    if np.linalg.norm(vec) > 1e-12:
-                        if np.dot(original_normals[face_idx], vec) < -1e-9:
-                            self._face_normals[face_idx] = -original_normals[face_idx]
-
-    def get_owner_neighbor(self):
-        return self._owner_cells, self._neighbor_cells
-
-    def get_cell_centers(self):
-        return self._cell_centers
-
-    def get_node_positions(self):
-        return self._nodes
-
-    def get_face_centers(self):
-        return self._face_centers
-
-    def get_face_normals(self):
-        return self._face_normals
-
-    def get_face_areas(self):
-        return self._face_areas
-
-    def get_cell_volumes(self):
-        return self._cell_volumes
-
-    @property
-    def n_cells(self):
-        return len(self._cells)
-
-    @property
-    def n_faces(self):
-        return len(self._faces)
-
-    @property
-    def n_nodes(self):
-        return len(self._nodes)
-
-    def plot(self, ax=None, title=None):
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(8, 6))
+            volumes[i] = vol
         else:
-            fig = ax.figure
-
-        ax.plot(self._nodes[:, 0], self._nodes[:, 1], "ko", markersize=1, alpha=0.6)
-        for face in self._faces:
-            if len(face) >= 2:
-                nodes = self._nodes[face]
-                if len(face) > 2:
-                    nodes = np.vstack([nodes, nodes[0]])
-                ax.plot(nodes[:, 0], nodes[:, 1], "k-", linewidth=0.5)
-
-        if title:
-            ax.set_title(title)
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.set_aspect("equal")
-        return fig, ax
-
-    def savePlot(self, filename, title=None, dpi=150, format="pdf"):
-        fig, ax = plt.subplots(figsize=(8, 6))
-        self.plot(ax, title)
-        plt.tight_layout()
-        plt.savefig(filename, dpi=dpi, format=format, bbox_inches="tight")
-        plt.close(fig)
-
-    def _extract_faces_and_cells(self, triangles):
-        """
-        Extract faces and cells from triangles. Each face is uniquely shared.
-        Ensures that every cell (triangle) has exactly 3 valid face indices.
-        """
-        edge_to_face = {}
-        faces = []
-        cells = []
-
-        for tri_idx, tri in enumerate(triangles):
-            cell_faces = []
-            for i in range(3):
-                n1, n2 = tri[i], tri[(i + 1) % 3]
-                edge = tuple(sorted((n1, n2)))
-                if edge not in edge_to_face:
-                    edge_to_face[edge] = len(faces)
-                    faces.append([n1, n2])
-                cell_faces.append(edge_to_face[edge])
-            if len(cell_faces) != 3:
-                raise ValueError(f"Cell {tri_idx} does not have 3 valid faces.")
-            cells.append(cell_faces)
-
-        return faces, cells
-
-    def _identify_boundary_faces(self, original_normals):
-        xmin, xmax = self._domain_bounds["xmin"], self._domain_bounds["xmax"]
-        ymin, ymax = self._domain_bounds["ymin"], self._domain_bounds["ymax"]
-        tol = 1e-10
-        for i in range(len(self._faces)):
-            if self._neighbor_cells[i] == -1:
-                c = self._face_centers[i]
-                if abs(c[0] - xmin) < tol:
-                    self.boundary_face_to_name[i] = "left"
-                    self._face_normals[i] = np.array([-1, 0])
-                elif abs(c[0] - xmax) < tol:
-                    self.boundary_face_to_name[i] = "right"
-                    self._face_normals[i] = np.array([1, 0])
-                elif abs(c[1] - ymin) < tol:
-                    self.boundary_face_to_name[i] = "bottom"
-                    self._face_normals[i] = np.array([0, -1])
-                elif abs(c[1] - ymax) < tol:
-                    self.boundary_face_to_name[i] = "top"
-                    self._face_normals[i] = np.array([0, 1])
-
-
-class UnstructuredRefined(UnstructuredMesh):
-    def __init__(
-        self,
-        mesh_size_walls,
-        mesh_size_lid,
-        mesh_size_center,
-        xmin=0.0,
-        xmax=1.0,
-        ymin=0.0,
-        ymax=1.0,
-    ):
-        self._domain_bounds = {"xmin": xmin, "xmax": xmax, "ymin": ymin, "ymax": ymax}
-
-        with pygmsh.geo.Geometry() as geom:
-            p1 = geom.add_point([xmin, ymin, 0.0], mesh_size=mesh_size_walls)
-            p2 = geom.add_point([xmax, ymin, 0.0], mesh_size=mesh_size_walls)
-            p3 = geom.add_point([xmax, ymax, 0.0], mesh_size=mesh_size_lid)
-            p4 = geom.add_point([xmin, ymax, 0.0], mesh_size=mesh_size_lid)
-
-            l1 = geom.add_line(p1, p2)
-            l2 = geom.add_line(p2, p3)
-            l3 = geom.add_line(p3, p4)
-            l4 = geom.add_line(p4, p1)
-
-            cloop = geom.add_curve_loop([l1, l2, l3, l4])
-            geom.add_plane_surface(cloop)
-
-            geom.set_mesh_size_callback(
-                lambda dim, tag, x, y, z, lc: min(
-                    mesh_size_center,
-                    mesh_size_walls
-                    + min(
-                        1.0,
-                        1.25
-                        * min(abs(x - xmin), abs(x - xmax), abs(y - ymin))
-                        / max(xmax - xmin, ymax - ymin),
-                    )
-                    * (mesh_size_center - mesh_size_walls),
-                    mesh_size_lid
-                    + min(1.0, 1.25 * abs(y - ymax) / (ymax - ymin))
-                    * (mesh_size_center - mesh_size_lid),
-                )
-            )
-
-            mesh = geom.generate_mesh()
-
-        nodes = mesh.points
-        triangles = mesh.cells_dict["triangle"]
-        faces, cells = self._extract_faces_and_cells(triangles, nodes)
-
-        super().__init__(nodes, faces, cells)
-
-    def _extract_faces_and_cells(self, triangles, nodes):
-        edge_to_face = {}
-        faces = []
-        cells = []
-
-        for tri in triangles:
-            if len(set(tri)) < 3 or np.any(np.array(tri) >= len(nodes)):
-                continue  # Skip degenerate or out-of-bounds
-
-            cell_faces = []
-            for i in range(3):
-                n1, n2 = tri[i], tri[(i + 1) % 3]
-                edge = tuple(sorted((n1, n2)))
-                if edge not in edge_to_face:
-                    edge_to_face[edge] = len(faces)
-                    faces.append([n1, n2])
-                f_idx = edge_to_face[edge]
-                cell_faces.append(f_idx)
-
-            if len(cell_faces) == 3:
-                cells.append(cell_faces)
-
-        # Post-process: filter out cells that don't own any face
-        face_to_owners = {i: [] for i in range(len(faces))}
-        for c_idx, cell_faces in enumerate(cells):
-            for f in cell_faces:
-                face_to_owners[f].append(c_idx)
-
-        face_owners = {f: owners[0] for f, owners in face_to_owners.items() if owners}
-
-        surviving_cells = []
-        surviving_indices = set(face_owners.values())
-        for c_idx, cell_faces in enumerate(cells):
-            if c_idx in surviving_indices:
-                surviving_cells.append(cell_faces)
-
-        return faces, surviving_cells
-
-    def _identify_boundary_faces(self, original_normals):
-        xmin, xmax = self._domain_bounds["xmin"], self._domain_bounds["xmax"]
-        ymin, ymax = self._domain_bounds["ymin"], self._domain_bounds["ymax"]
-        tol = 1e-6  # Slightly relaxed
-        self.boundary_face_to_name = {}
-
-        for i in range(len(self._faces)):
-            if self._neighbor_cells[i] == -1:
-                c = self._face_centers[i]
-                if abs(c[0] - xmin) < tol:
-                    self.boundary_face_to_name[i] = "left"
-                    self._face_normals[i] = np.array([-1, 0])
-                elif abs(c[0] - xmax) < tol:
-                    self.boundary_face_to_name[i] = "right"
-                    self._face_normals[i] = np.array([1, 0])
-                elif abs(c[1] - ymin) < tol:
-                    self.boundary_face_to_name[i] = "bottom"
-                    self._face_normals[i] = np.array([0, -1])
-                elif abs(c[1] - ymax) < tol:
-                    self.boundary_face_to_name[i] = "top"
-                    self._face_normals[i] = np.array([0, 1])
-                else:
-                    raise RuntimeError(
-                        f"Boundary face {i} at {c} not classified: "
-                        f"expected near edge of domain "
-                        f"x=[{xmin},{xmax}], y=[{ymin},{ymax}]"
-                        f"face_centers: {self._face_centers}"
-                        f"face: {self._faces[i]}"
-                    )
+            volumes[i] = 0.0 # Or handle other types
+    return volumes

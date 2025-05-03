@@ -95,3 +95,19 @@ def test_mesh_geometry_suite(mesh_instance, subtests):
         volumes = mesh_instance.get_cell_volumes()
         assert np.all(volumes > 1e-10), "Some cells have nearly-zero volume"
         assert np.all(np.isfinite(centers)), "Some cell centers are NaN or inf"
+
+    with subtests.test("cell_face_count"):
+        owners, _ = mesh_instance.get_owner_neighbor()
+        for cell_idx, cell_faces in enumerate(mesh_instance._cells):
+            assert len(cell_faces) >= 3, (
+                f"Cell {cell_idx} has insufficient faces ({len(cell_faces)})"
+            )
+
+    with subtests.test("simple_readiness"):
+        face_areas = mesh_instance.get_face_areas()
+        face_normals = mesh_instance.get_face_normals()
+        assert np.all(face_areas > 0), "Zero-area faces detected"
+        assert not np.any(np.isnan(face_normals)), "Invalid face normals"
+        assert len(mesh_instance.boundary_face_to_name) >= 4, (
+            "Missing boundary definitions"
+        )
