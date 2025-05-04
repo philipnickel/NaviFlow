@@ -19,9 +19,11 @@ def calculate_face_normals(points, edges):
     return normals
 
 
-def generate(L=1.0, nx=50, ny=50, lc=0.1, output_filename=None):
+def generate(L=1.0, nx=50, ny=50, lc=0.1, output_filename=None, model_name=None):
     """Generate structured uniform Cartesian mesh using gmsh API"""
-    model_name = "structured_uniform_gmsh"
+    if model_name is None:
+        model_name = "structured_uniform_gmsh"
+        
     if gmsh.isInitialized():
         try:
             gmsh.model.setCurrent(model_name)

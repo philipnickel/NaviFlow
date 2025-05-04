@@ -1,17 +1,17 @@
-#!/usr/bin/env pvpython
 """
-Mesh Visualization Script for NaviFlow-Collocated
+Academic Mesh Visualization Script for 2D CFD Grids
 
-This script uses ParaView's Python interface to load and visualize .vtk files.
-It can visualize individual meshes or entire experiment directories.
+Generates high-quality vector PDF visualizations from Gmsh-generated VTK meshes.
+Only PDF export is performed (no PNG). Designed for clean academic figures.
 
 Usage:
     pvpython visualize_meshes.py [path]
 
-The path can be:
-1. A specific .vtk file
-2. A directory containing .vtk files
-3. The experiments directory (default) to process all experiment meshes
+Arguments:
+    path: Optional. Can be a .vtk file, directory of .vtk files, or an experiment folder.
+
+Usage (Philips Mac from naviflow directory): 
+run_with_paraview meshing/visualize_meshes.py
 """
 
 import os
@@ -20,110 +20,116 @@ import glob
 import argparse
 from paraview.simple import *
 
-def visualize_mesh(vtk_filename):
-    """Load and visualize a mesh file, saving a screenshot."""
-    base_name = os.path.splitext(os.path.basename(vtk_filename))[0]
-    output_dir = os.path.dirname(vtk_filename)
-    png_filename = os.path.join(output_dir, f"{base_name}.png")
+# Style configuration
+STYLE_CONFIG = {
+    "background": [1, 1, 1],              # White
+    "edge_color": [0.1, 0.1, 0.1],        # Dark gray
+    "resolution": [1600, 1200],           # High-res
+    "font": "Arial",
+    "font_size": 14,
+}
 
-    print(f"Visualizing: {os.path.basename(vtk_filename)}")
+def configure_2d_view(view):
+    """Set up consistent 2D academic rendering style"""
+    view.ViewSize = STYLE_CONFIG["resolution"]
+    view.Background = STYLE_CONFIG["background"]
+    view.OrientationAxesVisibility = 0
+    view.CameraParallelProjection = 1  # 2D projection
+    view.CameraViewUp = [0, 1, 0]
+    view.CameraPosition = [0, 0, 100]  # Zoomed out of XY plane
+    view.CameraFocalPoint = [0, 0, 0]
+    Render()
+
+def color_by_physical_groups(display, view):
+    """Try coloring by 'gmsh:physical' with legend"""
+    try:
+        ColorBy(display, ('CELLS', 'gmsh:physical'))
+        display.SetScalarBarVisibility(view, True)
+        print("Colored by gmsh:physical")
+    except Exception:
+        print("Warning: 'gmsh:physical' not found, using surface coloring.")
+        ColorBy(display, None)
+        display.DiffuseColor = [0.85, 0.85, 0.85]
+def visualize_mesh(vtk_file):
+    """Visualize a single .vtk mesh and export as PDF"""
+    print(f"Visualizing: {vtk_file}")
+    base = os.path.splitext(os.path.basename(vtk_file))[0]
+    output_dir = os.path.dirname(vtk_file)
+    output_pdf = os.path.join(output_dir, f"{base}.pdf")
 
     try:
-        active = GetActiveSource()
-        if active:
-            Delete(active)
-    except:
-        pass
+        # Load mesh
+        mesh = OpenDataFile(vtk_file)
+        view = GetActiveViewOrCreate('RenderView')
+        display = Show(mesh, view)
 
-    try:
-        # Load the mesh (auto-detect reader)
-        reader = OpenDataFile(vtk_filename)
-
-        renderView = GetActiveViewOrCreate('RenderView')
-        display = Show(reader, renderView)
-
+        # Style
         display.Representation = 'Surface With Edges'
-        display.EdgeColor = [0.0, 0.0, 0.0]
+        display.EdgeColor = STYLE_CONFIG["edge_color"]
+        display.LineWidth = 1.2
 
-        # Reset and adjust view
-        renderView.ResetCamera()
-        renderView.OrientationAxesVisibility = 1
-        renderView.Background = [1.0, 1.0, 1.0]
-        renderView.CameraParallelProjection = 1
+        configure_2d_view(view)
+        color_by_physical_groups(display, view)
 
+        view.ResetCamera()
         Render()
 
-        SaveScreenshot(png_filename, renderView, ImageResolution=[1200, 800])
-        print(f"Screenshot saved to {png_filename}")
+        # Save as PDF vector output
+        ExportView(output_pdf, view)
+        print(f"Exported: {os.path.basename(output_pdf)}")
 
     except Exception as e:
-        print(f"Error processing {vtk_filename}: {e}")
+        print(f"Visualization error: {e}")
+
     finally:
-        if 'reader' in locals():
-            Delete(reader)
-            del reader
-        if 'display' in locals():
+        # Full cleanup: remove mesh, display, view
+        try:
             Delete(display)
-            del display
-        if 'renderView' in locals():
-            Delete(renderView)
-            del renderView
+        except: pass
+        try:
+            Delete(mesh)
+        except: pass
+        try:
+            Delete(view)
+        except: pass
+        ResetSession()
 
 def visualize_experiment_dir(experiment_dir):
-    """Visualize all mesh types in an experiment directory."""
-    experiment_name = os.path.basename(experiment_dir)
-    print(f"\nProcessing experiment: {experiment_name}")
-
+    print(f"\nProcessing experiment: {os.path.basename(experiment_dir)}")
     mesh_types = ["structuredUniform", "structuredRefined", "unstructured"]
-
     for mesh_type in mesh_types:
         mesh_dir = os.path.join(experiment_dir, mesh_type)
         if not os.path.isdir(mesh_dir):
             continue
-
         mesh_files = glob.glob(os.path.join(mesh_dir, "*.vtk"))
-        if mesh_files:
-            print(f"  Processing {mesh_type} meshes...")
-            for mesh_file in mesh_files:
-                visualize_mesh(mesh_file)
+        for mesh_file in mesh_files:
+            visualize_mesh(mesh_file)
 
 def process_path(path):
-    """Process a file, experiment dir, or mesh directory."""
     if os.path.isfile(path) and path.endswith('.vtk'):
         visualize_mesh(path)
     elif os.path.isdir(path):
-        if any(os.path.isdir(os.path.join(path, mesh_type)) 
-               for mesh_type in ["structuredUniform", "structuredRefined", "unstructured"]):
+        if any(os.path.isdir(os.path.join(path, t)) for t in ["structuredUniform", "structuredRefined", "unstructured"]):
             visualize_experiment_dir(path)
         elif os.path.basename(path) == "experiments":
             print(f"Processing all experiments in: {path}")
-            experiment_dirs = [d for d in glob.glob(os.path.join(path, "*")) if os.path.isdir(d)]
-            for exp_dir in sorted(experiment_dirs):
-                visualize_experiment_dir(exp_dir)
+            for d in sorted(glob.glob(os.path.join(path, "*"))):
+                if os.path.isdir(d):
+                    visualize_experiment_dir(d)
         else:
-            mesh_files = glob.glob(os.path.join(path, "*.vtk"))
-            if mesh_files:
-                print(f"Processing {len(mesh_files)} mesh files in directory: {path}")
-                for mesh_file in sorted(mesh_files):
-                    visualize_mesh(mesh_file)
-            else:
-                print(f"No .vtk files found in {path}")
+            vtk_files = glob.glob(os.path.join(path, "*.vtk"))
+            for f in sorted(vtk_files):
+                visualize_mesh(f)
     else:
-        print(f"Error: Path not found or not a .vtk file: {path}")
+        print(f"Error: Invalid path '{path}'")
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize CFD meshes with ParaView")
-    parser.add_argument("path", nargs="?", help="Path to .vtk file or directory")
+    parser = argparse.ArgumentParser(description="Generate PDF mesh visualizations")
+    parser.add_argument("path", nargs="?", help="VTK file or directory")
     args = parser.parse_args()
-
-    if args.path:
-        target_path = args.path
-    else:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        target_path = os.path.join(script_dir, "experiments")
-
+    target = args.path or os.path.join(os.path.dirname(__file__), "experiments")
     Connect()
-    process_path(target_path)
+    process_path(target)
     print("\nVisualization complete")
 
 if __name__ == "__main__":

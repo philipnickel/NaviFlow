@@ -1,5 +1,5 @@
 # vtk DataFile Version 2.0
-structured_refined_gmsh, Created by Gmsh 4.13.1 
+lidDrivenCavity_refined, Created by Gmsh 4.13.1 
 ASCII
 DATASET UNSTRUCTURED_GRID
 POINTS 1029 double

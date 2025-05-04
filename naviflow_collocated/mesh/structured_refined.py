@@ -6,9 +6,11 @@ from .mesh_data import MeshData2D
 from .structured_uniform import calculate_face_normals, build_owner_neighbor 
 from numba import njit, prange
 
-def generate(L=1.0, nx=50, ny=50, refine_edge='left', ratio=1.2, output_filename=None):
+def generate(L=1.0, nx=50, ny=50, refine_edge='left', ratio=1.2, output_filename=None, model_name=None):
     """Generate stretched grid with boundary refinement using gmsh API"""
-    model_name = "structured_refined_gmsh"
+    if model_name is None:
+        model_name = "structured_refined_gmsh"
+        
     if gmsh.isInitialized():
         try:
             gmsh.model.setCurrent(model_name)

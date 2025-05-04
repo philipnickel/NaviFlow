@@ -66,9 +66,12 @@ def generate(L=1.0, obstacle_radius=0.1, output_filename=None):
     # Generate mesh
     gmsh.model.mesh.generate(2)
 
+    gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+    gmsh.option.setNumber("Mesh.Binary", 0)  # ASCII format
     # Save mesh if filename provided
     if output_filename:
         try:
+            # Ensure legacy format is used for compatibility with ParaView
             gmsh.write(output_filename)
             print(f"Mesh saved to {output_filename}")
         except Exception as e:
