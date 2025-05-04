@@ -8,45 +8,59 @@ from numba import types
 from numba.experimental import jitclass
 import numpy as np
 
-# Type specification for Numba (enforced 2D)
+
 mesh_data_spec = [
-    # ----------------------------
-    # Geometric Properties (2D)
-    # ----------------------------
-    ('cell_volumes', types.float64[:]),       # [n_cells] Cell areas (m²)
-    ('face_areas', types.float64[:]),         # [n_faces] Face lengths (m)
-    ('face_normals', types.float64[:,:]),     # [n_faces, 2] Face normal vectors (2D)
-    ('face_centers', types.float64[:,:]),     # [n_faces, 2] Face centroids (x,y)
-    ('cell_centers', types.float64[:,:]),     # [n_cells, 2] Cell centroids (x,y)
+    # Existing geometric properties
+    ('cell_volumes', types.float64[:]),       # Cell areas (m²)
+    ('face_areas', types.float64[:]),         # Face lengths (m)
+    ('face_normals', types.float64[:,:]),     # Face normal vectors
+    ('face_centers', types.float64[:,:]),     # Face centroids
+    ('cell_centers', types.float64[:,:]),     # Cell centroids
     
-    # ----------------------------
-    # Connectivity
-    # ----------------------------
-    ('owner_cells', types.int64[:]),          # [n_faces] Owner cell indices
-    ('neighbor_cells', types.int64[:]),       # [n_faces] Neighbor cell indices (-1=boundary)
+    # Core connectivity (existing)
+    ('owner_cells', types.int64[:]),          # Owner cell indices
+    ('neighbor_cells', types.int64[:]),       # Neighbor cell indices (-1=boundary)
     
-    # ----------------------------
-    # Boundary Handling (2D)
-    # ----------------------------
-    ('boundary_faces', types.int64[:]),       # [n_boundary_faces] Boundary face indices
-    ('boundary_types', types.int64[:]),       # [n_boundary_faces] BC types (0=Dirichlet, ...)
-    ('boundary_values', types.float64[:,:]),  # [n_boundary_faces, 2] BC values (e.g., [u,v] for velocity)
-    ('boundary_patches', types.int64[:]),     # [n_boundary_faces] Patch IDs
+    # Additional connectivity (required)
+    ('vertices', types.float64[:,:]),         # Vertex coordinates
+    ('faces', types.int64[:,:]),              # Vertices forming each face
+    ('cell_faces', types.int64[:,:]),         # Faces forming each cell
+    ('boundary_owners', types.int64[:]),      # Owner cell for each boundary face
     
-    # ----------------------------
-    # Interpolation Data (2D)
-    # ----------------------------
-    ('face_interp_factors', types.float64[:]),# [n_faces] Interpolation factors (fx ∈ [0,1])
-    ('d_CF', types.float64[:,:]),             # [n_faces, 2] Owner-to-neighbor vectors (Δx,Δy)
-    ('non_ortho_correction', types.float64[:,:]), # [n_faces, 2] T_f vectors (2D)
+    # Boundary data (existing)
+    ('boundary_faces', types.int64[:]),       # Boundary face indices
+    ('boundary_types', types.int64[:]),       # BC types
+    ('boundary_values', types.float64[:,:]),  # BC values
+    ('boundary_patches', types.int64[:]),     # Patch IDs
     
-    # ----------------------------
-    # Mesh Metadata
-    # ----------------------------
+    # Diffusion & convection support
+    ('face_interp_factors', types.float64[:]),# Interpolation factors
+    ('d_CF', types.float64[:,:]),             # Owner-to-neighbor vectors
+    ('e_f', types.float64[:,:]),              # Unit vector from owner to neighbor
+    ('delta_CF', types.float64[:]),           # Distance between cell centers
+    ('delta_Cf', types.float64[:]),           # Distance from owner center to face
+    ('delta_fF', types.float64[:]),           # Distance from face to neighbor center
+    ('non_ortho_correction', types.float64[:,:]), # Non-orthogonality correction
+    
+    # SIMPLE algorithm specific
+    ('face_fluxes', types.float64[:]),        # Mass fluxes through faces
+    ('face_velocities', types.float64[:,:]),  # Velocity vectors at faces
+    ('D_f', types.float64[:]),                # Diffusion coefficients
+    ('H_f', types.float64[:,:]),              # Sum of neighbor coefficients and sources
+    ('grad_p_f', types.float64[:,:]),         # Pressure gradient at faces
+    ('pressure_correction_coeffs', types.float64[:,:]), # p' equation coefficients
+    
+    # Under-relaxation
+    ('alpha_u', types.float64),               # Velocity under-relaxation
+    ('alpha_p', types.float64),               # Pressure under-relaxation
+    
+    # Mesh metadata (existing)
     ('is_structured', types.boolean),         # Structured grid flag
     ('is_orthogonal', types.boolean),         # Orthogonality flag
     ('is_conforming', types.boolean)          # Conformity flag
 ]
+
+
 
 @jitclass(mesh_data_spec)
 class MeshData2D:
