@@ -380,28 +380,77 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, wake_refine
         wake_y_min_end = obstacle_center[1] - wake_half_width_end
         wake_y_max_end = obstacle_center[1] + wake_half_width_end
         
-        # Create a box field for the wake region
-        wake_field = gmsh.model.mesh.field.add("Box")
-        
-        # Define a box field slightly bigger than the obstacle
+        # Wake refinement parameters
         h_wake = h_min * 1.5  # Wake refinement is slightly coarser than boundary refinement
         
-        # Set the box parameters - use VIn for inside refinement size
-        gmsh.model.mesh.field.setNumber(wake_field, "VIn", h_wake)
-        gmsh.model.mesh.field.setNumber(wake_field, "VOut", h_max)
-        gmsh.model.mesh.field.setNumber(wake_field, "XMin", wake_x_start)
-        gmsh.model.mesh.field.setNumber(wake_field, "XMax", wake_x_end)
-        gmsh.model.mesh.field.setNumber(wake_field, "YMin", wake_y_min_end)  # Use the wider end value
-        gmsh.model.mesh.field.setNumber(wake_field, "YMax", wake_y_max_end)  # Use the wider end value
-        gmsh.model.mesh.field.setNumber(wake_field, "Thickness", obstacle_width/4)  # Smooth transition
+        # Determine if we should use MathEval or Box field based on complexity
+        use_math_eval = False  # Use Box field by default (more compatible)
         
-        print(f"  Wake region: x=[{wake_x_start:.3f}, {wake_x_end:.3f}], y=[{wake_y_min_end:.3f} to {wake_y_max_end:.3f}]")
+        if use_math_eval:
+            # MathEval field for tapered wake (more advanced but sometimes has compatibility issues)
+            wake_field = gmsh.model.mesh.field.add("MathEval")
+            
+            # Create a function that defines a tapered wake shape with gradient
+            # This creates smaller elements near obstacle that gradually increase in size
+            # The shape expands linearly in y-direction as x increases
+            math_expr = f"({h_wake}) + ({h_max-h_wake}) * " + \
+                        f"min(1, sqrt(((x-{wake_x_start})/{wake_x_end-wake_x_start})^2 + " + \
+                        f"max(0, abs(y-{obstacle_center[1]})/{wake_half_width_end} - " + \
+                        f"({wake_half_width_end}-{obstacle_width/2})/{wake_half_width_end}*" + \
+                        f"(x-{wake_x_start})/{wake_x_end-wake_x_start})^2))"
+            
+            gmsh.model.mesh.field.setString(wake_field, "F", math_expr)
+            print(f"  Using MathEval field with expression: {math_expr}")
+            
+        else:
+            # Use Box field (more reliable approach)
+            wake_field = gmsh.model.mesh.field.add("Box")
+            
+            # Configure the box for the wake region
+            # Use tapered shape by setting proper YMin/YMax values
+            gmsh.model.mesh.field.setNumber(wake_field, "VIn", h_wake)
+            gmsh.model.mesh.field.setNumber(wake_field, "VOut", h_max)
+            gmsh.model.mesh.field.setNumber(wake_field, "XMin", wake_x_start)
+            gmsh.model.mesh.field.setNumber(wake_field, "XMax", wake_x_end)
+            
+            # Use full tapered shape with properly expanding width from start to end
+            # This creates a true wake expansion effect
+            gmsh.model.mesh.field.setNumber(wake_field, "YMin", wake_y_min_start)
+            gmsh.model.mesh.field.setNumber(wake_field, "YMax", wake_y_max_start)
+            
+            # Add thickness for smooth transition at wake boundaries
+            # Larger thickness = smoother transition but less precise boundaries
+            gmsh.model.mesh.field.setNumber(wake_field, "Thickness", obstacle_width/3)
+            
+            # For Box field, we need a second field to create the expanding wake
+            # Create an additional box for expanded region
+            wake_field2 = None
+            if expansion_factor > 1.0:
+                wake_field2 = gmsh.model.mesh.field.add("Box")
+                
+                # Define a second box for the expanded part of wake
+                # This creates the tapered wake effect 
+                transition_point = wake_x_start + (wake_x_end - wake_x_start) * 0.5
+                
+                gmsh.model.mesh.field.setNumber(wake_field2, "VIn", h_wake * 1.2)  # Slightly coarser
+                gmsh.model.mesh.field.setNumber(wake_field2, "VOut", h_max)
+                gmsh.model.mesh.field.setNumber(wake_field2, "XMin", transition_point) 
+                gmsh.model.mesh.field.setNumber(wake_field2, "XMax", wake_x_end)
+                gmsh.model.mesh.field.setNumber(wake_field2, "YMin", wake_y_min_end)
+                gmsh.model.mesh.field.setNumber(wake_field2, "YMax", wake_y_max_end)
+                gmsh.model.mesh.field.setNumber(wake_field2, "Thickness", obstacle_width/2)
+        
+        print(f"  Wake region: Start: x={wake_x_start:.3f}, y=[{wake_y_min_start:.3f}, {wake_y_max_start:.3f}]")
+        print(f"              End:   x={wake_x_end:.3f}, y=[{wake_y_min_end:.3f}, {wake_y_max_end:.3f}]")
         print(f"  Wake mesh size: {h_wake:.5f}")
     
     # Create min field to combine all fields
     if wake_field:
         field_min = gmsh.model.mesh.field.add("Min")
-        gmsh.model.mesh.field.setNumbers(field_min, "FieldsList", [field_threshold, wake_field])
+        if 'wake_field2' in locals() and wake_field2 is not None:
+            gmsh.model.mesh.field.setNumbers(field_min, "FieldsList", [field_threshold, wake_field, wake_field2])
+        else:
+            gmsh.model.mesh.field.setNumbers(field_min, "FieldsList", [field_threshold, wake_field])
         gmsh.model.mesh.field.setAsBackgroundMesh(field_min)
     else:
         # Just use threshold field if no wake refinement
