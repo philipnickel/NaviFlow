@@ -55,60 +55,117 @@ EXPERIMENTS = {
     "lidDrivenCavity": {
         "description": "Classic lid-driven cavity problem with moving top wall",
         "uniform": {
-            "L": 1.0, "nx": 30, "ny": 30, "lc": 0.02,
-            "description": "Uniform mesh (30x30 Coarse) for lid-driven cavity"
+            "resolutions": {
+                "coarse": {"L": 1.0, "nx": 20, "ny": 20, "lc": 0.05},
+                "medium": {"L": 1.0, "nx": 40, "ny": 40, "lc": 0.025},
+                "fine": {"L": 1.0, "nx": 80, "ny": 80, "lc": 0.0125}
+            },
+            "description": "Uniform structured mesh for lid-driven cavity at multiple resolutions"
         },
         "unstructured": {
-            "Lx": 1.0, "Ly": 1.0, "n_cells": 3000, "ratio": 2.5,
-            "description": "Unstructured mesh with boundary refinement using distance field"
+            "resolutions": {
+                "coarse": {"Lx": 1.0, "Ly": 1.0, "n_cells": 1500, "ratio": 2.5},
+                "medium": {"Lx": 1.0, "Ly": 1.0, "n_cells": 3000, "ratio": 2.5},
+                "fine": {"Lx": 1.0, "Ly": 1.0, "n_cells": 6000, "ratio": 2.5}
+            },
+            "description": "Unstructured mesh with boundary refinement at multiple resolutions"
         }
     },
     "channelFlow": {
         "description": "Channel flow with circular obstacle",
         "unstructured": {
-            "Lx": 3.0, "Ly": 1.0, "n_cells": 4000, "ratio": 2.5,
-            "obstacle": {
-                "type": "circle",
-                "center": (0.6, 0.5),
-                "radius": 0.2
+            "resolutions": {
+                "coarse": {
+                    "Lx": 3.0, "Ly": 1.0, "n_cells": 2000, "ratio": 2.5,
+                    "obstacle": {
+                        "type": "circle",
+                        "center": (0.6, 0.5),
+                        "radius": 0.1
+                    },
+                    "wake_refinement": True
+                },
+                "medium": {
+                    "Lx": 3.0, "Ly": 1.0, "n_cells": 4000, "ratio": 2.5,
+                    "obstacle": {
+                        "type": "circle",
+                        "center": (0.6, 0.5),
+                        "radius": 0.1
+                    },
+                    "wake_refinement": True
+                },
+                "fine": {
+                    "Lx": 3.0, "Ly": 1.0, "n_cells": 8000, "ratio": 2.5,
+                    "obstacle": {
+                        "type": "circle",
+                        "center": (0.6, 0.5),
+                        "radius": 0.1
+                    },
+                    "wake_refinement": True
+                }
             },
-            "description": "Unstructured mesh for channel flow with circular obstacle"
+            "description": "Unstructured mesh for channel flow with circular obstacle at multiple resolutions"
         }
     },
-    "cavityWithObstacle": {
-        "description": "Cavity flow with rectangular obstacle",
-        "unstructured": {
-            "Lx": 1.0, "Ly": 1.0, "n_cells": 3000, "ratio": 2.5,
-            "obstacle": {
-                "type": "rectangle",
-                "start": (0.4, 0.2),
-                "end": (0.6, 0.4)
-            },
-            "description": "Unstructured mesh for cavity with rectangular obstacle"
-        }
-    },
+ 
     "airfoilFlow": {
         "description": "External flow around a NACA airfoil",
         "unstructured": {
-            "Lx": 5.0, "Ly": 3.0, "n_cells": 5000, "ratio": 3.0,
-            "obstacle": {
-                "type": "custom",
-                "geometry": "naca",
-                "params": {
-                    "digits": "0012",     # NACA 0012 airfoil
-                    "chord": 1.0,         # Chord length
-                    "points": 100,        # Number of points to define airfoil
-                    "angle": 5.0          # 5 degree angle of attack
+            "resolutions": {
+                "coarse": {
+                    "Lx": 5.0, "Ly": 3.0, "n_cells": 2500, "ratio": 3.0,
+                    "obstacle": {
+                        "type": "custom",
+                        "geometry": "naca",
+                        "params": {
+                            "digits": "0012",     # NACA 0012 airfoil
+                            "chord": 1.0,         # Chord length
+                            "points": 100,        # Number of points to define airfoil
+                            "angle": 0.0          # 0 degree angle of attack
+                        },
+                        "position": (0.5, 1.5),   # Position in domain
+                        "scale": 1                # Scale factor
+                    },
+                    "wake_refinement": True
                 },
-                "position": (1.5, 1.5),   # Position in domain
-                "scale": 1.0              # Scale factor
+                "medium": {
+                    "Lx": 5.0, "Ly": 3.0, "n_cells": 5000, "ratio": 3.0,
+                    "obstacle": {
+                        "type": "custom",
+                        "geometry": "naca",
+                        "params": {
+                            "digits": "0012",     # NACA 0012 airfoil
+                            "chord": 1.0,         # Chord length
+                            "points": 100,        # Number of points to define airfoil
+                            "angle": 0.0          # 0 degree angle of attack
+                        },
+                        "position": (0.5, 1.5),   # Position in domain
+                        "scale": 1                # Scale factor
+                    },
+                    "wake_refinement": True
+                },
+                "fine": {
+                    "Lx": 5.0, "Ly": 3.0, "n_cells": 10000, "ratio": 3.0,
+                    "obstacle": {
+                        "type": "custom",
+                        "geometry": "naca",
+                        "params": {
+                            "digits": "0012",     # NACA 0012 airfoil
+                            "chord": 1.0,         # Chord length
+                            "points": 100,        # Number of points to define airfoil
+                            "angle": 0.0          # 0 degree angle of attack
+                        },
+                        "position": (0.5, 1.5),   # Position in domain
+                        "scale": 1                # Scale factor
+                    },
+                    "wake_refinement": True
+                }
             },
-            "description": "Unstructured mesh for flow around NACA 0012 airfoil at 5° angle of attack"
+            "description": "Unstructured mesh for flow around NACA 0012 airfoil at multiple resolutions"
         }
     }
 }
 
-def generate_experiment_meshes(exp_name, exp_config, base_dir):
+def generate_experiment_meshes(exp_name, exp_config, base_dir, selected_resolution=None):
     print(f"\n=== Generating meshes for experiment: {exp_name} ===")
     exp_dir = os.path.join(base_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
@@ -119,64 +176,87 @@ def generate_experiment_meshes(exp_name, exp_config, base_dir):
         for key in ["uniform", "refined", "unstructured"]:
             if key in exp_config:
                 f.write(f"- **{key}**: {exp_config[key]['description']}\n")
+        f.write("\n## Resolutions\n")
+        f.write("- **coarse**: Lower resolution for quick tests\n")
+        f.write("- **medium**: Balanced resolution for most simulations\n")
+        f.write("- **fine**: Higher resolution for detailed flow features\n\n")
         f.write("\n## File Format\n- **.msh**: Gmsh format with boundary tags\n- **.vtu**: VTU format for ParaView\n")
 
     # ---------- Structured Uniform ----------
     if "uniform" in exp_config:
-        print("→ Generating structured uniform mesh...")
+        print("→ Generating structured uniform meshes...")
         mesh_dir = os.path.join(exp_dir, "structuredUniform")
         os.makedirs(mesh_dir, exist_ok=True)
-        msh_file = os.path.join(mesh_dir, f"{exp_name}_uniform.msh")
+        
+        # Create each resolution
+        for res_name, res_config in exp_config["uniform"]["resolutions"].items():
+            # Skip if a specific resolution was requested and this isn't it
+            if selected_resolution and res_name != selected_resolution:
+                continue
+                
+            print(f"  • Resolution: {res_name}")
+            
+            # Create resolution subfolder
+            res_dir = os.path.join(mesh_dir, res_name)
+            os.makedirs(res_dir, exist_ok=True)
+            
+            msh_file = os.path.join(res_dir, f"{exp_name}_uniform_{res_name}.msh")
 
-        try:
-            gmsh.clear()
-            gen_uniform(
-                L=exp_config["uniform"]["L"],
-                nx=exp_config["uniform"]["nx"],
-                ny=exp_config["uniform"]["ny"],
-                lc=exp_config["uniform"]["lc"],
-                output_filename=None,  # Don't write yet
-                model_name=f"{exp_name}_uniform"
-            )
-            export_mesh(msh_file)
-        except Exception as e:
-            print(f"  ❌ Error generating structured uniform mesh: {e}")
+            try:
+                gmsh.clear()
+                gen_uniform(
+                    L=res_config["L"],
+                    nx=res_config["nx"],
+                    ny=res_config["ny"],
+                    lc=res_config["lc"],
+                    output_filename=None,  # Don't write yet
+                    model_name=f"{exp_name}_uniform_{res_name}"
+                )
+                export_mesh(msh_file)
+            except Exception as e:
+                print(f"  ❌ Error generating structured uniform mesh ({res_name}): {e}")
 
     # ---------- Unstructured ----------
     if "unstructured" in exp_config:
-        print("→ Generating unstructured mesh...")
+        print("→ Generating unstructured meshes...")
         mesh_dir = os.path.join(exp_dir, "unstructured")
         os.makedirs(mesh_dir, exist_ok=True)
-        msh_file = os.path.join(mesh_dir, f"{exp_name}_unstructured.msh")
+        
+        # Create each resolution
+        for res_name, res_config in exp_config["unstructured"]["resolutions"].items():
+            # Skip if a specific resolution was requested and this isn't it
+            if selected_resolution and res_name != selected_resolution:
+                continue
+                
+            print(f"  • Resolution: {res_name}")
+            
+            # Create resolution subfolder
+            res_dir = os.path.join(mesh_dir, res_name)
+            os.makedirs(res_dir, exist_ok=True)
+            
+            msh_file = os.path.join(res_dir, f"{exp_name}_unstructured_{res_name}.msh")
 
-        try:
-            gmsh.clear()
-            # Handle different parameter sets
-            if "Lx" in exp_config["unstructured"]:
-                # Rectangular domain with possible obstacle
+            try:
+                gmsh.clear()
+                # Get parameters specific to this resolution
+                params = res_config.copy()
+                
+                # Handle rectangular domain with possible obstacle
                 gen_unstructured(
-                    Lx=exp_config["unstructured"]["Lx"],
-                    Ly=exp_config["unstructured"]["Ly"],
-                    n_cells=exp_config["unstructured"]["n_cells"],
-                    ratio=exp_config["unstructured"]["ratio"],
-                    obstacle=exp_config["unstructured"].get("obstacle", None),
+                    Lx=params["Lx"],
+                    Ly=params["Ly"],
+                    n_cells=params["n_cells"],
+                    ratio=params["ratio"],
+                    obstacle=params.get("obstacle", None),
+                    wake_refinement=params.get("wake_refinement", False),
                     output_filename=None,  # Don't write yet
                 )
-            else:
-                # Legacy square domain support
-                gen_unstructured(
-                    Lx=exp_config["unstructured"]["L"],
-                    Ly=exp_config["unstructured"]["L"],
-                    n_cells=exp_config["unstructured"]["n_cells"],
-                    ratio=exp_config["unstructured"]["ratio"],
-                    output_filename=None,  # Don't write yet
-                )
-            export_mesh(msh_file)
-        except Exception as e:
-            print(f"  ❌ Error generating unstructured mesh: {e}")
+                export_mesh(msh_file)
+            except Exception as e:
+                print(f"  ❌ Error generating unstructured mesh ({res_name}): {e}")
 
 
-def generate_all_meshes(selected_experiment=None):
+def generate_all_meshes(selected_experiment=None, selected_resolution=None):
     # Initialize Gmsh ONCE at the beginning
     gmsh.initialize()
     # Ensure finalization even if errors occur
@@ -191,14 +271,14 @@ def generate_all_meshes(selected_experiment=None):
 
         if selected_experiment:
             if selected_experiment in EXPERIMENTS:
-                generate_experiment_meshes(selected_experiment, EXPERIMENTS[selected_experiment], base_dir)
+                generate_experiment_meshes(selected_experiment, EXPERIMENTS[selected_experiment], base_dir, selected_resolution)
             else:
                 print(f"Experiment '{selected_experiment}' not found.")
                 # Don't call sys.exit here, let finalize run
                 # sys.exit(1)
         else:
             for exp_name, exp_config in EXPERIMENTS.items():
-                generate_experiment_meshes(exp_name, exp_config, base_dir)
+                generate_experiment_meshes(exp_name, exp_config, base_dir, selected_resolution)
 
         print("\n✅ Mesh generation complete.")
 
@@ -210,5 +290,7 @@ def generate_all_meshes(selected_experiment=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate meshes for CFD experiments")
     parser.add_argument("experiment", nargs="?", help="Name of specific experiment to generate")
+    parser.add_argument("--resolution", "-r", choices=["coarse", "medium", "fine"], 
+                       help="Generate only a specific resolution (coarse, medium, fine)")
     args = parser.parse_args()
-    generate_all_meshes(args.experiment)
+    generate_all_meshes(args.experiment, args.resolution)

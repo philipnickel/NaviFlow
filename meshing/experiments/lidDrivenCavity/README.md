@@ -4,8 +4,14 @@ Classic lid-driven cavity problem with moving top wall
 
 ## Mesh Types
 
-- **uniform**: Uniform mesh (30x30 Coarse) for lid-driven cavity
-- **unstructured**: Unstructured mesh with boundary refinement using distance field
+- **uniform**: Uniform structured mesh for lid-driven cavity at multiple resolutions
+- **unstructured**: Unstructured mesh with boundary refinement at multiple resolutions
+
+## Resolutions
+- **coarse**: Lower resolution for quick tests
+- **medium**: Balanced resolution for most simulations
+- **fine**: Higher resolution for detailed flow features
+
 
 ## File Format
 - **.msh**: Gmsh format with boundary tags

@@ -4,7 +4,7 @@ with correct physical tagging for the fluid domain and boundary curves.
 Changelog
 ---------
 * **v1.3** – Fixed Python `SyntaxError` on multiple annotated assignment
-  and removed unused variable.  Now compatible with Python ≥3.8.
+  and removed unused variable.  Now compatible with Python ≥3.8.
 """
 
 import numpy as np
@@ -67,7 +67,8 @@ def generate(
         tag = gmsh.model.addPhysicalGroup(1, [line])
         gmsh.model.setPhysicalName(1, tag, f"{name}_boundary")
 
-    fluid_tag = gmsh.model.addPhysicalGroup(2, [surf])
+    # Use tag 10 for fluid domain to be consistent with unstructured mesh
+    fluid_tag = gmsh.model.addPhysicalGroup(2, [surf], 10)
     gmsh.model.setPhysicalName(2, fluid_tag, "fluid_domain")
 
     # ------------------------------------------------------------------

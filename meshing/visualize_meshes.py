@@ -105,24 +105,56 @@ def visualize_mesh(file_path):
     if color_field:
         print(f"  Using field '{color_field[1]}' for boundary identification and legend.")
         lut = GetColorTransferFunction(color_field[1])
-        # lut.ApplyPreset('Cool to Warm Extended', True) # REMOVED
-
-        # Manually set LUT colors from COOL_TO_WARM_MANUAL
+        
+        # Get available boundary IDs from the data by checking which ones actually have elements
+        available_boundaries = set()
+        reader.UpdatePipeline()
+        data_info = reader.GetCellDataInformation().GetArray(color_field[1])
+        min_val, max_val = int(data_info.GetRange()[0]), int(data_info.GetRange()[1])
+        
+        # Check if boundaries actually have elements
+        valid_boundaries = set()
+        for bid in range(1, 6):  # Check boundary tags 1-5
+            filt = Threshold(Input=reader)
+            filt.LowerThreshold = bid - 0.5
+            filt.UpperThreshold = bid + 0.5
+            filt.ThresholdMethod = 'Between'
+            if hasattr(filt, 'SelectInputScalars'):
+                filt.SelectInputScalars = color_field
+            elif hasattr(filt, 'Scalars'):
+                filt.Scalars = color_field
+            filt.UpdatePipeline()
+            if filt.GetDataInformation().GetNumberOfCells() > 0:
+                valid_boundaries.add(bid)
+        
+        print(f"  Valid boundary tags with cells: {sorted(valid_boundaries)}")
+        
+        # Check the mesh type and handle boundary detection accordingly
+        is_structured = "structuredUniform" in file_path or "structuredRefined" in file_path
+      
+        has_obstacle = 5 in valid_boundaries
+        
+        active_boundaries = {
+            bid: label for bid, label in BOUNDARY_LABELS.items() 
+            if bid in valid_boundaries and (bid != 5 or has_obstacle)
+        }
+        
+        print(f"  Active boundaries for display: {', '.join([f'{k}:{v}' for k, v in active_boundaries.items()])}")
+        
+        # Set up colors only for boundaries that exist in this mesh
         rgb_points = []
-        # Use only the boundary IDs present in the specific map
-        sorted_bids = sorted([bid for bid in COOL_TO_WARM_MANUAL.keys() if bid in BOUNDARY_LABELS])
-        for bid in sorted_bids:
+        for bid in sorted(active_boundaries.keys()):
             color = COOL_TO_WARM_MANUAL[bid]
             rgb_points.extend([float(bid), color[0], color[1], color[2]])
+        
         if rgb_points:
             lut.RGBPoints = rgb_points
-
+            
         lut.InterpretValuesAsCategories = 1
-        # lut.RescaleTransferFunction(1.0, 4.0) # REMOVED - Not needed with manual points
-
-        # Setup annotations for legend
+        
+        # Setup annotations for legend - only for active boundaries
         annotations = []
-        for bid, label in BOUNDARY_LABELS.items():
+        for bid, label in active_boundaries.items():
             annotations.extend([str(bid), label])
         if annotations:
             lut.Annotations = annotations
@@ -163,7 +195,7 @@ def visualize_mesh(file_path):
             d.ColorArrayName = color_field
             d.LookupTable = lut # Use the manually configured LUT
             d.MapScalars = 1
-
+            
     # Add cell count text (count all triangle cells from the mesh)
     try:
         # Get the total cell count directly from the reader
@@ -223,14 +255,39 @@ def process_path(path):
         visualize_mesh(path)
     elif os.path.isdir(path):
         mesh_files = []
+        # Find .vtu files directly in the specified directory
         for ext in ['*.vtu']:
             mesh_files.extend(glob.glob(os.path.join(path, ext)))
-        for subdir in ['structuredUniform', 'structuredRefined', 'unstructured']:
-            mesh_files.extend(glob.glob(os.path.join(path, subdir, '*.vtu')))
+        
+        # Look for meshes in standard directory structure pattern
+        # experiments/{experiment}/structuredUniform/{resolution}/*.vtu
+        # experiments/{experiment}/unstructured/{resolution}/*.vtu
+        for mesh_type in ['structuredUniform', 'structuredRefined', 'unstructured']:
+            # Check for resolution subfolders first
+            mesh_type_dir = os.path.join(path, mesh_type)
+            if os.path.isdir(mesh_type_dir):
+                # Check for resolution subfolders (coarse, medium, fine)
+                for resolution in ['coarse', 'medium', 'fine']:
+                    res_dir = os.path.join(mesh_type_dir, resolution)
+                    if os.path.isdir(res_dir):
+                        mesh_files.extend(glob.glob(os.path.join(res_dir, '*.vtu')))
+                # For backward compatibility, also check for files directly in mesh_type_dir
+                mesh_files.extend(glob.glob(os.path.join(mesh_type_dir, '*.vtu')))
+                
+        # Handle if path is an experiment directory that contains mesh type subdirectories
         for exp in glob.glob(os.path.join(path, '*')):
             if os.path.isdir(exp):
-                for subdir in ['structuredUniform', 'structuredRefined', 'unstructured']:
-                    mesh_files.extend(glob.glob(os.path.join(exp, subdir, '*.vtu')))
+                for mesh_type in ['structuredUniform', 'structuredRefined', 'unstructured']:
+                    mesh_type_dir = os.path.join(exp, mesh_type)
+                    if os.path.isdir(mesh_type_dir):
+                        # Check for resolution subfolders (coarse, medium, fine)
+                        for resolution in ['coarse', 'medium', 'fine']:
+                            res_dir = os.path.join(mesh_type_dir, resolution)
+                            if os.path.isdir(res_dir):
+                                mesh_files.extend(glob.glob(os.path.join(res_dir, '*.vtu')))
+                        # For backward compatibility, also check for files directly in mesh_type_dir
+                        mesh_files.extend(glob.glob(os.path.join(mesh_type_dir, '*.vtu')))
+                        
         if mesh_files:
             print(f"Found {len(mesh_files)} mesh files to visualize")
             for f in mesh_files:

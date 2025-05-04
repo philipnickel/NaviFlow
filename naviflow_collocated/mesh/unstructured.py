@@ -155,7 +155,7 @@ def generate_custom_geometry(geom_type, **params):
     else:
         raise ValueError(f"Unknown geometry type: {geom_type}")
 
-def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_filename=None, model_name=None):
+def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, wake_refinement=False, output_filename=None, model_name=None):
     """
     Generate unstructured mesh with refinement near boundaries and optional internal obstacles.
     
@@ -174,6 +174,8 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_file
         - Circle: {'type': 'circle', 'center': (x,y), 'radius': r}
         - Rectangle: {'type': 'rectangle', 'start': (x1,y1), 'end': (x2,y2)}
         - Custom: {'type': 'custom', 'geometry': 'naca|file|points', ...params}
+    wake_refinement : bool
+        Whether to add mesh refinement in the wake region (downstream of obstacle)
     output_filename : str, optional
         Filename to save the mesh to
     model_name : str, optional
@@ -218,12 +220,17 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_file
     # Create obstacle if specified
     obstacle_boundary = None
     obstacle_lines = []
+    obstacle_center = None
+    obstacle_width = None
+    
     if obstacle:
         obstacle_type = obstacle.get('type', '').lower()
         
         if obstacle_type == 'circle':
             center = obstacle.get('center', (Lx/2, Ly/2))
             radius = obstacle.get('radius', min(Lx, Ly)/8)
+            obstacle_center = center
+            obstacle_width = radius * 2
             
             # Add center point
             pc = gmsh.model.geo.addPoint(center[0], center[1], 0)
@@ -246,6 +253,8 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_file
         elif obstacle_type == 'rectangle':
             start = obstacle.get('start', (Lx/4, Ly/4))
             end = obstacle.get('end', (3*Lx/4, 3*Ly/4))
+            obstacle_center = ((start[0] + end[0])/2, (start[1] + end[1])/2)
+            obstacle_width = end[0] - start[0]
             
             # Add corners of rectangle
             p_rect1 = gmsh.model.geo.addPoint(start[0], start[1], 0)
@@ -268,6 +277,17 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_file
             geom_params = obstacle.get('params', {})
             position = obstacle.get('position', (Lx/2, Ly/2))
             scale = obstacle.get('scale', 1.0)
+            
+            # For wake refinement, estimate the obstacle center and width
+            obstacle_center = position
+            
+            # For NACA airfoil, use chord length as width
+            if geom_type == 'naca':
+                chord = geom_params.get('chord', 1.0) * scale
+                obstacle_width = chord
+            else:
+                # Default width estimation for other geometries
+                obstacle_width = min(Lx, Ly) / 4 * scale
             
             # Generate the geometry coordinates
             try:
@@ -322,12 +342,6 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_file
     
     # Add fluid domain
     fluid_tag = gmsh.model.addPhysicalGroup(2, [surface], 10)
-    
-    # Name physical groups
-    gmsh.model.setPhysicalName(1, bottom_tag, "bottom_boundary")
-    gmsh.model.setPhysicalName(1, right_tag, "right_boundary")
-    gmsh.model.setPhysicalName(1, top_tag, "top_boundary")
-    gmsh.model.setPhysicalName(1, left_tag, "left_boundary")
     gmsh.model.setPhysicalName(2, fluid_tag, "fluid_domain")
     
     # MESH REFINEMENT using distance fields
@@ -347,8 +361,51 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_file
     gmsh.model.mesh.field.setNumber(field_threshold, "DistMin", 0)
     gmsh.model.mesh.field.setNumber(field_threshold, "DistMax", min(Lx, Ly)/3)
     
-    # Set this field as the background mesh size field
-    gmsh.model.mesh.field.setAsBackgroundMesh(field_threshold)
+    # Set up wake refinement if requested and obstacle exists
+    wake_field = None
+    if wake_refinement and obstacle_center and obstacle_width:
+        print("  Setting up wake refinement...")
+        
+        # Define wake region parameters - create a refined zone extending from obstacle to right boundary
+        wake_x_start = obstacle_center[0] + obstacle_width/2  # Start at the right edge of obstacle
+        wake_x_end = Lx  # Extend to right domain boundary
+        
+        # The wake width grows gradually (tapered) from obstacle width to wider
+        wake_y_min_start = obstacle_center[1] - obstacle_width/2
+        wake_y_max_start = obstacle_center[1] + obstacle_width/2
+        
+        # Wake expands as it moves downstream (angle of ~15 degrees)
+        expansion_factor = 1.5  # How much wider the wake becomes
+        wake_half_width_end = (obstacle_width/2) * expansion_factor
+        wake_y_min_end = obstacle_center[1] - wake_half_width_end
+        wake_y_max_end = obstacle_center[1] + wake_half_width_end
+        
+        # Create a box field for the wake region
+        wake_field = gmsh.model.mesh.field.add("Box")
+        
+        # Define a box field slightly bigger than the obstacle
+        h_wake = h_min * 1.5  # Wake refinement is slightly coarser than boundary refinement
+        
+        # Set the box parameters - use VIn for inside refinement size
+        gmsh.model.mesh.field.setNumber(wake_field, "VIn", h_wake)
+        gmsh.model.mesh.field.setNumber(wake_field, "VOut", h_max)
+        gmsh.model.mesh.field.setNumber(wake_field, "XMin", wake_x_start)
+        gmsh.model.mesh.field.setNumber(wake_field, "XMax", wake_x_end)
+        gmsh.model.mesh.field.setNumber(wake_field, "YMin", wake_y_min_end)  # Use the wider end value
+        gmsh.model.mesh.field.setNumber(wake_field, "YMax", wake_y_max_end)  # Use the wider end value
+        gmsh.model.mesh.field.setNumber(wake_field, "Thickness", obstacle_width/4)  # Smooth transition
+        
+        print(f"  Wake region: x=[{wake_x_start:.3f}, {wake_x_end:.3f}], y=[{wake_y_min_end:.3f} to {wake_y_max_end:.3f}]")
+        print(f"  Wake mesh size: {h_wake:.5f}")
+    
+    # Create min field to combine all fields
+    if wake_field:
+        field_min = gmsh.model.mesh.field.add("Min")
+        gmsh.model.mesh.field.setNumbers(field_min, "FieldsList", [field_threshold, wake_field])
+        gmsh.model.mesh.field.setAsBackgroundMesh(field_min)
+    else:
+        # Just use threshold field if no wake refinement
+        gmsh.model.mesh.field.setAsBackgroundMesh(field_threshold)
     
     # Mesh settings
     gmsh.option.setNumber("Mesh.Algorithm", 6)  # Frontal-Delaunay
