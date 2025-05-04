@@ -4,18 +4,24 @@ from .mesh_data import MeshData2D
 from .structured_uniform import calculate_face_normals, build_owner_neighbor
 from numba import njit, prange
 
-def generate(L=1.0, n_cells=1000, ratio=2.5, output_filename=None, model_name=None):
+def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_filename=None, model_name=None):
     """
-    Generate unstructured mesh with refinement near boundaries and corners.
+    Generate unstructured mesh with refinement near boundaries and optional internal obstacle.
     
     Parameters:
     -----------
-    L : float
-        Domain length (square domain with side length L)
+    Lx : float
+        Domain length in x-direction
+    Ly : float
+        Domain length in y-direction
     n_cells : int
         Target number of cells for the mesh
     ratio : float
         Refinement ratio between boundaries and center
+    obstacle : dict, optional
+        Dictionary specifying an internal obstacle. Supported types:
+        - Circle: {'type': 'circle', 'center': (x,y), 'radius': r}
+        - Rectangle: {'type': 'rectangle', 'start': (x1,y1), 'end': (x2,y2)}
     output_filename : str, optional
         Filename to save the mesh to
     model_name : str, optional
@@ -30,8 +36,9 @@ def generate(L=1.0, n_cells=1000, ratio=2.5, output_filename=None, model_name=No
     gmsh.clear()
     gmsh.model.add(model_name)
     
-    # Approximate cell size based on target cell count
-    h = L / np.sqrt(n_cells / 4.2)  # Adjusted factor based on testing
+    # Approximate cell size based on target cell count and domain area
+    area = Lx * Ly
+    h = np.sqrt(area / (n_cells / 4.2))  # Adjusted factor based on testing
     
     # Define mesh sizes
     h_min = h / ratio  # Size at boundaries
@@ -42,11 +49,11 @@ def generate(L=1.0, n_cells=1000, ratio=2.5, output_filename=None, model_name=No
     print(f"  - Min cell size: {h_min:.5f} (boundaries)")
     print(f"  - Max cell size: {h_max:.5f} (center)")
     
-    # Create square domain
+    # Create domain boundary
     p1 = gmsh.model.geo.addPoint(0, 0, 0)
-    p2 = gmsh.model.geo.addPoint(L, 0, 0)
-    p3 = gmsh.model.geo.addPoint(L, L, 0)
-    p4 = gmsh.model.geo.addPoint(0, L, 0)
+    p2 = gmsh.model.geo.addPoint(Lx, 0, 0)
+    p3 = gmsh.model.geo.addPoint(Lx, Ly, 0)
+    p4 = gmsh.model.geo.addPoint(0, Ly, 0)
     
     # Define boundary lines
     l1 = gmsh.model.geo.addLine(p1, p2)  # bottom
@@ -54,40 +61,104 @@ def generate(L=1.0, n_cells=1000, ratio=2.5, output_filename=None, model_name=No
     l3 = gmsh.model.geo.addLine(p3, p4)  # top
     l4 = gmsh.model.geo.addLine(p4, p1)  # left
     
-    # Create surface
-    curve_loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, l4])
-    surface = gmsh.model.geo.addPlaneSurface([curve_loop])
+    external_boundary = gmsh.model.geo.addCurveLoop([l1, l2, l3, l4])
+    
+    # Create obstacle if specified
+    obstacle_boundary = None
+    obstacle_lines = []
+    if obstacle:
+        obstacle_type = obstacle.get('type', '').lower()
+        
+        if obstacle_type == 'circle':
+            center = obstacle.get('center', (Lx/2, Ly/2))
+            radius = obstacle.get('radius', min(Lx, Ly)/8)
+            
+            # Add center point
+            pc = gmsh.model.geo.addPoint(center[0], center[1], 0)
+            
+            # Add four points around the circle
+            p_circ1 = gmsh.model.geo.addPoint(center[0] + radius, center[1], 0)
+            p_circ2 = gmsh.model.geo.addPoint(center[0], center[1] + radius, 0)
+            p_circ3 = gmsh.model.geo.addPoint(center[0] - radius, center[1], 0)
+            p_circ4 = gmsh.model.geo.addPoint(center[0], center[1] - radius, 0)
+            
+            # Create circle arcs
+            circ1 = gmsh.model.geo.addCircleArc(p_circ1, pc, p_circ2)
+            circ2 = gmsh.model.geo.addCircleArc(p_circ2, pc, p_circ3)
+            circ3 = gmsh.model.geo.addCircleArc(p_circ3, pc, p_circ4)
+            circ4 = gmsh.model.geo.addCircleArc(p_circ4, pc, p_circ1)
+            
+            obstacle_boundary = gmsh.model.geo.addCurveLoop([circ1, circ2, circ3, circ4])
+            obstacle_lines = [circ1, circ2, circ3, circ4]
+            
+        elif obstacle_type == 'rectangle':
+            start = obstacle.get('start', (Lx/4, Ly/4))
+            end = obstacle.get('end', (3*Lx/4, 3*Ly/4))
+            
+            # Add corners of rectangle
+            p_rect1 = gmsh.model.geo.addPoint(start[0], start[1], 0)
+            p_rect2 = gmsh.model.geo.addPoint(end[0], start[1], 0)
+            p_rect3 = gmsh.model.geo.addPoint(end[0], end[1], 0)
+            p_rect4 = gmsh.model.geo.addPoint(start[0], end[1], 0)
+            
+            # Create rectangle lines
+            rect1 = gmsh.model.geo.addLine(p_rect1, p_rect2)
+            rect2 = gmsh.model.geo.addLine(p_rect2, p_rect3)
+            rect3 = gmsh.model.geo.addLine(p_rect3, p_rect4)
+            rect4 = gmsh.model.geo.addLine(p_rect4, p_rect1)
+            
+            obstacle_boundary = gmsh.model.geo.addCurveLoop([rect1, rect2, rect3, rect4])
+            obstacle_lines = [rect1, rect2, rect3, rect4]
+    
+    # Create surface with or without hole
+    if obstacle_boundary:
+        # Create surface with hole
+        surface = gmsh.model.geo.addPlaneSurface([external_boundary, obstacle_boundary])
+    else:
+        # Create simple surface
+        surface = gmsh.model.geo.addPlaneSurface([external_boundary])
     
     gmsh.model.geo.synchronize()
     
-    # Set up physical groups for boundaries
+    # Physical groups for boundaries
     bottom_tag = gmsh.model.addPhysicalGroup(1, [l1], 1)
     right_tag = gmsh.model.addPhysicalGroup(1, [l2], 2)
     top_tag = gmsh.model.addPhysicalGroup(1, [l3], 3)
     left_tag = gmsh.model.addPhysicalGroup(1, [l4], 4)
-    fluid_tag = gmsh.model.addPhysicalGroup(2, [surface], 5)
     
-    # Name the physical groups
+    # Add obstacle physical group if present
+    if obstacle_lines:
+        obstacle_tag = gmsh.model.addPhysicalGroup(1, obstacle_lines, 5)
+        gmsh.model.setPhysicalName(1, obstacle_tag, "obstacle_boundary")
+    
+    # Add fluid domain
+    fluid_tag = gmsh.model.addPhysicalGroup(2, [surface], 10)
+    
+    # Name physical groups
     gmsh.model.setPhysicalName(1, bottom_tag, "bottom_boundary")
     gmsh.model.setPhysicalName(1, right_tag, "right_boundary")
     gmsh.model.setPhysicalName(1, top_tag, "top_boundary")
     gmsh.model.setPhysicalName(1, left_tag, "left_boundary")
     gmsh.model.setPhysicalName(2, fluid_tag, "fluid_domain")
     
-    # MESH REFINEMENT: Use distance field to refine near boundaries
-    # 1. Create distance field from boundaries
-    field_distance = gmsh.model.mesh.field.add("Distance")
-    gmsh.model.mesh.field.setNumbers(field_distance, "EdgesList", [l1, l2, l3, l4])
+    # MESH REFINEMENT using distance fields
+    boundary_edges = [l1, l2, l3, l4]
+    if obstacle_lines:
+        boundary_edges.extend(obstacle_lines)
     
-    # 2. Create a threshold field that varies mesh size with distance from boundaries
+    # Create distance field from all boundaries
+    field_distance = gmsh.model.mesh.field.add("Distance")
+    gmsh.model.mesh.field.setNumbers(field_distance, "EdgesList", boundary_edges)
+    
+    # Create threshold field that varies mesh size with distance from boundaries
     field_threshold = gmsh.model.mesh.field.add("Threshold")
     gmsh.model.mesh.field.setNumber(field_threshold, "IField", field_distance)
     gmsh.model.mesh.field.setNumber(field_threshold, "LcMin", h_min)
     gmsh.model.mesh.field.setNumber(field_threshold, "LcMax", h_max)
     gmsh.model.mesh.field.setNumber(field_threshold, "DistMin", 0)
-    gmsh.model.mesh.field.setNumber(field_threshold, "DistMax", L/3)
+    gmsh.model.mesh.field.setNumber(field_threshold, "DistMax", min(Lx, Ly)/3)
     
-    # 3. Set this field as the background mesh size field
+    # Set this field as the background mesh size field
     gmsh.model.mesh.field.setAsBackgroundMesh(field_threshold)
     
     # Mesh settings

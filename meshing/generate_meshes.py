@@ -62,7 +62,30 @@ EXPERIMENTS = {
             "L": 1.0, "n_cells": 3000, "ratio": 2.5,
             "description": "Unstructured mesh with boundary refinement using distance field"
         }
-     
+    },
+    "channelFlow": {
+        "description": "Channel flow with circular obstacle",
+        "unstructured": {
+            "Lx": 3.0, "Ly": 1.0, "n_cells": 4000, "ratio": 2.5,
+            "obstacle": {
+                "type": "circle",
+                "center": (0.6, 0.5),
+                "radius": 0.2
+            },
+            "description": "Unstructured mesh for channel flow with circular obstacle"
+        }
+    },
+    "cavityWithObstacle": {
+        "description": "Cavity flow with rectangular obstacle",
+        "unstructured": {
+            "Lx": 1.0, "Ly": 1.0, "n_cells": 3000, "ratio": 2.5,
+            "obstacle": {
+                "type": "rectangle",
+                "start": (0.4, 0.2),
+                "end": (0.6, 0.4)
+            },
+            "description": "Unstructured mesh for cavity with rectangular obstacle"
+        }
     }
 }
 
@@ -109,12 +132,26 @@ def generate_experiment_meshes(exp_name, exp_config, base_dir):
 
         try:
             gmsh.clear()
-            gen_unstructured(
-                L=exp_config["unstructured"]["L"],
-                n_cells=exp_config["unstructured"]["n_cells"],
-                ratio=exp_config["unstructured"]["ratio"],
-                output_filename=None,  # Don't write yet
-            )
+            # Handle different parameter sets
+            if "Lx" in exp_config["unstructured"]:
+                # Rectangular domain with possible obstacle
+                gen_unstructured(
+                    Lx=exp_config["unstructured"]["Lx"],
+                    Ly=exp_config["unstructured"]["Ly"],
+                    n_cells=exp_config["unstructured"]["n_cells"],
+                    ratio=exp_config["unstructured"]["ratio"],
+                    obstacle=exp_config["unstructured"].get("obstacle", None),
+                    output_filename=None,  # Don't write yet
+                )
+            else:
+                # Legacy square domain support
+                gen_unstructured(
+                    Lx=exp_config["unstructured"]["L"],
+                    Ly=exp_config["unstructured"]["L"],
+                    n_cells=exp_config["unstructured"]["n_cells"],
+                    ratio=exp_config["unstructured"]["ratio"],
+                    output_filename=None,  # Don't write yet
+                )
             export_mesh(msh_file)
         except Exception as e:
             print(f"  ❌ Error generating unstructured mesh: {e}")
