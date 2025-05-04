@@ -1,12 +1,163 @@
 import numpy as np
 import gmsh
+import math
 from .mesh_data import MeshData2D
 from .structured_uniform import calculate_face_normals, build_owner_neighbor
 from numba import njit, prange
 
+def generate_naca_profile(naca_digits, chord_length=1.0, num_points=100):
+    """
+    Generate a NACA 4-digit airfoil profile.
+    
+    Parameters:
+    -----------
+    naca_digits : str
+        The 4-digit NACA profile (e.g., '0012')
+    chord_length : float
+        The chord length of the airfoil
+    num_points : int
+        Number of points to generate along the profile
+        
+    Returns:
+    --------
+    tuple of numpy arrays
+        (x_coords, y_coords) for the airfoil profile
+    """
+    # Parse NACA digits
+    if len(naca_digits) != 4:
+        raise ValueError("NACA profile must be a 4-digit string")
+    
+    try:
+        m = int(naca_digits[0]) / 100.0    # Maximum camber
+        p = int(naca_digits[1]) / 10.0     # Location of maximum camber
+        t = int(naca_digits[2:]) / 100.0   # Maximum thickness
+    except ValueError:
+        raise ValueError("NACA digits must be integers")
+    
+    # Generate x-coordinates with cosine spacing (clustered at leading and trailing edge)
+    beta = np.linspace(0, np.pi, num_points)
+    x = 0.5 * (1 - np.cos(beta)) * chord_length
+    
+    # Calculate thickness distribution
+    yt = 5 * t * chord_length * (0.2969 * np.sqrt(x/chord_length) - 
+                                0.1260 * (x/chord_length) - 
+                                0.3516 * (x/chord_length)**2 + 
+                                0.2843 * (x/chord_length)**3 - 
+                                0.1015 * (x/chord_length)**4)
+    
+    # Initialize arrays for upper and lower surface
+    xu = np.zeros_like(x)
+    xl = np.zeros_like(x)
+    yu = np.zeros_like(x)
+    yl = np.zeros_like(x)
+    
+    # Calculate camber line and surface coordinates
+    if m == 0:  # Symmetric airfoil
+        xu = x
+        xl = x
+        yu = yt
+        yl = -yt
+    else:
+        # Calculate camber line
+        yc = np.zeros_like(x)
+        dyc_dx = np.zeros_like(x)
+        
+        # Split calculations based on position relative to p
+        for i in range(len(x)):
+            xi = x[i] / chord_length
+            if xi < p:
+                yc[i] = m * (xi / p**2) * (2*p - xi)
+                dyc_dx[i] = (2*m / p**2) * (p - xi)
+            else:
+                yc[i] = m * (1 - 2*p + (2*p - xi) / (1-p)**2)
+                dyc_dx[i] = (2*m / (1-p)**2) * (p - xi)
+        
+        # Calculate final coordinates
+        theta = np.arctan(dyc_dx)
+        xu = x - yt * np.sin(theta)
+        yu = yc + yt * np.cos(theta)
+        xl = x + yt * np.sin(theta)
+        yl = yc - yt * np.cos(theta)
+    
+    # Combine upper and lower surfaces in the correct order
+    # Start from trailing edge, go around leading edge, back to trailing edge
+    # Reverse lower surface points to maintain CCW order
+    x_coords = np.concatenate((xu[::-1][:-1], xl))
+    y_coords = np.concatenate((yu[::-1][:-1], yl))
+    
+    return x_coords, y_coords
+
+def generate_custom_geometry(geom_type, **params):
+    """
+    Generate coordinates for custom geometry types.
+    
+    Parameters:
+    -----------
+    geom_type : str
+        Type of geometry ('naca', 'file', 'points')
+    params : dict
+        Parameters specific to the geometry type
+        
+    Returns:
+    --------
+    tuple of numpy arrays
+        (x_coords, y_coords) for the geometry
+    """
+    if geom_type == 'naca':
+        # NACA airfoil profile
+        naca_digits = params.get('digits', '0012')
+        chord_length = params.get('chord', 1.0)
+        num_points = params.get('points', 100)
+        angle_deg = params.get('angle', 0.0)  # Angle of attack in degrees
+        
+        # Generate base profile
+        x_coords, y_coords = generate_naca_profile(naca_digits, chord_length, num_points)
+        
+        # Apply rotation if needed
+        if angle_deg != 0:
+            angle_rad = np.radians(angle_deg)
+            # Rotate coordinates around origin
+            x_rot = x_coords * np.cos(angle_rad) - y_coords * np.sin(angle_rad)
+            y_rot = x_coords * np.sin(angle_rad) + y_coords * np.cos(angle_rad)
+            x_coords, y_coords = x_rot, y_rot
+            
+        return x_coords, y_coords
+        
+    elif geom_type == 'file':
+        # Load coordinates from file
+        filepath = params.get('path', '')
+        if not filepath:
+            raise ValueError("File path must be provided for 'file' geometry type")
+        
+        try:
+            data = np.loadtxt(filepath)
+            if data.shape[1] < 2:
+                raise ValueError("File must contain at least 2 columns (x, y)")
+            return data[:, 0], data[:, 1]
+        except Exception as e:
+            raise ValueError(f"Failed to load geometry from file: {e}")
+            
+    elif geom_type == 'points':
+        # Use provided points directly
+        points = params.get('coords', [])
+        if not points or len(points) < 3:
+            raise ValueError("At least 3 points must be provided for 'points' geometry type")
+            
+        # Convert to numpy arrays if needed
+        if isinstance(points, list):
+            points = np.array(points)
+            
+        if points.shape[1] < 2:
+            raise ValueError("Points must be (x,y) pairs")
+            
+        return points[:, 0], points[:, 1]
+        
+    else:
+        raise ValueError(f"Unknown geometry type: {geom_type}")
+
 def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_filename=None, model_name=None):
     """
-    Generate unstructured mesh with refinement near boundaries and optional internal obstacle.
+    Generate unstructured mesh with refinement near boundaries and optional internal obstacles.
     
     Parameters:
     -----------
@@ -22,6 +173,7 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_file
         Dictionary specifying an internal obstacle. Supported types:
         - Circle: {'type': 'circle', 'center': (x,y), 'radius': r}
         - Rectangle: {'type': 'rectangle', 'start': (x1,y1), 'end': (x2,y2)}
+        - Custom: {'type': 'custom', 'geometry': 'naca|file|points', ...params}
     output_filename : str, optional
         Filename to save the mesh to
     model_name : str, optional
@@ -109,6 +261,43 @@ def generate(Lx=1.0, Ly=1.0, n_cells=1000, ratio=2.5, obstacle=None, output_file
             
             obstacle_boundary = gmsh.model.geo.addCurveLoop([rect1, rect2, rect3, rect4])
             obstacle_lines = [rect1, rect2, rect3, rect4]
+            
+        elif obstacle_type == 'custom':
+            # Get geometry parameters
+            geom_type = obstacle.get('geometry', '')
+            geom_params = obstacle.get('params', {})
+            position = obstacle.get('position', (Lx/2, Ly/2))
+            scale = obstacle.get('scale', 1.0)
+            
+            # Generate the geometry coordinates
+            try:
+                x_coords, y_coords = generate_custom_geometry(geom_type, **geom_params)
+                
+                # Apply scaling and translation
+                x_coords = x_coords * scale + position[0]
+                y_coords = y_coords * scale + position[1]
+                
+                # Add points for the geometry
+                points = []
+                for i in range(len(x_coords)):
+                    points.append(gmsh.model.geo.addPoint(x_coords[i], y_coords[i], 0))
+                
+                # Create lines connecting the points
+                lines = []
+                for i in range(len(points)-1):
+                    lines.append(gmsh.model.geo.addLine(points[i], points[i+1]))
+                # Close the loop
+                lines.append(gmsh.model.geo.addLine(points[-1], points[0]))
+                
+                obstacle_boundary = gmsh.model.geo.addCurveLoop(lines)
+                obstacle_lines = lines
+                
+                print(f"Created custom geometry with {len(points)} points and {len(lines)} lines")
+                
+            except Exception as e:
+                print(f"Error creating custom geometry: {e}")
+                obstacle_boundary = None
+                obstacle_lines = []
     
     # Create surface with or without hole
     if obstacle_boundary:

@@ -59,7 +59,7 @@ EXPERIMENTS = {
             "description": "Uniform mesh (30x30 Coarse) for lid-driven cavity"
         },
         "unstructured": {
-            "L": 1.0, "n_cells": 3000, "ratio": 2.5,
+            "Lx": 1.0, "Ly": 1.0, "n_cells": 3000, "ratio": 2.5,
             "description": "Unstructured mesh with boundary refinement using distance field"
         }
     },
@@ -85,6 +85,25 @@ EXPERIMENTS = {
                 "end": (0.6, 0.4)
             },
             "description": "Unstructured mesh for cavity with rectangular obstacle"
+        }
+    },
+    "airfoilFlow": {
+        "description": "External flow around a NACA airfoil",
+        "unstructured": {
+            "Lx": 5.0, "Ly": 3.0, "n_cells": 5000, "ratio": 3.0,
+            "obstacle": {
+                "type": "custom",
+                "geometry": "naca",
+                "params": {
+                    "digits": "0012",     # NACA 0012 airfoil
+                    "chord": 1.0,         # Chord length
+                    "points": 100,        # Number of points to define airfoil
+                    "angle": 5.0          # 5 degree angle of attack
+                },
+                "position": (1.5, 1.5),   # Position in domain
+                "scale": 1.0              # Scale factor
+            },
+            "description": "Unstructured mesh for flow around NACA 0012 airfoil at 5° angle of attack"
         }
     }
 }

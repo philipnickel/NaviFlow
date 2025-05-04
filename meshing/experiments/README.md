@@ -9,3 +9,6 @@ Channel flow with circular obstacle
 ### cavityWithObstacle
 Cavity flow with rectangular obstacle
 
+### airfoilFlow
+External flow around a NACA airfoil
+

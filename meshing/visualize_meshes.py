@@ -30,7 +30,8 @@ BOUNDARY_LABELS = {
     2: "right_boundary",
     3: "top_boundary",
     4: "left_boundary",
-    # 5: "fluid_domain" # Domain is usually not labeled as a boundary
+    5: "obstacle_boundary",  # Added obstacle boundary
+    # 10: "fluid_domain" # Domain is usually not labeled as a boundary
 }
 
 BOUNDARY_COLORS = {
@@ -47,7 +48,7 @@ PROFESSIONAL_COLORS = {
     2: [1.000, 0.498, 0.055], # Orange (Right - Now unique)
     3: [0.172, 0.627, 0.172], # Green (Top)
     4: [0.839, 0.152, 0.156], # Red (Left)
-    5: [0.580, 0.403, 0.741], # Purple (for potential obstacle)
+    5: [0.580, 0.403, 0.741], # Purple (for obstacle)
 }
 
 # Specific Cool-to-Warm Approximations
@@ -59,10 +60,9 @@ def hex_to_rgb(hex_color): # Helper function
 COOL_TO_WARM_MANUAL = {
     1: hex_to_rgb("#3b4cc0"), # Coolest Blue
     2: hex_to_rgb("#8db0fe"), # Lighter Blue
-    # 3: hex_to_rgb("#dddcdc"), # Mid Gray (Skip for boundary? Use next)
     3: hex_to_rgb("#f4987a"), # Lighter Red/Orange
     4: hex_to_rgb("#b40426"), # Warmest Red
-    # Optional 5th color if needed later
+    5: hex_to_rgb("#762a83"), # Purple (for obstacle)
 }
 
 def visualize_mesh(file_path):
@@ -164,23 +164,11 @@ def visualize_mesh(file_path):
             d.LookupTable = lut # Use the manually configured LUT
             d.MapScalars = 1
 
-    # Add cell count text (count only fluid domain cells)
+    # Add cell count text (count all triangle cells from the mesh)
     try:
-        # Threshold to get only fluid domain cells (tag 5)
-        fluid_thresh = Threshold(Input=reader)
-        fluid_thresh.LowerThreshold = 4.5
-        fluid_thresh.UpperThreshold = 5.5
-        fluid_thresh.ThresholdMethod = 'Between'
-        if hasattr(fluid_thresh, 'SelectInputScalars'):
-             fluid_thresh.SelectInputScalars = ('CELLS', 'gmsh:physical')
-        elif hasattr(fluid_thresh, 'Scalars'):
-             fluid_thresh.Scalars = ('CELLS', 'gmsh:physical')
-        else:
-             raise RuntimeError("Could not set scalars for fluid cell count threshold")
-
-        # Update pipeline to get data info from the threshold filter
-        fluid_thresh.UpdatePipeline()
-        num_cells = fluid_thresh.GetDataInformation().GetNumberOfCells()
+        # Get the total cell count directly from the reader
+        reader.UpdatePipeline()
+        num_cells = reader.GetDataInformation().GetNumberOfCells()
         cell_text = Text()
         cell_text.Text = f"Cells: {num_cells:,}"
         text_display = Show(cell_text, view)
