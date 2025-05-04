@@ -5,7 +5,7 @@ This directory contains meshes for various CFD experiments.
 ## Experiments
 
 ### lidDrivenCavity
-Lid-driven cavity flow in a square domain
+Classic lid-driven cavity problem with moving top wall
 
 ### flowAroundCylinder
 Flow around a circular cylinder

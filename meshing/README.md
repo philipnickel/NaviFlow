@@ -27,9 +27,37 @@ Available experiment types:
 - `flowAroundCylinder` - Flow around a circular obstacle
 - `backwardFacingStep` - Flow over a backward-facing step
 
+## Mesh Format
+
+For each mesh, a single file format is used:
+
+- `.msh` - Native GMSH format (version 4.1) with physical groups for boundaries
+  - Used for both simulation and visualization
+  - Contains all boundary information needed for the solver
+  - Can be directly read by ParaView using the meshio plugin
+
+This simplified approach avoids format conversion issues and enables direct visualization of the simulation meshes.
+
 ## Mesh Visualization
 
-Visualize meshes using ParaView's Python API:
+### Setting up the ParaView meshio Plugin
+
+To visualize the `.msh` files in ParaView, you need to install the meshio plugin:
+
+1. Install the meshio Python package in ParaView's Python environment:
+   ```bash
+   pip install meshio
+   ```
+   
+2. Download the ParaView meshio plugin from:
+   - https://github.com/nschloe/meshio/blob/main/tools/paraview-meshio-plugin.py
+
+3. In ParaView, go to Tools → Manage Plugins → Load New and select the downloaded plugin file
+4. Check the "Auto Load" option to load it automatically in future sessions
+
+### Visualizing Meshes
+
+Once the plugin is installed, you can visualize meshes using:
 
 ```bash
 # Visualize all experiment meshes
@@ -39,8 +67,10 @@ pvpython meshing/visualize_meshes.py
 pvpython meshing/visualize_meshes.py meshing/experiments/lidDrivenCavity
 
 # Visualize a specific mesh file
-pvpython meshing/visualize_meshes.py meshing/experiments/lidDrivenCavity/structuredUniform/lidDrivenCavity_uniform.msh
+pvpython meshing/visualize_meshes.py meshing/experiments/lidDrivenCavity/structuredRefined/lidDrivenCavity_refined.msh
 ```
+
+Alternatively, you can open the `.msh` files directly in the ParaView GUI.
 
 ## Directory Structure
 
@@ -50,14 +80,12 @@ meshing/
     experiments/
         [experiment_type]/
             structuredUniform/
-                [experiment_type]_uniform.msh
-                [experiment_type]_uniform.png (if visualized)
+                [experiment_type]_uniform.msh        # GMSH file (for both simulation and visualization)
+                [experiment_type]_uniform.pdf        # Visualization output (if generated)
             structuredRefined/
-                [experiment_type]_refined.msh
-                [experiment_type]_refined.png (if visualized)
+                # Similar structure as above
             unstructured/
-                [experiment_type]_unstructured.msh
-                [experiment_type]_unstructured.png (if visualized)
+                # Similar structure as above
 ```
 
 ## Requirements
@@ -66,6 +94,7 @@ meshing/
 - NumPy
 - gmsh (Python bindings)
 - ParaView (for visualization)
+  - With the meshio plugin installed
   - When using ParaView visualization, run the scripts with `pvpython` or `pvbatch`
   - These executables are included with the ParaView installation
 

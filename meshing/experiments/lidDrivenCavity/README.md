@@ -1,9 +1,14 @@
 # lidDrivenCavity Experiment
 
-Lid-driven cavity flow in a square domain
+Classic lid-driven cavity problem with moving top wall
 
 ## Mesh Types
 
-- **structuredUniform**: Standard uniform square mesh
-- **structuredRefined**: Refined near the top lid to capture boundary layer
-- **unstructured**: Unstructured triangle mesh with refinement near walls and lid
+- **structuredUniform**: Uniform mesh for lid-driven cavity
+- **structuredRefined**: Mesh with refinement near the top (lid)
+
+## File Formats
+
+- **.msh**: Native GMSH format with all boundary information
+  - Used for both simulation and visualization
+  - For visualization in ParaView, use the meshio plugin
