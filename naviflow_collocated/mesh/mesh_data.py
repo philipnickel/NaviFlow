@@ -1,121 +1,47 @@
-"""
-Numba-accelerated 2D Mesh Data Structure for Finite Volume CFD Simulations
-
-Specialized for 2D simulations while maintaining compatibility with Moukalled's FVM methodology.
-All spatial data uses 2D coordinates (x,y) with z=0 implied.
-"""
-
 import numpy as np
 from numba import types
 from numba.experimental import jitclass
 
-
 mesh_data_spec = [
-    # Existing geometric properties
-    ("cell_volumes", types.float64[:]),  # Cell areas (m²)
-    ("face_areas", types.float64[:]),  # Face lengths (m)
-    ("face_normals", types.float64[:, :]),  # Face normal vectors
-    ("face_centers", types.float64[:, :]),  # Face centroids
-    ("cell_centers", types.float64[:, :]),  # Cell centroids
-    # Core connectivity (existing)
-    ("owner_cells", types.int64[:]),  # Owner cell indices
-    ("neighbor_cells", types.int64[:]),  # Neighbor cell indices (-1=boundary)
-    # Additional connectivity (required)
-    ("vertices", types.float64[:, :]),  # Vertex coordinates
-    ("faces", types.int64[:, :]),  # Vertices forming each face
-    ("cell_faces", types.int64[:, :]),  # Faces forming each cell
-    ("boundary_owners", types.int64[:]),  # Owner cell for each boundary face
-    # Boundary data (existing)
-    ("boundary_faces", types.int64[:]),  # Boundary face indices
-    ("boundary_types", types.int64[:]),  # BC types
-    ("boundary_values", types.float64[:, :]),  # BC values
-    ("boundary_patches", types.int64[:]),  # Patch IDs
-    # Diffusion & convection support
-    ("face_interp_factors", types.float64[:]),  # Interpolation factors
-    ("d_CF", types.float64[:, :]),  # Owner-to-neighbor vectors
-    ("e_f", types.float64[:, :]),  # Unit vector from owner to neighbor
-    ("delta_CF", types.float64[:]),  # Distance between cell centers
-    ("delta_Cf", types.float64[:]),  # Distance from owner center to face
-    ("delta_fF", types.float64[:]),  # Distance from face to neighbor center
-    ("non_ortho_correction", types.float64[:, :]),  # Non-orthogonality correction
-    # SIMPLE algorithm specific
-    ("face_fluxes", types.float64[:]),  # Mass fluxes through faces
-    ("face_velocities", types.float64[:, :]),  # Velocity vectors at faces
-    ("D_f", types.float64[:]),  # Diffusion coefficients
-    ("H_f", types.float64[:, :]),  # Sum of neighbor coefficients and sources
-    ("grad_p_f", types.float64[:, :]),  # Pressure gradient at faces
-    ("pressure_correction_coeffs", types.float64[:, :]),  # p' equation coefficients
-    # Under-relaxation
-    ("alpha_u", types.float64),  # Velocity under-relaxation
-    ("alpha_p", types.float64),  # Pressure under-relaxation
-    # Mesh metadata (existing)
-    ("is_structured", types.boolean),  # Structured grid flag
-    ("is_orthogonal", types.boolean),  # Orthogonality flag
-    ("is_conforming", types.boolean),  # Conformity flag
+    # --- Geometry ---
+    ("cell_volumes", types.float64[:]),
+    ("cell_centers", types.float64[:, :]),
+    ("face_areas", types.float64[:]),
+    ("face_normals", types.float64[:, :]),
+    ("face_centers", types.float64[:, :]),
+    # --- Connectivity ---
+    ("owner_cells", types.int64[:]),
+    ("neighbor_cells", types.int64[:]),
+    ("cell_faces", types.int64[:, :]),
+    ("face_vertices", types.int64[:, :]),
+    ("vertices", types.float64[:, :]),
+    # --- Precomputed metrics ---
+    ("d_PN", types.float64[:, :]),
+    ("e_f", types.float64[:, :]),
+    ("delta_PN", types.float64[:]),
+    ("delta_Pf", types.float64[:]),
+    ("delta_fN", types.float64[:]),
+    ("non_ortho_correction", types.float64[:, :]),
+    ("face_interp_factors", types.float64[:]),
+    # --- Topological masks ---
+    ("internal_faces", types.int64[:]),
+    ("boundary_faces", types.int64[:]),
+    ("boundary_patches", types.int64[:]),
+    ("boundary_types", types.int64[:]),
+    ("boundary_values", types.float64[:, :]),
+    # --- Face-level variables ---
+    ("face_fluxes", types.float64[:]),
+    ("face_velocities", types.float64[:, :]),
+    ("grad_p_f", types.float64[:, :]),
+    # --- Cell-level solver data ---
+    ("D_f", types.float64[:]),
+    ("H_f", types.float64[:, :]),
+    ("p_corr_coeffs", types.float64[:, :]),
+    # --- Mesh metadata ---
+    ("is_structured", types.boolean),
+    ("is_orthogonal", types.boolean),
+    ("is_conforming", types.boolean),
 ]
-
-
-# Helper functions for mesh initialization that need to be outside the jitclass
-def calculate_delta_cf(cell_centers, face_centers, d_CF, owner_cells, neighbor_cells):
-    """Calculate distances between cell centers and faces."""
-    # Small value to prevent zero distance
-    _SMALL = 1.0e-12
-
-    n_faces = len(owner_cells)
-    delta_CF_array = np.zeros(n_faces)
-
-    for f in range(n_faces):
-        C = owner_cells[f]
-        F = neighbor_cells[f]
-
-        distance = 0.0
-        # For internal faces, use distance between cell centers
-        if F >= 0:
-            d_cf_vec = d_CF[f]
-            distance = np.sqrt(d_cf_vec[0] ** 2 + d_cf_vec[1] ** 2)
-        else:
-            # For boundary faces, use distance from cell center to face center
-            d_cf_vec = face_centers[f] - cell_centers[C]
-            distance = np.sqrt(d_cf_vec[0] ** 2 + d_cf_vec[1] ** 2)
-
-        # Ensure distance is not exactly zero
-        delta_CF_array[f] = max(distance, _SMALL)
-
-    return delta_CF_array
-
-
-def calculate_cell_faces_array(n_cells, n_faces, owner_cells, neighbor_cells):
-    """Build the cell_faces array."""
-    # First, count how many faces each cell has
-    face_count = np.zeros(n_cells, dtype=np.int64)
-    for f in range(n_faces):
-        C = owner_cells[f]
-        face_count[C] += 1
-        if neighbor_cells[f] >= 0:
-            F = neighbor_cells[f]
-            face_count[F] += 1
-
-    # Find maximum number of faces per cell
-    max_faces_per_cell = np.max(face_count)
-
-    # Initialize cell_faces array with -1 (invalid face index)
-    cell_faces_array = np.full((n_cells, max_faces_per_cell), -1, dtype=np.int64)
-
-    # Reset face count to use as counter
-    face_count = np.zeros(n_cells, dtype=np.int64)
-
-    # Fill cell_faces array
-    for f in range(n_faces):
-        C = owner_cells[f]
-        cell_faces_array[C, face_count[C]] = f
-        face_count[C] += 1
-
-        if neighbor_cells[f] >= 0:
-            F = neighbor_cells[f]
-            cell_faces_array[F, face_count[F]] = f
-            face_count[F] += 1
-
-    return cell_faces_array
 
 
 @jitclass(mesh_data_spec)
@@ -123,129 +49,74 @@ class MeshData2D:
     def __init__(
         self,
         cell_volumes,
+        cell_centers,
         face_areas,
         face_normals,
         face_centers,
-        cell_centers,
         owner_cells,
         neighbor_cells,
+        cell_faces,
+        face_vertices,
+        vertices,
+        d_PN,
+        e_f,
+        delta_PN,
+        delta_Pf,
+        delta_fN,
+        non_ortho_correction,
+        face_interp_factors,
+        internal_faces,
         boundary_faces,
+        boundary_patches,
         boundary_types,
         boundary_values,
-        boundary_patches,
-        face_interp_factors,
-        d_CF,
-        non_ortho_correction,
         is_structured,
         is_orthogonal,
         is_conforming,
-        cell_faces=None,  # Optional: faces for each cell
-        delta_CF=None,  # Optional: distance between cell centers
-        vertices=None,  # Optional: vertex coordinates
-        faces=None,  # Optional: vertices forming each face
-        boundary_owners=None,  # Optional: owner cell for each boundary face
     ):
-        """
-        Initialize 2D mesh data structure
+        # --- Geometry ---
+        self.cell_volumes = cell_volumes
+        self.cell_centers = cell_centers
+        self.face_areas = face_areas
+        self.face_normals = face_normals
+        self.face_centers = face_centers
 
-        Parameters:
-        -----------
-        All arrays must be C-contiguous and properly typed (float64/int64)
-        Spatial data must be 2D (shape [n, 2])
-        """
-        # Validate 2D shape consistency
-        assert face_normals.shape[1] == 2, "Face normals must be 2D vectors"
-        assert face_centers.shape[1] == 2, "Face centers must be 2D coordinates"
-        assert cell_centers.shape[1] == 2, "Cell centers must be 2D coordinates"
-        assert d_CF.shape[1] == 2, "d_CF vectors must be 2D"
-        assert non_ortho_correction.shape[1] == 2, "Non-ortho correction must be 2D"
-        assert boundary_values.shape[1] == 2, "Boundary values must be 2D"
+        # --- Connectivity ---
+        self.owner_cells = owner_cells
+        self.neighbor_cells = neighbor_cells
+        self.cell_faces = cell_faces
+        self.face_vertices = face_vertices
+        self.vertices = vertices
 
-        # Geometric properties
-        self.cell_volumes = cell_volumes  # Cell areas [n_cells]
-        self.face_areas = face_areas  # Face lengths [n_faces]
-        self.face_normals = face_normals  # Face normal vectors [n_faces, 2]
-        self.face_centers = face_centers  # Face centroids [n_faces, 2]
-        self.cell_centers = cell_centers  # Cell centroids [n_cells, 2]
+        # --- Precomputed metrics ---
+        self.d_PN = d_PN
+        self.e_f = e_f
+        self.delta_PN = delta_PN
+        self.delta_Pf = delta_Pf
+        self.delta_fN = delta_fN
+        self.non_ortho_correction = non_ortho_correction
+        self.face_interp_factors = face_interp_factors
 
-        # Connectivity maps
-        self.owner_cells = owner_cells  # Owner cell indices [n_faces]
-        self.neighbor_cells = neighbor_cells  # Neighbor cell indices [n_faces]
+        # --- Topological masks ---
+        self.internal_faces = internal_faces
+        self.boundary_faces = boundary_faces
+        self.boundary_patches = boundary_patches
+        self.boundary_types = boundary_types
+        self.boundary_values = boundary_values
 
-        # Boundary condition data
-        self.boundary_faces = boundary_faces  # Boundary face indices [n_boundary_faces]
-        self.boundary_types = boundary_types  # BC type codes [n_boundary_faces]
-        self.boundary_values = boundary_values  # BC values [n_boundary_faces, 2]
-        self.boundary_patches = boundary_patches  # Patch IDs [n_boundary_faces]
-
-        # Interpolation factors
-        self.face_interp_factors = face_interp_factors  # [n_faces]
-        self.d_CF = d_CF  # Owner-to-neighbor vectors [n_faces, 2]
-        self.non_ortho_correction = non_ortho_correction  # T_f vectors [n_faces, 2]
-
-        # Mesh metadata
-        self.is_structured = is_structured  # Structured grid flag
-        self.is_orthogonal = is_orthogonal  # Orthogonality flag
-        self.is_conforming = is_conforming  # Conformity flag
-
-        # Set dimensions for sizing
+        # --- Face-level variables (initialized to zero) ---
         n_faces = len(face_areas)
-        n_cells = len(cell_volumes)
-        n_boundary_faces = len(boundary_faces)
-
-        # Initialize optional arrays with proper shape and type
-        # Set optional attributes if provided, otherwise use empty arrays of the correct shape/type
-        self.cell_faces = (
-            cell_faces
-            if cell_faces is not None
-            else np.zeros((n_cells, 1), dtype=np.int64)
-        )
-        self.delta_CF = (
-            delta_CF if delta_CF is not None else np.zeros(n_faces, dtype=np.float64)
-        )
-        self.vertices = (
-            vertices if vertices is not None else np.zeros((1, 2), dtype=np.float64)
-        )
-        self.faces = faces if faces is not None else np.zeros((1, 4), dtype=np.int64)
-        self.boundary_owners = (
-            boundary_owners
-            if boundary_owners is not None
-            else np.zeros(n_boundary_faces, dtype=np.int64)
-        )
-
-        # Initialize SIMPLE algorithm specific fields with proper sizes
         self.face_fluxes = np.zeros(n_faces, dtype=np.float64)
         self.face_velocities = np.zeros((n_faces, 2), dtype=np.float64)
+        self.grad_p_f = np.zeros((n_faces, 2), dtype=np.float64)
+
+        # --- Cell-level solver data (initialized to zero) ---
+        n_cells = len(cell_volumes)
         self.D_f = np.zeros(n_faces, dtype=np.float64)
         self.H_f = np.zeros((n_cells, 2), dtype=np.float64)
-        self.grad_p_f = np.zeros((n_faces, 2), dtype=np.float64)
-        self.pressure_correction_coeffs = np.zeros((n_cells, 2), dtype=np.float64)
-        self.alpha_u = 0.7  # Default under-relaxation for velocity
-        self.alpha_p = 0.3  # Default under-relaxation for pressure
-        self.delta_Cf = np.zeros(n_faces, dtype=np.float64)
-        self.delta_fF = np.zeros(n_faces, dtype=np.float64)
-        self.e_f = np.zeros((n_faces, 2), dtype=np.float64)
+        self.p_corr_coeffs = np.zeros((n_cells, 2), dtype=np.float64)
 
-
-# Validation Checklist ---------------------------------------------------------
-"""
-1. 2D Shape Enforcement:
-   - All vector arrays have shape [n, 2]
-   - No z-component storage
-
-2. Geometric Integrity:
-   - cell_volumes (areas) > 0
-   - face_areas (lengths) > 0
-   - face_normals magnitude ≈ face_areas
-
-3. Boundary Conditions:
-   - Moving wall BCs have non-zero tangential components
-   - Pressure BCs use normal gradient conditions
-"""
-
-# Performance Notes ------------------------------------------------------------
-"""
-- 2D storage reduces memory usage by 33% compared to 3D arrays
-- Numba can optimize 2D loops more effectively
-- Use np.linalg.norm(..., axis=1) for 2D vector magnitudes
-"""
+        # --- Mesh metadata ---
+        self.is_structured = is_structured
+        self.is_orthogonal = is_orthogonal
+        self.is_conforming = is_conforming

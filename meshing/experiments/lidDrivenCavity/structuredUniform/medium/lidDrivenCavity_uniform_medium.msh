@@ -3,10 +3,10 @@ $MeshFormat
 $EndMeshFormat
 $PhysicalNames
 5
-1 1 "bottom_boundary"
-1 2 "right_boundary"
-1 3 "top_boundary"
-1 4 "left_boundary"
+1 1 "bottom"
+1 2 "right"
+1 3 "top"
+1 4 "left"
 2 10 "fluid_domain"
 $EndPhysicalNames
 $Nodes

@@ -1,140 +1,197 @@
 import numpy as np
+import os
+import matplotlib.pyplot as plt
+from naviflow_collocated.mesh.mesh_data import MeshData2D
 
 
-def test_mesh_basic_properties(mesh_instance):
-    """Test basic mesh properties and geometry."""
-    # Check cell and face geometry
-    assert len(mesh_instance.cell_volumes) > 0, "Mesh has no cells"
-    assert len(mesh_instance.face_areas) > 0, "Mesh has no faces"
-    assert np.all(mesh_instance.face_areas > 0), "Mesh has zero or negative face areas"
-    assert np.all(mesh_instance.cell_volumes > 0), (
-        "Mesh has zero or negative cell volumes"
+def test_basic_mesh_integrity(mesh_instance):
+    mesh = mesh_instance
+    assert isinstance(mesh, MeshData2D)
+
+    n_cells = mesh.cell_volumes.shape[0]
+    n_faces = mesh.face_areas.shape[0]
+
+    # Core shape checks
+    assert mesh.cell_centers.shape == (n_cells, 2)
+    assert mesh.face_centers.shape == (n_faces, 2)
+    assert mesh.face_normals.shape == (n_faces, 2)
+    assert mesh.owner_cells.shape[0] == n_faces
+    assert mesh.neighbor_cells.shape[0] == n_faces
+
+    # Physical quantities
+    assert np.all(mesh.cell_volumes > 0), "All cell volumes should be > 0"
+    assert np.all(mesh.face_areas > 0), "All face areas should be > 0"
+
+    # Connectivity validity
+    assert np.all(mesh.owner_cells >= 0)
+    assert np.all(mesh.neighbor_cells[mesh.boundary_faces] == -1)
+    assert np.all((mesh.face_interp_factors >= 0) & (mesh.face_interp_factors <= 1))
+
+    # Structured-specific
+    if mesh.is_structured:
+        assert mesh.is_orthogonal, "Structured meshes must be flagged orthogonal"
+
+
+def test_face_cell_symmetry(mesh_instance):
+    mesh = mesh_instance
+    n_faces = mesh.face_areas.shape[0]
+    counts = np.zeros(n_faces, dtype=np.int32)
+    for face_list in mesh.cell_faces:
+        for f in face_list:
+            if f >= 0:
+                counts[f] += 1
+    assert np.all((counts == 1) | (counts == 2)), (
+        "Each face must belong to 1 or 2 cells"
     )
 
-    # Check array dimensions
-    assert mesh_instance.face_normals.shape[1] == 2, "Face normals aren't 2D vectors"
-    assert mesh_instance.cell_centers.shape[1] == 2, "Cell centers aren't 2D points"
-    assert mesh_instance.face_centers.shape[1] == 2, "Face centers aren't 2D points"
+
+def test_unique_face_vertices(mesh_instance):
+    mesh = mesh_instance
+    face_keys = [tuple(sorted(face.tolist())) for face in mesh.face_vertices]
+    assert len(set(face_keys)) == len(face_keys), "Duplicate face vertices detected"
 
 
-def test_mesh_connectivity(mesh_instance):
-    """Test mesh connectivity and owner-neighbor relationships."""
-    # Test owner cells are valid indices
-    face_counts = np.bincount(
-        mesh_instance.owner_cells, minlength=len(mesh_instance.cell_volumes)
+def test_face_normal_orientation(mesh_instance):
+    mesh = mesh_instance
+    internal = mesh.neighbor_cells >= 0
+    P = mesh.owner_cells[internal]
+    N = mesh.neighbor_cells[internal]
+    vec = mesh.cell_centers[N] - mesh.cell_centers[P]
+    dot = np.einsum("ij,ij->i", vec, mesh.face_normals[internal])
+    assert np.all(dot > 0), "Some face normals do not point from owner to neighbor"
+
+
+def test_delta_PN_matches_geometry(mesh_instance):
+    mesh = mesh_instance
+    mask = mesh.neighbor_cells >= 0
+    P = mesh.owner_cells[mask]
+    N = mesh.neighbor_cells[mask]
+    expected = np.linalg.norm(mesh.cell_centers[N] - mesh.cell_centers[P], axis=1)
+    assert np.allclose(mesh.delta_PN[mask], expected, rtol=1e-3), "Mismatch in delta_PN"
+
+
+def test_non_ortho_projection_decomposition(mesh_instance):
+    mesh = mesh_instance
+    internal = mesh.neighbor_cells >= 0
+    vec_pn = mesh.d_PN[internal]
+    n_hat = mesh.face_normals[internal] / (
+        np.linalg.norm(mesh.face_normals[internal], axis=1)[:, None] + 1e-12
     )
-    print("Cells with no owned faces:", np.where(face_counts == 0)[0])
-    assert np.all(mesh_instance.owner_cells >= 0), "Invalid negative owner cell indices"
-    assert np.max(mesh_instance.owner_cells) < len(mesh_instance.cell_volumes), (
-        "Owner index out of range"
+    proj_len = np.einsum("ij,ij->i", vec_pn, n_hat)
+    t_f = mesh.non_ortho_correction[internal]
+    reconstructed = proj_len[:, None] * n_hat + t_f
+    assert np.allclose(vec_pn, reconstructed, rtol=1e-6), (
+        "Projection decomposition failed"
     )
 
-    # Test neighbor cells are valid (when not boundary)
-    internal_faces = mesh_instance.neighbor_cells != -1
-    if np.any(internal_faces):
-        assert np.all(mesh_instance.neighbor_cells[internal_faces] >= 0), (
-            "Invalid negative neighbor indices"
+
+def test_structured_mesh_alignment(mesh_instance):
+    mesh = mesh_instance
+    if mesh.is_structured:
+        aligned = np.einsum("ij,ij->i", mesh.face_normals, mesh.e_f) / (
+            mesh.face_areas + 1e-12
         )
-        assert np.max(mesh_instance.neighbor_cells[internal_faces]) < len(
-            mesh_instance.cell_volumes
-        ), "Neighbor index out of range"
-
-    # Test boundary faces
-    assert len(mesh_instance.boundary_faces) > 0, "No boundary faces found"
-    assert np.all(mesh_instance.boundary_faces >= 0), (
-        "Invalid negative boundary face indices"
-    )
-    assert np.all(mesh_instance.boundary_faces < len(mesh_instance.face_areas)), (
-        "Boundary face index out of range"
-    )
-
-    # Check all boundary faces have no neighbors
-    for bf in mesh_instance.boundary_faces:
-        assert mesh_instance.neighbor_cells[bf] == -1, (
-            "Boundary face has a neighbor cell"
-        )
-
-    # Test most cells own at least one face
-    # Note: Some meshes may have orphan cells depending on how they were generated
-    n_cells = len(mesh_instance.cell_volumes)
-    face_counts = np.bincount(mesh_instance.owner_cells, minlength=n_cells)
-    orphan_cells = np.where(face_counts == 0)[0]
-    assert len(orphan_cells) < n_cells / 2, (
-        f"Too many cells ({len(orphan_cells)}/{n_cells}) own no faces"
-    )
-
-
-def test_mesh_face_normals(mesh_instance):
-    """Test face normal vectors properties."""
-    # Test face normals are unit vectors
-    normal_magnitudes = np.linalg.norm(mesh_instance.face_normals, axis=1)
-    assert np.allclose(normal_magnitudes, 1.0, atol=1e-10), (
-        "Face normals are not unit vectors"
-    )
-
-    # Test face normals point outward from owner cell
-    for f in range(len(mesh_instance.face_areas)):
-        owner = mesh_instance.owner_cells[f]
-        if owner == -1:  # Skip if no owner (shouldn't happen)
-            continue
-
-        face_center = mesh_instance.face_centers[f]
-        cell_center = mesh_instance.cell_centers[owner]
-        normal = mesh_instance.face_normals[f]
-
-        # Vector from cell center to face center
-        cf_vector = face_center - cell_center
-
-        # For properly oriented meshes, the dot product should be positive or very close to zero
-        # (very close to zero can happen for orthogonal meshes where face is exactly perpendicular)
-        assert np.dot(normal, cf_vector) > -1e-8, (
-            f"Face {f} normal points inward to owner cell"
-        )
-
-
-def test_mesh_interpolation_factors(mesh_instance):
-    """Test face interpolation factors."""
-    internal_faces = mesh_instance.neighbor_cells != -1
-    factors = mesh_instance.face_interp_factors[internal_faces]
-
-    # Check factors are in valid range [0, 1]
-    assert np.all(factors >= 0) and np.all(factors <= 1), (
-        "Interpolation factors outside valid range [0, 1]"
-    )
-
-
-def test_mesh_orthogonality(mesh_instance):
-    """Test mesh orthogonality."""
-    # For a structured mesh, we might want to test that all cells are orthogonal
-    if mesh_instance.is_structured:
-        assert mesh_instance.is_orthogonal, "Structured mesh should be orthogonal"
-
-    # Test non-orthogonality correction vectors
-    internal_faces = mesh_instance.neighbor_cells != -1
-    corrections = mesh_instance.non_ortho_correction[internal_faces]
-
-    # Check non-orthogonality vectors are properly sized
-    assert corrections.shape[1] == 2, "Non-orthogonality vectors aren't 2D"
-
-
-def test_mesh_boundary_patches(mesh_instance):
-    """Test boundary patch IDs."""
-    # Test all boundary patches have valid IDs (non-negative)
-    assert np.all(mesh_instance.boundary_patches >= 0), "Negative boundary patch IDs"
-
-    # Test boundary_types match boundary_patches[boundary_faces]
-    for i, bf in enumerate(mesh_instance.boundary_faces):
-        assert mesh_instance.boundary_patches[bf] == mesh_instance.boundary_types[i], (
-            f"Mismatched boundary type for face {bf}"
+        assert np.allclose(aligned, 1.0, atol=1e-2), (
+            "Structured mesh has misaligned normals"
         )
 
 
-def test_mesh_non_degenerate(mesh_instance):
-    """Test mesh has no degenerate elements."""
-    # Check face areas are not too small
-    assert np.min(mesh_instance.face_areas) > 1e-10, "Faces with near-zero area found"
-
-    # Check cell volumes are not too small
-    assert np.min(mesh_instance.cell_volumes) > 1e-10, (
-        "Cells with near-zero volume found"
+def test_boundary_patch_consistency(mesh_instance):
+    mesh = mesh_instance
+    assert mesh.boundary_faces.shape[0] == mesh.boundary_patches.shape[0], (
+        "Mismatch in boundary face/patch count"
     )
+    assert mesh.boundary_types.shape[0] == mesh.boundary_faces.shape[0], (
+        "Mismatch in boundary face/type count"
+    )
+    assert mesh.boundary_values.shape[0] == mesh.boundary_faces.shape[0], (
+        "Mismatch in boundary face/value shape"
+    )
+
+
+def test_graph_connectivity_and_plot(mesh_instance):
+    mesh = mesh_instance
+    os.makedirs("tests/test_output", exist_ok=True)
+    mesh_type = "structured" if mesh.is_structured else "unstructured"
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    ax1, ax2 = axes
+
+    face_c = mesh.face_centers
+    face_n = mesh.face_normals
+    face_v = mesh.face_vertices
+    cell_c = mesh.cell_centers
+    boundary_mask = np.zeros(len(face_c), dtype=bool)
+    boundary_mask[mesh.boundary_faces] = True
+
+    # === Subplot 1: Mesh geometry with real face edges and face normals ===
+    ax1.set_title("Mesh Geometry and Face Normals")
+    ax1.set_aspect("equal")
+
+    # Plot actual faces as lines between vertices
+    for i, verts in enumerate(face_v):
+        v0, v1 = mesh.vertices[verts[0]], mesh.vertices[verts[1]]
+        color = "red" if boundary_mask[i] else "gray"
+        ax1.plot([v0[0], v1[0]], [v0[1], v1[1]], color=color, lw=1.2)
+
+    # Cell centers
+    ax1.scatter(cell_c[:, 0], cell_c[:, 1], s=10, color="blue", label="Cell Centers")
+
+    # Face centers
+    ax1.scatter(
+        face_c[~boundary_mask, 0],
+        face_c[~boundary_mask, 1],
+        s=10,
+        color="gray",
+        label="Internal Faces",
+    )
+    ax1.scatter(
+        face_c[boundary_mask, 0],
+        face_c[boundary_mask, 1],
+        s=20,
+        color="red",
+        label="Boundary Faces",
+    )
+
+    # Scaled face normals for visibility
+    arrow_len = 0.1 * np.mean(mesh.face_areas)
+    norms = np.linalg.norm(face_n, axis=1)[:, None] + 1e-12
+    face_n_vis = (face_n / norms) * arrow_len
+    ax1.quiver(
+        face_c[:, 0],
+        face_c[:, 1],
+        face_n_vis[:, 0],
+        face_n_vis[:, 1],
+        color="black",
+        scale=0.5,
+        width=0.002,
+        alpha=0.5,
+        label="Face Normals",
+    )
+
+    # Label faces with face ID and owner/neighbor info
+    ax1.legend(fontsize="x-small")
+
+    # === Subplot 2: Face–Cell bipartite graph ===
+    ax2.set_title("Face–Cell Connectivity")
+    ax2.set_aspect("equal")
+
+    # Draw edges from cell to face
+    for c, faces in enumerate(mesh.cell_faces):
+        for f in faces:
+            if f >= 0:
+                x0, y0 = cell_c[c]
+                x1, y1 = face_c[f]
+                ax2.plot([x0, x1], [y0, y1], color="gray", linewidth=0.6)
+
+    # Plot nodes
+    ax2.scatter(cell_c[:, 0], cell_c[:, 1], s=15, color="blue", label="Cells")
+    ax2.scatter(face_c[:, 0], face_c[:, 1], s=15, color="orange", label="Faces")
+
+    ax2.legend(fontsize="x-small")
+
+    # Final save
+    plt.suptitle(f"Mesh Connectivity Check: {mesh_type.capitalize()}")
+    plt.tight_layout()
+    plt.savefig(f"tests/test_output/mesh_graph_detailed_{mesh_type}.pdf", dpi=300)
+    plt.close()
