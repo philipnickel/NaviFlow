@@ -63,7 +63,9 @@ def generate(
     # ------------------------------------------------------------------
     # 3. Physical groups
     # ------------------------------------------------------------------
-    for name, line in zip(["bottom", "right", "top", "left"], [l0, l1, l2, l3], strict=True):
+    for name, line in zip(
+        ["bottom", "right", "top", "left"], [l0, l1, l2, l3], strict=True
+    ):
         tag = gmsh.model.addPhysicalGroup(1, [line])
         gmsh.model.setPhysicalName(1, tag, f"{name}_boundary")
 
@@ -100,9 +102,13 @@ def generate(
     try:
         idx_quad = list(elem_types).index(3)
     except ValueError as e:
-        raise RuntimeError("No quadrilateral elements found – check transfinite & recombine settings.") from e
+        raise RuntimeError(
+            "No quadrilateral elements found – check transfinite & recombine settings."
+        ) from e
 
-    quads = np.fromiter((node_map[int(n)] for n in elem_nodes[idx_quad]), dtype=np.int32).reshape(-1, 4)
+    quads = np.fromiter(
+        (node_map[int(n)] for n in elem_nodes[idx_quad]), dtype=np.int32
+    ).reshape(-1, 4)
 
     # ------------------------------------------------------------------
     # 7. Boundary edges
@@ -125,7 +131,9 @@ def generate(
         for t in tags_nested[idx_line]:
             tag_map[int(t)] = phys_tag
 
-    edges_np = np.asarray([node_map[int(n)] for n in edge_nodes], dtype=np.int64).reshape(-1, 2)
+    edges_np = np.asarray(
+        [node_map[int(n)] for n in edge_nodes], dtype=np.int64
+    ).reshape(-1, 2)
     edge_tags_np = np.asarray(edge_tags, dtype=np.int64)
 
     # ------------------------------------------------------------------
@@ -137,7 +145,9 @@ def generate(
     cell_volumes = calculate_cell_volumes(points, quads)
     owner, neighbor = build_owner_neighbor(quads, edges_np)
     bface_idx = np.where(neighbor == -1)[0]
-    btypes = np.asarray([tag_map.get(int(t), 0) for t in edge_tags_np[bface_idx]], dtype=np.int64)
+    btypes = np.asarray(
+        [tag_map.get(int(t), 0) for t in edge_tags_np[bface_idx]], dtype=np.int64
+    )
 
     return MeshData2D(
         cell_volumes=cell_volumes,

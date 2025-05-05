@@ -56,17 +56,17 @@ EXPERIMENTS = {
         "description": "Classic lid-driven cavity problem with moving top wall",
         "uniform": {
             "resolutions": {
-                "coarse": {"L": 1.0, "nx": 20, "ny": 20, "lc": 0.05},
-                "medium": {"L": 1.0, "nx": 40, "ny": 40, "lc": 0.025},
-                "fine": {"L": 1.0, "nx": 80, "ny": 80, "lc": 0.0125}
+                "coarse": {"L": 1.0, "nx": 5, "ny": 5, "lc": 0.05},
+                "medium": {"L": 1.0, "nx": 10, "ny": 10, "lc": 0.025},
+                "fine": {"L": 1.0, "nx": 20, "ny": 20, "lc": 0.0125}
             },
             "description": "Uniform structured mesh for lid-driven cavity at multiple resolutions"
         },
         "unstructured": {
             "resolutions": {
-                "coarse": {"Lx": 1.0, "Ly": 1.0, "n_cells": 1500, "ratio": 2.5},
-                "medium": {"Lx": 1.0, "Ly": 1.0, "n_cells": 3000, "ratio": 2.5},
-                "fine": {"Lx": 1.0, "Ly": 1.0, "n_cells": 6000, "ratio": 2.5}
+                "coarse": {"Lx": 1.0, "Ly": 1.0, "n_cells": 25, "ratio": 2.5},
+                "medium": {"Lx": 1.0, "Ly": 1.0, "n_cells": 50, "ratio": 2.5},
+                "fine": {"Lx": 1.0, "Ly": 1.0, "n_cells": 100, "ratio": 2.5}
             },
             "description": "Unstructured mesh with boundary refinement at multiple resolutions"
         }

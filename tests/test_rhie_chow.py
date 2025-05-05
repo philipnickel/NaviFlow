@@ -1,1 +1,0 @@
-# Placeholder tests for Rhie-Chow interpolation

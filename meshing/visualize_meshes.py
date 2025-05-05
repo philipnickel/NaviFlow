@@ -196,19 +196,104 @@ def visualize_mesh(file_path):
             d.LookupTable = lut # Use the manually configured LUT
             d.MapScalars = 1
             
-    # Add cell count text (count all triangle cells from the mesh)
+    # Add cell count text (using a more robust method)
     try:
-        # Get the total cell count directly from the reader
         reader.UpdatePipeline()
-        num_cells = reader.GetDataInformation().GetNumberOfCells()
+        
+        # Method 1: Use Physical field to distinguish between domain and boundary cells
+        if color_field and color_field[1] == 'gmsh:physical':
+            # Most reliable approach: Fluid domain cells usually have tag 10
+            fluid_cells_filter = Threshold(Input=reader)
+            fluid_cells_filter.ThresholdMethod = 'Between'
+            fluid_cells_filter.LowerThreshold = 9.5  # Just below 10
+            fluid_cells_filter.UpperThreshold = 10.5  # Just above 10
+            
+            # Assign the correct field for filtering
+            if hasattr(fluid_cells_filter, 'SelectInputScalars'):
+                fluid_cells_filter.SelectInputScalars = color_field
+            elif hasattr(fluid_cells_filter, 'Scalars'):
+                fluid_cells_filter.Scalars = color_field
+                
+            fluid_cells_filter.UpdatePipeline()
+            num_cells_2d = fluid_cells_filter.GetDataInformation().GetNumberOfCells()
+            
+            # Get the total cells for comparison
+            total_cells = reader.GetDataInformation().GetNumberOfCells()
+            
+            # If we don't find any fluid cells, fall back to calculating by subtraction
+            if num_cells_2d == 0:
+                # Count boundary cells (tags 1-4 typically)
+                boundary_cells = 0
+                for bid in range(1, 5):  # Common boundary tags
+                    boundary_filter = Threshold(Input=reader)
+                    boundary_filter.ThresholdMethod = 'Between'
+                    boundary_filter.LowerThreshold = bid - 0.5
+                    boundary_filter.UpperThreshold = bid + 0.5
+                    
+                    if hasattr(boundary_filter, 'SelectInputScalars'):
+                        boundary_filter.SelectInputScalars = color_field
+                    elif hasattr(boundary_filter, 'Scalars'):
+                        boundary_filter.Scalars = color_field
+                        
+                    boundary_filter.UpdatePipeline()
+                    boundary_cells += boundary_filter.GetDataInformation().GetNumberOfCells()
+                
+                # Calculate 2D cells by subtracting boundary cells from total
+                num_cells_2d = total_cells - boundary_cells
+                print(f"  Using method 1 fallback: {total_cells} total - {boundary_cells} boundary = {num_cells_2d} fluid cells")
+            else:
+                print(f"  Using method 1: Found {num_cells_2d} fluid domain cells (tag 10)")
+        else:
+            # Method 2: If we don't have physical tags, estimate based on cell type
+            # This is less reliable but better than nothing
+            total_cells = reader.GetDataInformation().GetNumberOfCells()
+            
+            # For structured meshes, we can calculate based on the boundary lines
+            # A 2D structured n×m mesh has n*m cells and 2*(n+m) boundary lines
+            is_structured = "structuredUniform" in file_path or "structuredRefined" in file_path
+            if is_structured:
+                # Count vertex points
+                points_info = reader.GetPointDataInformation()
+                num_points = points_info.GetNumberOfArrays()
+                
+                # Estimate n and m based on total cells and assumption of an n×m grid
+                # For a square domain (n=m): total_cells = n² + 4n
+                # Let's use a heuristic approach 
+                n = int((-4 + (16 + 4*total_cells)**0.5) / 2)
+                num_cells_2d = n*n
+                print(f"  Using method 2: Estimated {n}×{n} grid = {num_cells_2d} cells")
+            else:
+                # For unstructured, rough estimate is total minus boundary
+                # Typical boundary count is a small fraction of total cells
+                # Linear meshes usually have approximately total_cells*0.05 boundary elements
+                num_boundary_estimate = int(0.05 * total_cells)
+                num_cells_2d = total_cells - num_boundary_estimate
+                print(f"  Using method 2: Estimated {num_cells_2d} 2D cells (approx. {num_boundary_estimate} boundary elements)")
+        
+        # Create text display
         cell_text = Text()
-        cell_text.Text = f"Cells: {num_cells:,}"
+        cell_text.Text = f"Cells: {num_cells_2d:,}"
         text_display = Show(cell_text, view)
         text_display.Color = [0.1, 0.1, 0.1]
         text_display.FontSize = STYLE_CONFIG["font_size"]
         text_display.WindowLocation = 'Upper Center'
+        
+        print(f"  Visualization will show {num_cells_2d} cells")
+        
     except Exception as e:
-        print(f"  Warning: Could not add cell count text. {e}")
+        print(f"  Warning: Cell counting failed with error: {e}")
+        # Final fallback - just show total elements count
+        try:
+            total_cells = reader.GetDataInformation().GetNumberOfCells()
+            cell_text = Text()
+            cell_text.Text = f"Elements: {total_cells:,}"
+            text_display = Show(cell_text, view)
+            text_display.Color = [0.1, 0.1, 0.1]
+            text_display.FontSize = STYLE_CONFIG["font_size"]
+            text_display.WindowLocation = 'Upper Center'
+            print(f"  Fallback: Showing total element count ({total_cells})")
+        except Exception as nested_e:
+            print(f"  Warning: Even fallback counting failed. {nested_e}")
 
     # Auto-fit camera based on bounds
     try:
@@ -249,58 +334,64 @@ def visualize_mesh(file_path):
     except Exception as e:
         print(f"  Cleanup error: {e}")
 
-
 def process_path(path):
-    if os.path.isfile(path) and path.endswith('.vtu'):
-        visualize_mesh(path)
-    elif os.path.isdir(path):
-        mesh_files = []
-        # Find .vtu files directly in the specified directory
-        for ext in ['*.vtu']:
-            mesh_files.extend(glob.glob(os.path.join(path, ext)))
-        
-        # Look for meshes in standard directory structure pattern
-        # experiments/{experiment}/structuredUniform/{resolution}/*.vtu
-        # experiments/{experiment}/unstructured/{resolution}/*.vtu
-        for mesh_type in ['structuredUniform', 'structuredRefined', 'unstructured']:
-            # Check for resolution subfolders first
-            mesh_type_dir = os.path.join(path, mesh_type)
-            if os.path.isdir(mesh_type_dir):
-                # Check for resolution subfolders (coarse, medium, fine)
-                for resolution in ['coarse', 'medium', 'fine']:
-                    res_dir = os.path.join(mesh_type_dir, resolution)
-                    if os.path.isdir(res_dir):
-                        mesh_files.extend(glob.glob(os.path.join(res_dir, '*.vtu')))
-                # For backward compatibility, also check for files directly in mesh_type_dir
-                mesh_files.extend(glob.glob(os.path.join(mesh_type_dir, '*.vtu')))
-                
-        # Handle if path is an experiment directory that contains mesh type subdirectories
-        for exp in glob.glob(os.path.join(path, '*')):
-            if os.path.isdir(exp):
-                for mesh_type in ['structuredUniform', 'structuredRefined', 'unstructured']:
-                    mesh_type_dir = os.path.join(exp, mesh_type)
-                    if os.path.isdir(mesh_type_dir):
-                        # Check for resolution subfolders (coarse, medium, fine)
-                        for resolution in ['coarse', 'medium', 'fine']:
-                            res_dir = os.path.join(mesh_type_dir, resolution)
-                            if os.path.isdir(res_dir):
-                                mesh_files.extend(glob.glob(os.path.join(res_dir, '*.vtu')))
-                        # For backward compatibility, also check for files directly in mesh_type_dir
-                        mesh_files.extend(glob.glob(os.path.join(mesh_type_dir, '*.vtu')))
-                        
-        if mesh_files:
-            print(f"Found {len(mesh_files)} mesh files to visualize")
-            for f in mesh_files:
-                visualize_mesh(f)
-        else:
-            print(f"No .vtu files found in {path}")
-    else:
-        print(f"Invalid path: {path}")
+    """Process all VTU files in a given path."""
+    files = glob.glob(os.path.join(path, "*.vtu"))
+    if not files:
+        print(f"No VTU files found in {path}")
+        return False
+    
+    for file_path in sorted(files):
+        visualize_mesh(file_path)
+    
+    return True
 
+def main():
+    parser = argparse.ArgumentParser(description="Visualize meshes from VTU files")
+    parser.add_argument("paths", nargs="*", help="Paths to VTU files or directories")
+    args = parser.parse_args()
+    
+    # If no arguments provided, search for VTU files in experiments directory
+    if not args.paths:
+        print("No paths specified, searching for mesh files in standard locations...")
+        base_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        experiments_dir = os.path.join(base_dir, "meshing", "experiments")
+        
+        if not os.path.exists(experiments_dir):
+            print(f"Error: Experiments directory not found at {experiments_dir}")
+            sys.exit(1)
+        
+        found_files = False
+        for exp_dir in glob.glob(os.path.join(experiments_dir, "*")):
+            exp_name = os.path.basename(exp_dir)
+            print(f"\nSearching for mesh files in experiment: {exp_name}")
+            
+            # experiments/{experiment}/structuredUniform/{resolution}/*.vtu
+            # experiments/{experiment}/unstructured/{resolution}/*.vtu
+            for mesh_type in ['structuredUniform', 'structuredRefined', 'unstructured']:
+                mesh_dir = os.path.join(exp_dir, mesh_type)
+                if not os.path.exists(mesh_dir):
+                    continue
+                
+                for res_dir in glob.glob(os.path.join(mesh_dir, "*")):
+                    if os.path.isdir(res_dir):
+                        res_name = os.path.basename(res_dir)
+                        print(f"  • Checking {mesh_type} / {res_name}")
+                        if process_path(res_dir):
+                            found_files = True
+        
+        if not found_files:
+            print("\nNo mesh files found in standard locations.")
+            print("Generate meshes first or specify a path to VTU files.")
+    else:
+        # Process user-provided paths
+        for path in args.paths:
+            if os.path.isdir(path):
+                process_path(path)
+            elif os.path.isfile(path) and path.lower().endswith(".vtu"):
+                visualize_mesh(path)
+            else:
+                print(f"Error: {path} is not a valid VTU file or directory")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Visualize CFD mesh files (.vtu only)")
-    parser.add_argument('path', nargs='?', default='meshing/experiments',
-                        help='Path to a .vtu file, a directory of .vtu files, or an experiment folder')
-    args = parser.parse_args()
-    process_path(args.path)
+    main()
