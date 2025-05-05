@@ -5,6 +5,7 @@ Specialized for 2D simulations while maintaining compatibility with Moukalled's 
 All spatial data uses 2D coordinates (x,y) with z=0 implied.
 """
 
+import numpy as np
 from numba import types
 from numba.experimental import jitclass
 
@@ -54,6 +55,69 @@ mesh_data_spec = [
 ]
 
 
+# Helper functions for mesh initialization that need to be outside the jitclass
+def calculate_delta_cf(cell_centers, face_centers, d_CF, owner_cells, neighbor_cells):
+    """Calculate distances between cell centers and faces."""
+    # Small value to prevent zero distance
+    _SMALL = 1.0e-12
+
+    n_faces = len(owner_cells)
+    delta_CF_array = np.zeros(n_faces)
+
+    for f in range(n_faces):
+        C = owner_cells[f]
+        F = neighbor_cells[f]
+
+        distance = 0.0
+        # For internal faces, use distance between cell centers
+        if F >= 0:
+            d_cf_vec = d_CF[f]
+            distance = np.sqrt(d_cf_vec[0] ** 2 + d_cf_vec[1] ** 2)
+        else:
+            # For boundary faces, use distance from cell center to face center
+            d_cf_vec = face_centers[f] - cell_centers[C]
+            distance = np.sqrt(d_cf_vec[0] ** 2 + d_cf_vec[1] ** 2)
+
+        # Ensure distance is not exactly zero
+        delta_CF_array[f] = max(distance, _SMALL)
+
+    return delta_CF_array
+
+
+def calculate_cell_faces_array(n_cells, n_faces, owner_cells, neighbor_cells):
+    """Build the cell_faces array."""
+    # First, count how many faces each cell has
+    face_count = np.zeros(n_cells, dtype=np.int64)
+    for f in range(n_faces):
+        C = owner_cells[f]
+        face_count[C] += 1
+        if neighbor_cells[f] >= 0:
+            F = neighbor_cells[f]
+            face_count[F] += 1
+
+    # Find maximum number of faces per cell
+    max_faces_per_cell = np.max(face_count)
+
+    # Initialize cell_faces array with -1 (invalid face index)
+    cell_faces_array = np.full((n_cells, max_faces_per_cell), -1, dtype=np.int64)
+
+    # Reset face count to use as counter
+    face_count = np.zeros(n_cells, dtype=np.int64)
+
+    # Fill cell_faces array
+    for f in range(n_faces):
+        C = owner_cells[f]
+        cell_faces_array[C, face_count[C]] = f
+        face_count[C] += 1
+
+        if neighbor_cells[f] >= 0:
+            F = neighbor_cells[f]
+            cell_faces_array[F, face_count[F]] = f
+            face_count[F] += 1
+
+    return cell_faces_array
+
+
 @jitclass(mesh_data_spec)
 class MeshData2D:
     def __init__(
@@ -75,6 +139,11 @@ class MeshData2D:
         is_structured,
         is_orthogonal,
         is_conforming,
+        cell_faces=None,  # Optional: faces for each cell
+        delta_CF=None,  # Optional: distance between cell centers
+        vertices=None,  # Optional: vertex coordinates
+        faces=None,  # Optional: vertices forming each face
+        boundary_owners=None,  # Optional: owner cell for each boundary face
     ):
         """
         Initialize 2D mesh data structure
@@ -118,6 +187,44 @@ class MeshData2D:
         self.is_structured = is_structured  # Structured grid flag
         self.is_orthogonal = is_orthogonal  # Orthogonality flag
         self.is_conforming = is_conforming  # Conformity flag
+
+        # Set dimensions for sizing
+        n_faces = len(face_areas)
+        n_cells = len(cell_volumes)
+        n_boundary_faces = len(boundary_faces)
+
+        # Initialize optional arrays with proper shape and type
+        # Set optional attributes if provided, otherwise use empty arrays of the correct shape/type
+        self.cell_faces = (
+            cell_faces
+            if cell_faces is not None
+            else np.zeros((n_cells, 1), dtype=np.int64)
+        )
+        self.delta_CF = (
+            delta_CF if delta_CF is not None else np.zeros(n_faces, dtype=np.float64)
+        )
+        self.vertices = (
+            vertices if vertices is not None else np.zeros((1, 2), dtype=np.float64)
+        )
+        self.faces = faces if faces is not None else np.zeros((1, 4), dtype=np.int64)
+        self.boundary_owners = (
+            boundary_owners
+            if boundary_owners is not None
+            else np.zeros(n_boundary_faces, dtype=np.int64)
+        )
+
+        # Initialize SIMPLE algorithm specific fields with proper sizes
+        self.face_fluxes = np.zeros(n_faces, dtype=np.float64)
+        self.face_velocities = np.zeros((n_faces, 2), dtype=np.float64)
+        self.D_f = np.zeros(n_faces, dtype=np.float64)
+        self.H_f = np.zeros((n_cells, 2), dtype=np.float64)
+        self.grad_p_f = np.zeros((n_faces, 2), dtype=np.float64)
+        self.pressure_correction_coeffs = np.zeros((n_cells, 2), dtype=np.float64)
+        self.alpha_u = 0.7  # Default under-relaxation for velocity
+        self.alpha_p = 0.3  # Default under-relaxation for pressure
+        self.delta_Cf = np.zeros(n_faces, dtype=np.float64)
+        self.delta_fF = np.zeros(n_faces, dtype=np.float64)
+        self.e_f = np.zeros((n_faces, 2), dtype=np.float64)
 
 
 # Validation Checklist ---------------------------------------------------------

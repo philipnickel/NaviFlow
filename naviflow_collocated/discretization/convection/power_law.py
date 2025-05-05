@@ -1,72 +1,95 @@
+"""
+Power Law scheme for convection terms in FVM discretization.
+
+This module implements the Power Law scheme for discretizing
+convection terms, which is accurate for a wide range of Peclet numbers.
+"""
+
 import numpy as np
 from numba import njit
 
 
 @njit
-def compute_powerlaw_convection_face_coeffs(
-    i_face,
-    cell_centers,
-    face_centers,
-    face_normals,
-    face_areas,
-    owner_cells,
-    neighbor_cells,
-    rho_f,
-    face_velocity,
-    Gamma,
-):
-    """Per-face power-law *row* contributions (unsymmetric)."""
-    C = owner_cells[i_face]
-    F = neighbor_cells[i_face]
-    if F == -1:
-        # physical boundary – handled elsewhere
+def compute_powerlaw_convection_face_coeffs(mesh, f, face_flux, rho, mu):
+    """
+    Compute convection coefficients at face using the Power Law scheme.
+
+    Parameters
+    ----------
+    mesh : MeshData2D
+        Mesh data structure
+    f : int
+        Face index
+    face_flux : float
+        Mass flux through the face
+    rho : float
+        Density
+    mu : float or ndarray
+        Dynamic viscosity (used for Peclet number calculation)
+
+    Returns
+    -------
+    dC_conv : float
+        Diagonal convection coefficient for owner cell
+    oC_conv : float
+        Off-diagonal convection coefficient for owner cell
+    dF_conv : float
+        Diagonal convection coefficient for neighbor cell
+    oF_conv : float
+        Off-diagonal convection coefficient for neighbor cell
+    """
+    # Small value to prevent division by zero
+    _SMALL = 1.0e-12
+
+    # Get owner and neighbor cells
+    C = mesh.owner_cells[f]
+    F = mesh.neighbor_cells[f]
+
+    # If this is a boundary face, return zeros (handled separately)
+    if F < 0:
         return 0.0, 0.0, 0.0, 0.0
 
-    # geometry
-    d_vec = cell_centers[F] - cell_centers[C]
-    d_mag = np.sqrt(np.dot(d_vec, d_vec))
-    if d_mag < 1e-20:
-        return 0.0, 0.0, 0.0, 0.0
+    # Get face area and interpolation factor
+    area = mesh.face_areas[f]
+    fx = mesh.face_interp_factors[f]
 
-    A_f = face_areas[i_face]
-    n_f = face_normals[i_face]
-    rho = rho_f
-
-    # ------ NOTE the leading minus sign ------------------------------
-    m_f = -rho * np.dot(face_velocity[i_face], n_f) * A_f  # mass flux
-
-    # diffusive conductance for power-law weight
-    Gamma_f = 0.5 * (Gamma[C] + Gamma[F])
-    D_f = Gamma_f * A_f / d_mag
-
-    # If no mass flux, convection contribution is zero, scheme defaults to central
-    if abs(m_f) < 1e-20:
-        fP = 1.0  # Default to central differencing (fP=1)
-        D_fp = D_f * fP
-        # Convection terms are zero
-        diag_C = 0.0 + D_fp
-        off_C = 0.0 - D_fp
-        diag_F = 0.0 + D_fp
-        off_F = 0.0 - D_fp
-        return diag_C, off_C, diag_F, off_F
-
-    # Peclet number calculation
-    if abs(D_f) < 1e-12:
-        P = np.inf * np.sign(m_f)
+    # Calculate Diffusion Conductance (D_f)
+    # Get the diffusion coefficient (viscosity) at the face
+    if isinstance(mu, float):
+        mu_f = mu
     else:
-        P = m_f / D_f
+        mu_f = fx * mu[F] + (1.0 - fx) * mu[C]  # Linear interpolation
 
-    fP = max(0.0, (1.0 - 0.1 * np.abs(P)) ** 5)  # Patankar (Restored)
+    # Distance between cell centers (needed for D_f)
+    delta_CF = mesh.delta_CF[f]  # Use precomputed, should not be zero
 
-    D_fp = D_f * fP  # Effective diffusion (Restored)
+    D_f = mu_f * area / delta_CF  # Diffusion conductance
 
-    # --- owner row (C) ------------------------------------------------
-    diag_C = (m_f if m_f > 0.0 else 0.0) + D_fp
-    off_C = (m_f if m_f < 0.0 else 0.0) - D_fp  # minus → coefficient in matrix
+    # Use provided face_flux (mass flux = rho * u_n * area)
+    flux = face_flux
 
-    # --- neighbour row (F) -------------------------------------------
-    m_F = -m_f  # flux sign seen from F
-    diag_F = (m_F if m_F > 0.0 else 0.0) + D_fp
-    off_F = (m_F if m_F < 0.0 else 0.0) - D_fp
+    # Calculate Peclet number (Pe = F / D = face_flux / D_f)
+    if abs(D_f) < _SMALL:
+        # Avoid division by zero if diffusion is negligible
+        # Treat as pure convection (very high Pe)
+        Pe = np.inf * np.sign(flux)
+    else:
+        Pe = flux / D_f
 
-    return diag_C, off_C, diag_F, off_F
+    # Apply Power Law scheme
+    # A(|Pe|) = max(0, (1 - 0.1|Pe|)^5)
+    A_Pe = max(0.0, (1.0 - 0.1 * abs(Pe)) ** 5)
+
+    # Calculate coefficients based on flow direction
+    if flux >= 0:  # Flow from C to F
+        dC_conv = flux
+        oC_conv = -flux * A_Pe
+        dF_conv = 0.0
+        oF_conv = flux * (1.0 - A_Pe)
+    else:  # Flow from F to C
+        dC_conv = 0.0
+        oC_conv = -flux * (1.0 - A_Pe)
+        dF_conv = -flux
+        oF_conv = flux * A_Pe
+
+    return dC_conv, oC_conv, dF_conv, oF_conv

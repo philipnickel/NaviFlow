@@ -8,7 +8,7 @@ them to the MeshData2D format used by the NaviFlow solver.
 import numpy as np
 import gmsh
 import warnings
-from .mesh_data import MeshData2D
+from .mesh_data import MeshData2D, calculate_delta_cf, calculate_cell_faces_array
 from .mesh_helpers import (
     calculate_face_centers,
     calculate_face_areas,
@@ -402,10 +402,10 @@ def load_msh_file(filename, suppress_warnings=False):
     face_normals = calculate_face_normals_outward(points, edges_np, owner, cell_centers)
 
     # Calculate distance vectors and interpolation factors
-    d_cf = np.zeros((n_faces, 2))
+    d_CF_vectors = np.zeros((n_faces, 2))
     internal_faces = neighbor != -1
     for f in np.where(internal_faces)[0]:
-        d_cf[f] = cell_centers[neighbor[f]] - cell_centers[owner[f]]
+        d_CF_vectors[f] = cell_centers[neighbor[f]] - cell_centers[owner[f]]
 
     # Calculate interpolation factors for internal faces
     fx = np.full(n_faces, 0.5)  # Default to 0.5
@@ -414,7 +414,7 @@ def load_msh_file(filename, suppress_warnings=False):
         n_cell = neighbor[f]
 
         # Vector from owner to face center
-        d_cf_face = face_centers[f] - cell_centers[o_cell]
+        d_CF_face = face_centers[f] - cell_centers[o_cell]
 
         # Vector from owner to neighbor
         d_CF = cell_centers[n_cell] - cell_centers[o_cell]
@@ -422,29 +422,31 @@ def load_msh_file(filename, suppress_warnings=False):
 
         if d_CF_norm > 1e-12:
             # Project d_cf_face onto d_CF to find interpolation factor
-            dot_product = np.dot(d_cf_face, d_CF)
+            dot_product = np.dot(d_CF_face, d_CF)
             fx[f] = dot_product / (d_CF_norm * d_CF_norm)
 
     # Clamp fx to [0, 1]
     fx = np.clip(fx, 0.0, 1.0)
 
     # Calculate non-orthogonality correction vectors
-    non_ortho_correction = np.zeros_like(d_cf)
+    non_ortho_correction = np.zeros_like(d_CF_vectors)
     if np.any(internal_faces):
         # For internal faces, calculate non-orthogonality correction
         face_normals_unit = face_normals.copy()
 
         # Unit vector from owner to neighbor
-        d_cf_unit = np.zeros_like(d_cf)
-        d_cf_norms = np.linalg.norm(d_cf, axis=1)
-        valid_d_cf = d_cf_norms > 1e-12
-        d_cf_unit[valid_d_cf] = d_cf[valid_d_cf] / d_cf_norms[valid_d_cf, np.newaxis]
+        d_CF_unit = np.zeros_like(d_CF_vectors)
+        d_CF_norms = np.linalg.norm(d_CF_vectors, axis=1)
+        valid_d_CF = d_CF_norms > 1e-12
+        d_CF_unit[valid_d_CF] = (
+            d_CF_vectors[valid_d_CF] / d_CF_norms[valid_d_CF, np.newaxis]
+        )
 
         # Correction vector is orthogonal to face normal
-        dot_products = np.einsum("ij,ij->i", face_normals_unit, d_cf_unit)
-        for i in np.where(internal_faces & valid_d_cf)[0]:
+        dot_products = np.einsum("ij,ij->i", face_normals_unit, d_CF_unit)
+        for i in np.where(internal_faces & valid_d_CF)[0]:
             non_ortho_correction[i] = (
-                face_normals_unit[i] - dot_products[i] * d_cf_unit[i]
+                face_normals_unit[i] - dot_products[i] * d_CF_unit[i]
             )
 
     # Determine mesh properties
@@ -494,7 +496,24 @@ def load_msh_file(filename, suppress_warnings=False):
     # Close gmsh instance
     gmsh.finalize()
 
-    # Create mesh data instance
+    # Build cell_faces and delta_CF arrays using helper functions
+    n_cells = len(cell_volumes)
+    n_faces = len(face_areas)
+
+    # Calculate cell_faces array
+    cell_faces = calculate_cell_faces_array(n_cells, n_faces, owner, neighbor)
+
+    # Calculate delta_CF (distance between cell centers)
+    delta_CF = calculate_delta_cf(
+        cell_centers, face_centers, d_CF_vectors, owner, neighbor
+    )
+
+    # Create boundary owners array
+    boundary_owners = np.zeros(len(boundary_faces), dtype=np.int64)
+    for i, bf in enumerate(boundary_faces):
+        boundary_owners[i] = owner[bf]
+
+    # Create the MeshData2D object
     mesh = MeshData2D(
         cell_volumes=cell_volumes,
         face_areas=face_areas,
@@ -508,11 +527,24 @@ def load_msh_file(filename, suppress_warnings=False):
         boundary_values=boundary_values,
         boundary_patches=boundary_patches,
         face_interp_factors=fx,
-        d_CF=d_cf,
+        d_CF=d_CF_vectors,
         non_ortho_correction=non_ortho_correction,
         is_structured=is_structured,
         is_orthogonal=is_orthogonal,
         is_conforming=is_conforming,
+        cell_faces=cell_faces,
+        delta_CF=delta_CF,
+        vertices=points,
+        faces=edges_np,
     )
+
+    # Return the mesh and quality information
+    print(f"Mesh quality: {quality['quality'].upper()}")
+    if quality["orphan_count"] > 0:
+        print(
+            f"Orphan cells: {quality['orphan_count']} ({quality['orphan_percentage']:.2f}%)"
+        )
+    else:
+        print("Orphan cells: 0 (0.00%)")
 
     return mesh, quality
