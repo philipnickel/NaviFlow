@@ -123,11 +123,42 @@ def generate_experiment_meshes(exp_name, exp_config, base_dir, selected_resoluti
 
             try:
                 gmsh.clear()
+                # Convert mm to m
+                obstacle = res_config.get("obstacle", None)
+                # Convert mm to m for arbitrary geometry
+                if obstacle is not None and obstacle.get("type") == "arbitrary" and "file" in obstacle:
+                    object_path = os.path.join(script_dir, "geometries", obstacle["file"])
+                    coords = []
+                    with open(object_path, "r") as f:
+                        lines = f.readlines()
+                        start = False
+                        for line in lines:
+                            if "Airfoil surface" in line:
+                                start = True
+                                continue
+                            if start:
+                                if line.strip() == "" or "Camber line" in line:
+                                    break
+                                try:
+                                    x_str, y_str = line.strip().split(",")
+                                    coords.append([float(x_str), float(y_str)])
+                                except:
+                                    continue
+                    obstacle["object_geometry"] = coords
+                if obstacle is not None and "object_geometry" in obstacle:
+                    for point in obstacle["object_geometry"]:
+                        point[0] /= 1000.0
+                        point[1] /= 1000.0
+                if obstacle is not None and "object_geometry" in obstacle:
+                    airfoil_coords = obstacle["object_geometry"]
+                    print(f"[DEBUG] Loaded {len(airfoil_coords)} coordinates from {obstacle['file']}")
+                    if airfoil_coords:
+                        print(f"[DEBUG] First 3 coordinates (converted to meters): {airfoil_coords[:3]}")
                 gen_unstructured(
                     Lx=res_config["Lx"],
                     Ly=res_config["Ly"],
                     n_cells=res_config["n_cells"],
-                    obstacle=res_config.get("obstacle", None),
+                    obstacle=obstacle,
                     refinement_factors=res_config.get("refinement_factors", {}),
                     output_filename=msh_file,
                     model_name=f"{exp_name}_unstructured_{res_name}"

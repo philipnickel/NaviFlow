@@ -70,8 +70,14 @@ def visualize_mesh(file_path):
     output_dir = os.path.dirname(file_path)
     output_pdf = os.path.join(output_dir, f"{base}.pdf")
 
+    # --- Obstacle metadata will be estimated from mesh, not loaded from experiments.yaml ---
+
     reader = XMLUnstructuredGridReader(FileName=[file_path])
     reader.UpdatePipeline()
+
+    obstacle_center = (0.2, 0.205)
+    obstacle_radius = 0.05
+    print(f"  Using hardcoded obstacle: center={obstacle_center}, radius={obstacle_radius}")
 
     # Reset color palette and ensure gradient is applied
 
@@ -95,7 +101,7 @@ def visualize_mesh(file_path):
     wireframe_display.ColorArrayName = ['POINTS', '']
     wireframe_display.AmbientColor = [0.0, 0.0, 0.0]
     wireframe_display.DiffuseColor = [0.0, 0.0, 0.0]
-    wireframe_display.LineWidth = 0.4
+    wireframe_display.LineWidth = 0.2
 
     scalar_fields = []
     try:
@@ -282,18 +288,13 @@ def visualize_mesh(file_path):
         print("  Auto-fitting camera...")
         view.ResetCamera(True)
         view.CameraParallelProjection = 1
-        view.CameraParallelScale *= 0.4  # Zoom in to fill more of the screen
+        #view.CameraParallelScale *= 0.4  # Zoom in to fill more of the screen
     except Exception as e:
         print(f"  Warning: Auto-fitting camera failed. {e}")
         view.ResetCamera()
 
     view.ViewSize = [3840, 2160]
 
-    try:
-        SaveScreenshot(output_pdf.replace(".pdf", ".png"), view=view, ImageResolution=[3840, 2160])
-        print(f"  Saved visualization to: {output_pdf.replace('.pdf', '.png')}")
-    except Exception as e:
-        print(f"  ❌ Error exporting PNG: {e}")
 
     # PDF export block
     try:
@@ -302,12 +303,14 @@ def visualize_mesh(file_path):
     except Exception as e:
         print(f"  ❌ Error exporting PDF: {e}")
 
+
     try:
-        Delete(GetActiveView())
         for src in list(GetSources().values()):
+            Hide(src)
             Delete(src)
+        print("  Cleanup completed.")
     except Exception as e:
-        print(f"  Cleanup error: {e}")
+        print(f"  Warning during cleanup: {e}")
 
 def process_path(path):
     """Process all VTU files in a given path."""
