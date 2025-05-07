@@ -9,3 +9,6 @@ Flow around a circular cylinder in a rectangular domain
 ### nacaFlow
 Flow around a NACA0012 airfoil in a rectangular domain
 
+### b2
+Flow around a b2
+

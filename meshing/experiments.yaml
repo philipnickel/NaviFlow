@@ -190,3 +190,29 @@ nacaFlow:
             bottom_left: [1.0, 1]
             bottom_right: [1.0, 1]
           obstacle: [3.0, 0.2]
+b2:
+  description: Flow around a b2
+  unstructured:
+    description: Unstructured mesh for flow around b2 
+    resolutions:
+      medium:
+        Lx: 2.2
+        Ly: 0.41
+        n_cells: 20000
+        obstacle:
+          type: arbitrary
+          file: b2.csv
+          center: [0.2, 0.15]
+          scale: 3
+        refinement_factors:
+          boundaries:
+            left: [1.0, 1]
+            right: [1.0, 1]
+            top: [1.0, 0.1]
+            bottom: [1.0, 0.1]
+          corners:
+            top_left: [1.0, 1]
+            top_right: [1.0, 1]
+            bottom_left: [1.0, 1]
+            bottom_right: [1.0, 1]
+          obstacle: [3.0, 0.2]
