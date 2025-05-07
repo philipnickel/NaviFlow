@@ -11,7 +11,15 @@ Creates a structured directory hierarchy:
                     mesh files (.msh and .vtu)
 
 Usage:
-    python -m meshing.generate_meshes [experiment_name]
+    # lidDrivenCavity experiment
+    python -m meshing.generate_meshes lidDrivenCavity  
+    # cylinderFlow experiment
+    python -m meshing.generate_meshes cylinderFlow
+    # generate all experiments
+    python -m meshing.generate_meshes
+    # generate specific resolution
+    python -m meshing.generate_meshes lidDrivenCavity -r medium
+
 
 If no experiment name is provided, it will generate meshes for all experiments.
 """
@@ -21,6 +29,7 @@ import sys
 import gmsh
 import meshio
 import argparse
+import yaml
 
 # Add project root to Python path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -50,62 +59,9 @@ def export_mesh(msh_file):
     except Exception as e:
         print(f"  ❌ Mesh export failed: {e}")
 
-EXPERIMENTS = {
-    "lidDrivenCavity": {
-        "description": "Classic lid-driven cavity problem with moving top wall",
-        "uniform": {
-            "resolutions": {
-                "coarse": {"L": 1.0, "nx": 5, "ny": 5, "lc": 0.05},
-                "medium": {"L": 1.0, "nx": 10, "ny": 10, "lc": 0.025},
-                "fine": {"L": 1.0, "nx": 20, "ny": 20, "lc": 0.0125},
-            },
-            "description": "Uniform structured mesh for lid-driven cavity at multiple resolutions",
-        },
-        "unstructured": {
-            "resolutions": {
-                "coarse": {"Lx": 1.0, "Ly": 1.0, "n_cells": 25, "ratio": 2.5},
-                "medium": {"Lx": 1.0, "Ly": 1.0, "n_cells": 50, "ratio": 2.5},
-                "fine": {"Lx": 1.0, "Ly": 1.0, "n_cells": 100, "ratio": 2.5},
-            },
-            "description": "Unstructured mesh with boundary refinement at multiple resolutions",
-        },
-    },
-    "cylinderFlow": {
-        "description": "Flow around a circular cylinder in a rectangular domain",
-        "unstructured": {
-            "resolutions": {
-                "coarse": {
-                    "Lx": 4.0, "Ly": 1.0, "n_cells": 200, "ratio": 2.5,
-                    "obstacle": {
-                        "type": "circle",
-                        "center": (1.0, 0.5),
-                        "radius": 0.1
-                    },
-                    "wake_refinement": True
-                },
-                "medium": {
-                    "Lx": 4.0, "Ly": 1.0, "n_cells": 4000, "ratio": 2.5,
-                    "obstacle": {
-                        "type": "circle",
-                        "center": (1.0, 0.5),
-                        "radius": 0.1
-                    },
-                    "wake_refinement": True
-                },
-                "fine": {
-                    "Lx": 4.0, "Ly": 1.0, "n_cells": 8000, "ratio": 2.5,
-                    "obstacle": {
-                        "type": "circle",
-                        "center": (1.0, 0.5),
-                        "radius": 0.1
-                    },
-                    "wake_refinement": True
-                }
-            },
-            "description": "Unstructured mesh for flow around a cylinder at multiple resolutions"
-        }
-    }
-}
+def load_experiment_config(yaml_path):
+    with open(yaml_path, "r") as f:
+        return yaml.safe_load(f)
 
 def generate_experiment_meshes(exp_name, exp_config, base_dir, selected_resolution=None):
     print(f"\n=== Generating meshes for experiment: {exp_name} ===")
@@ -144,7 +100,6 @@ def generate_experiment_meshes(exp_name, exp_config, base_dir, selected_resoluti
                     L=res_config["L"],
                     nx=res_config["nx"],
                     ny=res_config["ny"],
-                    lc=res_config["lc"],
                     output_filename=msh_file,
                     model_name=f"{exp_name}_uniform_{res_name}"
                 )
@@ -172,9 +127,8 @@ def generate_experiment_meshes(exp_name, exp_config, base_dir, selected_resoluti
                     Lx=res_config["Lx"],
                     Ly=res_config["Ly"],
                     n_cells=res_config["n_cells"],
-                    ratio=res_config["ratio"],
                     obstacle=res_config.get("obstacle", None),
-                    wake_refinement=res_config.get("wake_refinement", False),
+                    refinement_factors=res_config.get("refinement_factors", {}),
                     output_filename=msh_file,
                     model_name=f"{exp_name}_unstructured_{res_name}"
                 )
@@ -187,6 +141,9 @@ def generate_all_meshes(selected_experiment=None, selected_resolution=None):
     try:
         base_dir = os.path.join(script_dir, "experiments")
         os.makedirs(base_dir, exist_ok=True)
+
+        experiments_path = os.path.join(script_dir, "experiments.yaml")
+        EXPERIMENTS = load_experiment_config(experiments_path)
 
         with open(os.path.join(base_dir, "README.md"), "w") as f:
             f.write("# CFD Experiment Meshes\n\n")

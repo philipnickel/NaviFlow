@@ -3,7 +3,7 @@ Unstructured mesh generator using Gmsh.
 
 Generates a 2D triangular mesh for a rectangular domain with optional internal
 obstacles (circle, rectangle, or custom shape like a NACA airfoil). Applies
-boundary tagging and optional wake refinement.
+boundary tagging.
 """
 
 import gmsh
@@ -16,22 +16,48 @@ def generate(
     n_cells=1000,
     ratio=2.5,
     obstacle=None,
-    wake_refinement=False,
     output_filename=None,
     model_name="unstructured_gmsh",
+    refinement_factors={},
 ):
+    if refinement_factors is None:
+        raise ValueError("refinement_factors must be provided")
+
     if not gmsh.isInitialized():
         gmsh.initialize()
     gmsh.clear()
     gmsh.model.add(model_name)
 
-    # Domain and mesh size
+    # Estimate global mesh size from target n_cells, adaptively correcting for refinement impact
     area = Lx * Ly
-    h = np.sqrt(area / (n_cells / 4.2))
-    h_min = h / ratio
-    h_max = h * 1.2
+    # Compute effective h using maximum refinement bleed
+    all_refinements = []
 
-    # Domain boundary
+    boundary_refinement = refinement_factors.get("boundaries", {})
+    corner_refinement = refinement_factors.get("corners", {})
+    obstacle_refinement = refinement_factors.get("obstacle", None)
+
+    for k, (factor, bleed) in boundary_refinement.items():
+        all_refinements.append(factor * bleed)
+    for k, (factor, bleed) in corner_refinement.items():
+        all_refinements.append(factor * bleed)
+    if obstacle_refinement:
+        factor, bleed = obstacle_refinement
+        all_refinements.append(factor * bleed)
+
+    max_ref_factor = max(all_refinements) if all_refinements else 1.0
+    correction_factor = 1 + 0.25 * max_ref_factor
+    h_effective = np.sqrt(area / (n_cells / correction_factor))
+
+    # Limit minimum size to avoid huge mesh counts
+    h_min = max(h_effective / ratio, h_effective / 10)
+    h_max = h_effective
+
+    print(
+        f"[Mesh Size] h_effective={h_effective:.5f}, h_min={h_min:.5f}, h_max={h_max:.5f}"
+    )
+
+    # Domain boundary points (no need for local mesh size here)
     p1 = gmsh.model.geo.addPoint(0, 0, 0)
     p2 = gmsh.model.geo.addPoint(Lx, 0, 0)
     p3 = gmsh.model.geo.addPoint(Lx, Ly, 0)
@@ -68,8 +94,6 @@ def generate(
             surface_loops.append(obstacle_loop)
             obstacle_lines.extend(arcs)
 
-        # Other obstacle types can be added here
-
     surface = gmsh.model.geo.addPlaneSurface(surface_loops)
     gmsh.model.geo.synchronize()
 
@@ -90,18 +114,116 @@ def generate(
     ftag = gmsh.model.addPhysicalGroup(2, [surface], 10)
     gmsh.model.setPhysicalName(2, ftag, "fluid_domain")
 
-    # Mesh size control
-    bnd_edges = [l1, l2, l3, l4] + obstacle_lines
-    dist_field = gmsh.model.mesh.field.add("Distance")
-    gmsh.model.mesh.field.setNumbers(dist_field, "EdgesList", bnd_edges)
+    # --- Boundary refinement
+    boundary_edge_map = {
+        "bottom": l1,
+        "right": l2,
+        "top": l3,
+        "left": l4,
+    }
 
-    thresh_field = gmsh.model.mesh.field.add("Threshold")
-    gmsh.model.mesh.field.setNumber(thresh_field, "IField", dist_field)
-    gmsh.model.mesh.field.setNumber(thresh_field, "LcMin", h_min)
-    gmsh.model.mesh.field.setNumber(thresh_field, "LcMax", h_max)
-    gmsh.model.mesh.field.setNumber(thresh_field, "DistMin", 0)
-    gmsh.model.mesh.field.setNumber(thresh_field, "DistMax", min(Lx, Ly) / 3)
-    gmsh.model.mesh.field.setAsBackgroundMesh(thresh_field)
+    boundary_refinement = refinement_factors.get("boundaries", {})
+    corner_refinement = refinement_factors.get("corners", {})
+
+    corner_points = {
+        "bottom_left": p1,
+        "bottom_right": p2,
+        "top_right": p3,
+        "top_left": p4,
+    }
+
+    # Combine corner and boundary fields separately
+    corner_fields = []
+    boundary_fields = []
+    diag = np.sqrt(Lx**2 + Ly**2)
+    bleed_correction_boundary = diag * 2
+    bleed_correction_corner = bleed_correction_boundary * 1
+
+    for name, edge in boundary_edge_map.items():
+        if name in boundary_refinement:
+            ref_factor, bleed_frac = boundary_refinement[name]
+            print(
+                f"[Boundary Refinement] Processing {name}: factor={ref_factor}, bleed={bleed_frac}"
+            )
+            df = gmsh.model.mesh.field.add("Distance")
+            gmsh.model.mesh.field.setNumbers(df, "EdgesList", [edge])
+            gmsh.model.mesh.field.setNumber(df, "Sampling", 150)
+            tf = gmsh.model.mesh.field.add("Threshold")
+            gmsh.model.mesh.field.setNumber(tf, "IField", df)
+            gmsh.model.mesh.field.setNumber(tf, "LcMin", h_min / ref_factor)
+            gmsh.model.mesh.field.setNumber(tf, "LcMax", h_max)
+            gmsh.model.mesh.field.setNumber(tf, "DistMin", 0.01 * Lx)
+            gmsh.model.mesh.field.setNumber(
+                tf, "DistMax", bleed_frac * bleed_correction_boundary
+            )
+            boundary_fields.append(tf)
+
+    for name, pid in corner_points.items():
+        if name in corner_refinement:
+            ref_factor, bleed_frac = corner_refinement[name]
+            print(
+                f"[Corner Refinement] Processing {name}: factor={ref_factor}, bleed={bleed_frac}"
+            )
+            df = gmsh.model.mesh.field.add("Distance")
+            gmsh.model.mesh.field.setNumbers(df, "PointsList", [pid])
+            tf = gmsh.model.mesh.field.add("Threshold")
+            gmsh.model.mesh.field.setNumber(tf, "IField", df)
+            gmsh.model.mesh.field.setNumber(tf, "LcMin", h_min / ref_factor)
+            gmsh.model.mesh.field.setNumber(tf, "LcMax", h_max)
+            gmsh.model.mesh.field.setNumber(tf, "DistMin", 0.01 * Lx)
+            gmsh.model.mesh.field.setNumber(
+                tf, "DistMax", bleed_frac * bleed_correction_corner
+            )
+            corner_fields.append(tf)
+
+    # --- Obstacle refinement
+    if (
+        obstacle
+        and "refinement_factors" in refinement_factors
+        and "obstacle" in refinement_factors["refinement_factors"]
+    ):
+        ref_factor, bleed_frac = refinement_factors["refinement_factors"]["obstacle"]
+        print(f"[Obstacle Refinement] factor={ref_factor}, bleed={bleed_frac}")
+        obs_edges = obstacle_lines
+        if obs_edges:
+            # Use Attractor + Threshold for better control
+            attractor_field = gmsh.model.mesh.field.add("Attractor")
+            gmsh.model.mesh.field.setNumbers(attractor_field, "EdgesList", obs_edges)
+            gmsh.model.mesh.field.setNumber(attractor_field, "Sampling", 150)
+
+            threshold_field = gmsh.model.mesh.field.add("Threshold")
+            gmsh.model.mesh.field.setNumber(threshold_field, "IField", attractor_field)
+            gmsh.model.mesh.field.setNumber(
+                threshold_field, "LcMin", h_min / ref_factor
+            )
+            gmsh.model.mesh.field.setNumber(threshold_field, "LcMax", h_max)
+            gmsh.model.mesh.field.setNumber(
+                threshold_field, "DistMin", 0.02 * obstacle.get("radius", 0.05)
+            )
+            gmsh.model.mesh.field.setNumber(
+                threshold_field,
+                "DistMax",
+                bleed_frac * obstacle.get("radius", 0.05) * 2,
+            )
+            corner_fields.append(threshold_field)
+
+    corner_min = gmsh.model.mesh.field.add("Min")
+    gmsh.model.mesh.field.setNumbers(corner_min, "FieldsList", corner_fields)
+
+    boundary_min = gmsh.model.mesh.field.add("Min")
+    gmsh.model.mesh.field.setNumbers(boundary_min, "FieldsList", boundary_fields)
+
+    # Use both boundary and corner refinement fields for final field
+    final_field = gmsh.model.mesh.field.add("Min")
+    gmsh.model.mesh.field.setNumbers(
+        final_field, "FieldsList", [boundary_min, corner_min]
+    )
+    gmsh.model.mesh.field.setAsBackgroundMesh(final_field)
+
+    gmsh.option.setNumber("Mesh.CharacteristicLengthFromPoints", 0)
+    gmsh.option.setNumber("Mesh.CharacteristicLengthExtendFromBoundary", 0)
+    gmsh.option.setNumber("Mesh.Algorithm", 5)  # Delaunay
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 20)
 
     # Mesh options
     gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
@@ -109,6 +231,7 @@ def generate(
     gmsh.option.setNumber("Mesh.SaveGroupsOfElements", 1)
     gmsh.option.setNumber("Mesh.Algorithm", 6)
 
+    print("[Gmsh] Finalizing and generating mesh with applied refinement fields...")
     gmsh.model.mesh.generate(2)
 
     if output_filename:

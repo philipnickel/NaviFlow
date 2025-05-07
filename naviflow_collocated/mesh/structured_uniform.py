@@ -11,7 +11,6 @@ def generate(
     L: float = 1.0,
     nx: int = 50,
     ny: int = 50,
-    lc: float = 0.1,
     output_filename: str | None = None,
     model_name: str = "structured_uniform",
 ) -> None:
@@ -23,13 +22,13 @@ def generate(
         Domain size (square domain from (0,0) to (L,L)).
     nx, ny : int
         Number of cells in x and y directions.
-    lc : float
-        Characteristic length for Gmsh point spacing.
     output_filename : str, optional
         Path to save the mesh file (must be .msh).
     model_name : str
         Name of the Gmsh model (used internally).
     """
+
+    lc = L / max(nx, ny)
 
     gmsh.clear()
     gmsh.model.add(model_name)

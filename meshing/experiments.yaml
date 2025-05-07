@@ -1,0 +1,123 @@
+lidDrivenCavity:
+  description: Classic lid-driven cavity problem with moving top wall
+  uniform:
+    description: Uniform structured mesh for lid-driven cavity at multiple resolutions
+    resolutions:
+      coarse: {L: 1.0, nx: 10, ny: 10}
+      medium: {L: 1.0, nx: 50, ny: 50}
+      fine: {L: 1.0, nx: 100, ny: 100}
+  unstructured:
+    description: Unstructured mesh with boundary refinement at multiple resolutions
+    resolutions:
+      coarse:
+        Lx: 1.0
+        Ly: 1.0
+        n_cells: 100
+        refinement_factors:
+          boundaries:
+            left: [2.0, 0.1] # 10x refinement, 10% towards center
+            right: [2.0, 0.1]
+            top: [2.0, 0.1]
+            bottom: [2.0, 0.1]
+          corners:
+            top_left: [5.0, 0.2] # 10x refinement, 75% towards center
+            top_right: [5.0, 0.2]
+            bottom_left: [1.0, 0.2]
+            bottom_right: [1.0, 0.2]
+
+      medium:
+        Lx: 1.0
+        Ly: 1.0
+        n_cells: 2500
+        refinement_factors:
+          boundaries:
+            left: [3.0, 0.1]
+            right: [3.0, 0.1]
+            top: [3.0, 0.1]
+            bottom: [3.0, 0.1]
+          corners:
+            top_left: [4.0, 1]
+            top_right: [4.0, 1]
+            bottom_left: [1.0, 1]
+            bottom_right: [1.0, 1]
+      fine:
+        Lx: 1.0
+        Ly: 1.0
+        n_cells: 10000
+        refinement_factors:
+          boundaries:
+            left: [3.0, 0.1]
+            right: [3.0, 0.1]
+            top: [3.0, 0.1]
+            bottom: [3.0, 0.1]
+          corners:
+            top_left: [4.0, 1]
+            top_right: [4.0, 1]
+            bottom_left: [1.0, 1]
+            bottom_right: [1.0, 1]
+
+cylinderFlow:
+  description: Flow around a circular cylinder in a rectangular domain
+  unstructured:
+    description: Unstructured mesh for flow around a cylinder at multiple resolutions
+    resolutions:
+      coarse:
+        Lx: 2.2
+        Ly: 0.41
+        n_cells: 5000
+        obstacle:
+          type: circle
+          center: [0.2, 0.205]
+          radius: 0.05
+        refinement_factors:
+          boundaries:
+            left: [1.0, 0.1]
+            right: [1.0, 0.1]
+            top: [1.0, 0.01]
+            bottom: [1.0, 0.01]
+          corners:
+            top_left: [1.0, 1]
+            top_right: [1.0, 1]
+            bottom_left: [1.0, 1]
+            bottom_right: [1.0, 1]
+          obstacle: [1.0, 0.1] # 20x refinement, 75% of distance (equal to obstacle radius) outwards of obstacle 
+      medium:
+        Lx: 2.2
+        Ly: 0.41
+        n_cells: 10000
+        obstacle:
+          type: circle
+          center: [0.2, 0.205]
+          radius: 0.05
+        refinement_factors:
+          boundaries:
+            left: [1.0, 0.1]
+            right: [1.0, 0.1]
+            top: [1.0, 0.01]
+            bottom: [1.0, 0.01]
+          corners:
+            top_left: [1.0, 1]
+            top_right: [1.0, 1]
+            bottom_left: [1.0, 1]
+            bottom_right: [1.0, 1]
+          obstacle: [1.0, 0.1]
+      fine:
+        Lx: 2.2
+        Ly: 0.41
+        n_cells: 15000
+        obstacle:
+          type: circle
+          center: [0.2, 0.205]
+          radius: 0.05
+        refinement_factors:
+          boundaries:
+            left: [1.0, 0.1]
+            right: [1.0, 0.1]
+            top: [1.0, 0.01]
+            bottom: [1.0, 0.01]
+          corners:
+            top_left: [1.0, 1]
+            top_right: [1.0, 1]
+            bottom_left: [1.0, 1]
+            bottom_right: [1.0, 1]
+          obstacle: [1.0, 0.1]

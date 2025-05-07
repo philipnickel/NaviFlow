@@ -17,13 +17,12 @@ from paraview.simple import *
 
 # Style configuration
 STYLE_CONFIG = {
-    "background": [1, 1, 1],
+    "background": [0.5, 0.5, 0.5],
     "edge_color": [0.1, 0.1, 0.1],
-    "boundary_color": [0.8, 0.1, 0.1],
-    "resolution": [1600, 1200],
-    "font_size": 16,
+    "boundary_color": [0.5, 0.5, 0.5],
+    "resolution": [1920, 1080],
+    "font_size": 100,
 }
-
 # Use names directly from the MSH file's PhysicalNames section
 BOUNDARY_LABELS = {
     1: "bottom_boundary",
@@ -74,16 +73,29 @@ def visualize_mesh(file_path):
     reader = XMLUnstructuredGridReader(FileName=[file_path])
     reader.UpdatePipeline()
 
+    # Reset color palette and ensure gradient is applied
+
     view = GetActiveViewOrCreate('RenderView')
-    view.Background = STYLE_CONFIG["background"]
+    view.UseColorPaletteForBackground = 0
+    view.BackgroundColorMode = 'Gradient'
+    view.Background = [1.0, 1.0, 1.0]  # Bottom (white)
+    view.Background2 = [0.55, 0.70, 0.90]  # Top (light blue)
     view.OrientationAxesVisibility = 0
 
-    display = Show(reader, view)
-    display.Representation = 'Wireframe'
-    display.ColorArrayName = ['POINTS', '']
-    display.AmbientColor = STYLE_CONFIG["edge_color"]
-    display.DiffuseColor = STYLE_CONFIG["edge_color"]
-    display.LineWidth = 2.0
+    # Base layer: light surface fill (use separate surface filter)
+    surface = ExtractSurface(Input=reader)
+    surface_display = Show(surface, view)
+    surface_display.Representation = 'Surface'
+    surface_display.DiffuseColor = [0.85, 0.85, 0.85]  # Light gray fill
+    surface_display.Opacity = 1.0
+
+    # Top layer: wireframe overlay
+    wireframe_display = Show(reader, view)
+    wireframe_display.Representation = 'Wireframe'
+    wireframe_display.ColorArrayName = ['POINTS', '']
+    wireframe_display.AmbientColor = [0.0, 0.0, 0.0]
+    wireframe_display.DiffuseColor = [0.0, 0.0, 0.0]
+    wireframe_display.LineWidth = 0.4
 
     scalar_fields = []
     try:
@@ -159,42 +171,10 @@ def visualize_mesh(file_path):
         if annotations:
             lut.Annotations = annotations
 
-        # Show scalar bar (legend)
-        scalar_bar = GetScalarBar(lut, view)
-        scalar_bar.Visibility = 1
-        scalar_bar.Title = "Boundary"
-        scalar_bar.ComponentTitle = ''
-        scalar_bar.LabelFontSize = STYLE_CONFIG["font_size"]
-        scalar_bar.TitleFontSize = 18
-        scalar_bar.Orientation = 'Horizontal'
-        scalar_bar.WindowLocation = 'Upper Right Corner'
-        scalar_bar.DrawAnnotations = 1
+        # Do not show scalar bar (legend) or add boundary overlays
 
     else:
         print("  No suitable scalar field found for legend.")
-
-    if color_field:
-        for bid, label in BOUNDARY_LABELS.items():
-            filt = Threshold(Input=reader)
-            filt.LowerThreshold = bid - 0.5
-            filt.UpperThreshold = bid + 0.5
-            filt.ThresholdMethod = 'Between'
-            if hasattr(filt, 'SelectInputScalars'):
-                filt.SelectInputScalars = color_field
-            elif hasattr(filt, 'Scalars'):
-                filt.Scalars = color_field
-            else:
-                print(f"Error: Could not set scalars for Threshold filter (bid={bid}). Skipping boundary.")
-                continue
-
-            surf = ExtractSurface(Input=filt)
-
-            # Show boundary surface, colored via LUT SCALAR MAPPING
-            d = Show(surf, view)
-            d.Representation = 'Surface'
-            d.ColorArrayName = color_field
-            d.LookupTable = lut # Use the manually configured LUT
-            d.MapScalars = 1
             
     # Add cell count text (using a more robust method)
     try:
@@ -275,8 +255,9 @@ def visualize_mesh(file_path):
         cell_text.Text = f"Cells: {num_cells_2d:,}"
         text_display = Show(cell_text, view)
         text_display.Color = [0.1, 0.1, 0.1]
-        text_display.FontSize = STYLE_CONFIG["font_size"]
-        text_display.WindowLocation = 'Upper Center'
+        text_display.FontSize = 50
+        text_display.WindowLocation = 'Lower Center'
+        text_display.Position = [0.4, 0.1]
         
         print(f"  Visualization will show {num_cells_2d} cells")
         
@@ -289,8 +270,9 @@ def visualize_mesh(file_path):
             cell_text.Text = f"Elements: {total_cells:,}"
             text_display = Show(cell_text, view)
             text_display.Color = [0.1, 0.1, 0.1]
-            text_display.FontSize = STYLE_CONFIG["font_size"]
-            text_display.WindowLocation = 'Upper Center'
+            text_display.FontSize = 20
+            text_display.WindowLocation = 'Lower Center'
+            text_display.Position = [0.4, 0.05]
             print(f"  Fallback: Showing total element count ({total_cells})")
         except Exception as nested_e:
             print(f"  Warning: Even fallback counting failed. {nested_e}")
@@ -298,32 +280,25 @@ def visualize_mesh(file_path):
     # Auto-fit camera based on bounds
     try:
         print("  Auto-fitting camera...")
-        view.ResetCamera(False)
-        camera = GetActiveCamera()
-        bounds = reader.GetDataInformation().GetBounds()
-        pad_factor = 0.15 # Increase padding further (15%)
-        x_center = (bounds[0] + bounds[1]) / 2.0
-        y_center = (bounds[2] + bounds[3]) / 2.0
-        x_range = (bounds[1] - bounds[0])
-        y_range = (bounds[3] - bounds[2])
-        max_range = max(x_range, y_range)
-        # Set focal point and position for 2D view
-        camera.SetFocalPoint(x_center, y_center, 0)
-        camera.SetPosition(x_center, y_center, 1) # Z distance doesn't matter much for parallel
-        # Adjust parallel scale based on bounds and padding
-        view.CameraParallelProjection = 1 # Ensure parallel projection
-        view.CameraParallelScale = (max_range / 2.0) * (1 + pad_factor)
-        print(f"    Bounds: {bounds}")
-        print(f"    Parallel Scale set to: {view.CameraParallelScale}")
+        view.ResetCamera(True)
+        view.CameraParallelProjection = 1
+        view.CameraParallelScale *= 0.4  # Zoom in to fill more of the screen
     except Exception as e:
-        print(f"  Warning: Auto-fitting camera failed. Using default ResetCamera(). {e}")
-        view.ResetCamera() # Fallback
+        print(f"  Warning: Auto-fitting camera failed. {e}")
+        view.ResetCamera()
 
-    view.ViewSize = STYLE_CONFIG["resolution"]
+    view.ViewSize = [3840, 2160]
 
     try:
+        SaveScreenshot(output_pdf.replace(".pdf", ".png"), view=view, ImageResolution=[3840, 2160])
+        print(f"  Saved visualization to: {output_pdf.replace('.pdf', '.png')}")
+    except Exception as e:
+        print(f"  ❌ Error exporting PNG: {e}")
+
+    # PDF export block
+    try:
         ExportView(output_pdf, view=view)
-        print(f"  Saved visualization to: {output_pdf}")
+        print(f"  Saved vector PDF to: {output_pdf}")
     except Exception as e:
         print(f"  ❌ Error exporting PDF: {e}")
 
