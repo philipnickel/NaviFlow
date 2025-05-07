@@ -39,8 +39,7 @@ def find_test_meshes():
         print(f"Warning: Unstructured mesh file not found at {unstructured_file}")
 
     if cylinder_file.exists():
-        # mesh_files["cylinder_flow"] = str(cylinder_file)
-        pass
+        mesh_files["cylinder_flow"] = str(cylinder_file)
     else:
         print(f"Warning: Cylinder flow mesh file not found at {cylinder_file}")
 
@@ -79,5 +78,6 @@ def mesh_instance(mesh_label):
 def pytest_generate_tests(metafunc):
     if "mesh_label" in metafunc.fixturenames:
         metafunc.parametrize(
-            "mesh_label", ["structured_uniform", "unstructured_refined"]
+            "mesh_label",
+            ["structured_uniform", "unstructured_refined"],  # , "cylinder_flow"],
         )

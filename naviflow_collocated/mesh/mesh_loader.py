@@ -2,47 +2,97 @@ import numpy as np
 import meshio
 from collections import defaultdict
 from naviflow_collocated.mesh.mesh_data import MeshData2D
+import yaml
 
 
-def load_mesh(filename):
+def parse_physical_names(msh_filename):
+    with open(msh_filename, "r") as f:
+        lines = f.readlines()
+
+    phys_names = {}
+    inside = False
+    for line in lines:
+        if line.strip() == "$PhysicalNames":
+            inside = True
+            continue
+        if line.strip() == "$EndPhysicalNames":
+            break
+        if inside:
+            parts = line.strip().split()
+            if len(parts) >= 3:
+                dim, tag, *name_parts = parts
+                name = " ".join(name_parts).strip('"')
+                phys_names[int(tag)] = name
+    return phys_names
+
+
+def load_mesh(filename, bc_config_file=None):
     """
     Load a 2D mesh (structured or unstructured) from a Gmsh .msh file
     and return a MeshData2D object with boundary tagging.
     """
+    physical_names = parse_physical_names(filename)
+    boundary_conditions = {}
+    if bc_config_file is not None:
+        with open(bc_config_file, "r") as f:
+            boundary_conditions = yaml.safe_load(f)
+
     mesh = meshio.read(filename)
     points = mesh.points[:, :2]
 
     if "triangle" in mesh.cells_dict:
-        return _load_unstructured_mesh(mesh, points)
+        return _load_unstructured_mesh(
+            mesh, points, physical_names, boundary_conditions
+        )
     elif "quad" in mesh.cells_dict:
-        return _load_structured_mesh(mesh, points)
+        return _load_structured_mesh(mesh, points, physical_names, boundary_conditions)
     else:
         raise ValueError("Unsupported mesh type: must contain triangle or quad cells")
 
 
-def _load_unstructured_mesh(mesh, points):
+def _load_unstructured_mesh(mesh, points, physical_names, boundary_conditions):
     triangles = np.array(mesh.cells_dict["triangle"], dtype=np.int64)
     boundary_lines = np.array(mesh.cells_dict.get("line", []), dtype=np.int64)
     boundary_tags = np.array(
         mesh.cell_data_dict["gmsh:physical"].get("line", []), dtype=np.int64
     )
     return _build_meshdata2d(
-        points, triangles, boundary_lines, boundary_tags, is_structured=False
+        points,
+        triangles,
+        boundary_lines,
+        boundary_tags,
+        is_structured=False,
+        physical_id_to_name=physical_names,
+        boundary_conditions=boundary_conditions,
     )
 
 
-def _load_structured_mesh(mesh, points):
+def _load_structured_mesh(mesh, points, physical_names, boundary_conditions):
     quads = np.array(mesh.cells_dict["quad"], dtype=np.int64)
     boundary_lines = np.array(mesh.cells_dict.get("line", []), dtype=np.int64)
     boundary_tags = np.array(
         mesh.cell_data_dict["gmsh:physical"].get("line", []), dtype=np.int64
     )
     return _build_meshdata2d(
-        points, quads, boundary_lines, boundary_tags, is_structured=True
+        points,
+        quads,
+        boundary_lines,
+        boundary_tags,
+        is_structured=True,
+        physical_id_to_name=physical_names,
+        boundary_conditions=boundary_conditions,
     )
 
 
-def _build_meshdata2d(points, cells, boundary_lines, boundary_tags, is_structured):
+def _build_meshdata2d(
+    points,
+    cells,
+    boundary_lines,
+    boundary_tags,
+    is_structured,
+    physical_id_to_name,
+    boundary_conditions,
+):
     def sorted_edge(a, b):
         return tuple(sorted((a, b)))
 
@@ -127,19 +177,81 @@ def _build_meshdata2d(points, cells, boundary_lines, boundary_tags, is_structure
     edge_to_face = {tuple(sorted(edge)): i for i, edge in enumerate(face_vertices)}
 
     # Boundary tagging
-    boundary_faces = []
-    boundary_patches = []
-    for i, line in enumerate(boundary_lines):
+    # Initialize boundary-related arrays to be n_faces long with default values
+    boundary_faces_list = []  # Temporary list to collect global IDs of boundary faces
+    boundary_patches = np.full(n_faces, -1, dtype=np.int64)  # Default patch ID -1
+    boundary_types = np.full(
+        n_faces, -1, dtype=np.int64
+    )  # Default type -1 (internal/unspecified)
+    # Initialize boundary_values with 0.0 instead of NaN as a safer default for testing
+    boundary_values = np.full((n_faces, 2), 0.0, dtype=np.float64)  # Default 0.0
+
+    internal_faces = np.where(neighbor_cells >= 0)[0]
+
+    for i, line in enumerate(boundary_lines):  # i is the index for boundary_tags
         edge = sorted_edge(*line)
         if edge in edge_to_face:
-            boundary_faces.append(edge_to_face[edge])
-            boundary_patches.append(boundary_tags[i])
+            face_id = edge_to_face[edge]  # This is the global face index
+            patch_tag_from_mesh_file = boundary_tags[i]  # gmsh physical tag
+            patch_name = physical_id_to_name.get(patch_tag_from_mesh_file, "unknown")
+            # Use patch_name to look up boundary conditions, default to empty dict if not found
+            bc = boundary_conditions.get(patch_name, {})
 
-    boundary_faces = np.array(boundary_faces, dtype=np.int64)
-    boundary_patches = np.array(boundary_patches, dtype=np.int64)
-    boundary_types = np.zeros_like(boundary_patches)
-    boundary_values = np.zeros((len(boundary_faces), 2), dtype=np.float64)
-    internal_faces = np.where(neighbor_cells >= 0)[0]
+            boundary_faces_list.append(face_id)
+            boundary_patches[face_id] = patch_tag_from_mesh_file  # Use global face_id
+
+            bc_type_str = bc.get("type", "unknown").lower()
+
+            # Assign types and values based on config or defaults
+            if bc_type_str == "wall":
+                boundary_types[face_id] = 1  # Use global face_id
+                boundary_values[face_id] = bc.get(
+                    "value", [0.0, 0.0]
+                )  # Default wall value [0,0]
+            elif bc_type_str == "dirichlet":
+                boundary_types[face_id] = 2  # Use global face_id
+                # Ensure value is a list/array of size 2, default to [0,0] if missing/invalid
+                val = bc.get("value", [0.0, 0.0])
+                if not isinstance(val, (list, np.ndarray)) or len(val) != 2:
+                    print(
+                        f"Warning: Invalid Dirichlet value for patch '{patch_name}', using [0,0]. Value: {val}"
+                    )
+                    val = [0.0, 0.0]
+                boundary_values[face_id] = val
+            elif bc_type_str == "zerogradient":  # Match case-insensitivity
+                boundary_types[face_id] = 3  # Use global face_id
+                # Keep NaN for zeroGradient as it signals specific handling might be needed downstream
+                boundary_values[face_id] = [np.nan, np.nan]
+            else:  # Default or unknown type from YAML/config
+                # Assign a default type (e.g., 0) but keep the default value ([0,0] set during init)
+                boundary_types[face_id] = 0
+                # No need to explicitly set boundary_values[face_id] here, it keeps the default [0,0]
+
+    boundary_faces = np.array(
+        sorted(list(set(boundary_faces_list))), dtype=np.int64
+    )  # Ensure unique sorted global IDs
+
+    # Compute distances from owner cell centers to boundary face centers
+    # This array is used by the MeshData2D constructor, but not in mesh_data_spec.
+    # For now, keep its original logic tied to the boundary_faces array.
+    boundary_dists = np.array(
+        [
+            np.linalg.norm(face_centers[f] - cell_centers[owner_cells[f]])
+            for f in boundary_faces
+        ]
+    )
+
+    # Initialize d_PB with 0.0, then calculate for boundary faces (aligns with MeshData2D spec comment)
+    d_PB = np.zeros(n_faces, dtype=np.float64)
+    for f in boundary_faces:  # Iterate through global boundary face indices
+        P = owner_cells[f]
+        x_P = cell_centers[P]
+        x_f = face_centers[f]
+        # Calculate norm, ensure it's not NaN (shouldn't be if centers are valid)
+        dist = np.linalg.norm(x_f - x_P)
+        d_PB[f] = (
+            dist if not np.isnan(dist) else 0.0
+        )  # Assign distance, default to 0 if NaN somehow occurs
 
     # Construct cell_faces as a padded ndarray (NumPy-compatible for Numba)
     cell_face_lists = [[] for _ in range(n_cells)]
@@ -175,6 +287,8 @@ def _build_meshdata2d(points, cells, boundary_lines, boundary_tags, is_structure
         boundary_patches=boundary_patches,
         boundary_types=boundary_types,
         boundary_values=boundary_values,
+        boundary_dists=boundary_dists,
+        d_PB=d_PB,
         cell_faces=cell_faces,
         is_structured=is_structured,
         is_orthogonal=is_structured,

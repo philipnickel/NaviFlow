@@ -30,6 +30,7 @@ def generate(
     gmsh.model.add(model_name)
 
     # Select geometry kernel: OpenCASCADE (`occ`) for speed, or classical (`geo`)
+    # geom = gmsh.model.occ
     geom = gmsh.model.occ
 
     # Estimate global mesh size from target n_cells, adaptively correcting for refinement impact
@@ -52,7 +53,6 @@ def generate(
         factor, bleed = obstacle_refinement
         all_refinements.append(factor * bleed)
 
-    max_ref_factor = max(all_refinements) if all_refinements else 1.0
     total_refinement_intensity = sum(all_refinements)
     correction_factor = 1 + 0.5 * total_refinement_intensity
     h_effective = np.sqrt(area / (n_cells / correction_factor))
@@ -91,7 +91,7 @@ def generate(
             obstacle_loop = geom.addCurveLoop([circ])
             surface_loops.append(obstacle_loop)
             obstacle_lines.extend([circ])
-    
+
         elif otype == "arbitrary":
             coords = obstacle.get("object_geometry", [])
             scale = obstacle.get("scale", 1.0)
@@ -100,17 +100,22 @@ def generate(
             print(f"[Arbitrary Obstacle] center = {center}, scale = {scale}")
             x0, y0 = center
             pts = []
-            for (x, y) in coords:
+            for x, y in coords:
                 pts.append(geom.addPoint(x0 + x * scale, y0 + y * scale, 0))
-            
+
             # Add the first point again at the end to close the loop
             if coords[0] != coords[-1]:
                 pts.append(pts[0])  # Close the loop by adding first point again
-            
+
             print(f"[Arbitrary Obstacle] Created {len(pts)} points")
-            
+
             # Create a single spline for the entire airfoil shape
-            lines = [geom.addSpline(pts)]
+            # lines = [geom.addSpline(pts)]
+            lines = []
+            for i in range(len(pts) - 1):
+                lines.append(gmsh.model.occ.addLine(pts[i], pts[i + 1]))
+            obstacle_loop = gmsh.model.occ.addWire(lines)
+            # lines = [geom.addPolyLine(pts)]
             print(f"[Arbitrary Obstacle] Creating loop with {len(lines)} lines")
             obstacle_loop = geom.addCurveLoop(lines)
             surface_loops.append(obstacle_loop)
@@ -219,7 +224,9 @@ def generate(
             gmsh.model.mesh.field.setNumber(bl_field, "Thickness", bl_thickness)
             gmsh.model.mesh.field.setNumber(bl_field, "Ratio", 1.3)
             gmsh.model.mesh.field.setNumber(bl_field, "Quads", 1)
-            print(f"[Obstacle BoundaryLayer] Size={h_min / ref_factor:.5f}, SizeFar={h_max:.5f}, Thickness={bl_thickness:.5f}")
+            print(
+                f"[Obstacle BoundaryLayer] Size={h_min / ref_factor:.5f}, SizeFar={h_max:.5f}, Thickness={bl_thickness:.5f}"
+            )
             corner_fields.append(bl_field)
 
             # Add Distance + Threshold refinement to extend beyond boundary layer

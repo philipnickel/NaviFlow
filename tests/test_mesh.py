@@ -100,15 +100,16 @@ def test_structured_mesh_alignment(mesh_instance):
 
 def test_boundary_patch_consistency(mesh_instance):
     mesh = mesh_instance
-    assert mesh.boundary_faces.shape[0] == mesh.boundary_patches.shape[0], (
-        "Mismatch in boundary face/patch count"
-    )
-    assert mesh.boundary_types.shape[0] == mesh.boundary_faces.shape[0], (
-        "Mismatch in boundary face/type count"
-    )
-    assert mesh.boundary_values.shape[0] == mesh.boundary_faces.shape[0], (
-        "Mismatch in boundary face/value shape"
-    )
+    for f in mesh.boundary_faces:
+        assert mesh.boundary_patches[f] >= 0, (
+            f"Missing or invalid boundary patch for face {f}"
+        )
+        assert mesh.boundary_types[f] >= 0, (
+            f"Missing or invalid boundary type for face {f}"
+        )
+        assert not np.isnan(mesh.boundary_values[f, 0]), (
+            f"Missing boundary value for face {f}"
+        )
 
 
 def test_graph_connectivity_and_plot(mesh_instance):

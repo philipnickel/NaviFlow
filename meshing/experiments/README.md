@@ -12,3 +12,6 @@ Flow around a NACA0012 airfoil in a rectangular domain
 ### b2
 Flow around a b2
 
+### cow
+Flow around a cow
+

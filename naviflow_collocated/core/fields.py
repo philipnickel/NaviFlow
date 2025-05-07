@@ -1,50 +1,60 @@
-# naviflow_collocated/core/fields.py
-
 import numpy as np
 
 
-class CellField:
-    def __init__(self, n_cells: int, name: str = ""):
-        self.name = name
-        self.values = np.zeros(n_cells, dtype=np.float64)
+class Fields2D:
+    """
+    Holds all evolving simulation fields for the flow solver.
 
-    def set_value(self, value: float):
-        self.values.fill(value)
+    Supports steady/transient SIMPLE, PISO, and can be extended for RANS/LES.
 
-    def copy(self):
-        new_field = CellField(len(self.values), name=self.name + "_copy")
-        new_field.values[:] = self.values[:]
-        return new_field
+    Field categories:
+    - velocity: u, v components (current, previous, predictor)
+    - pressure: pressure, pressure correction
+    - gradients: ∇u, ∇v, ∇p
+    - residuals: for momentum and pressure equations
+    - face values: interpolated face velocities, fluxes
+    - auxiliary: inverse diagonal (d_u, d_v), turbulent quantities, etc.
+    """
 
-    def norm(self):
-        return np.linalg.norm(self.values)
+    def __init__(self, mesh):
+        n_cells = len(mesh.cell_volumes)
+        n_faces = len(mesh.face_areas)
 
-    def __getitem__(self, idx):
-        return self.values[idx]
+        # === Cell-centered ===
+        # Velocity
+        self.u = np.zeros(n_cells)
+        self.v = np.zeros(n_cells)
+        self.u_prev = np.zeros(n_cells)  # for transient
+        self.v_prev = np.zeros(n_cells)
 
-    def __setitem__(self, idx, val):
-        self.values[idx] = val
+        self.u_star = np.zeros(n_cells)  # predicted velocity (PISO)
 
+        # Pressure
+        self.p = np.zeros(n_cells)
+        self.p_corr = np.zeros(n_cells)  # pressure correction
 
-class CellVectorField:
-    def __init__(self, n_cells: int, name: str = ""):
-        self.name = name
-        self.values = np.zeros((n_cells, 2), dtype=np.float64)
+        # Scalars (temperature, turbulence, etc.)
+        self.phi = np.zeros(n_cells)
 
-    def set_value(self, value: tuple):
-        self.values[:, 0] = value[0]
-        self.values[:, 1] = value[1]
+        # Gradients
+        self.grad_u = np.zeros((n_cells, 2))
+        self.grad_v = np.zeros((n_cells, 2))
+        self.grad_p = np.zeros((n_cells, 2))
 
-    def copy(self):
-        new_field = CellVectorField(len(self.values), name=self.name + "_copy")
-        new_field.values[:, :] = self.values[:, :]
-        return new_field
+        # Residuals
+        self.res_u = np.zeros(n_cells)
+        self.res_v = np.zeros(n_cells)
+        self.res_p = np.zeros(n_cells)
 
-    def norm(self):
-        return np.linalg.norm(self.values)
+        # Inverse diagonal coefficients (from momentum solver)
+        self.d_u = np.zeros(n_cells)
+        self.d_v = np.zeros(n_cells)
 
-    def __getitem__(self, idx):
-        return self.values[idx]
+        # === Face-centered ===
+        self.face_fluxes = np.zeros(n_faces)  # ρ u · n A
+        self.face_velocities = np.zeros((n_faces, 2))  # Rhie-Chow, etc.
 
-    def __setitem__(self, idx, val):
-        self.values[idx] = val
+        # === Optional turbulence support ===
+        self.nu_t = np.zeros(n_cells)  # turbulent viscosity
+        self.k = np.zeros(n_cells)  # turbulent kinetic energy
+        self.epsilon = np.zeros(n_cells)  # dissipation rate
