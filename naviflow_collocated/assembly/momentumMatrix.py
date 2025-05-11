@@ -1,78 +1,66 @@
 import numpy as np
 from naviflow_collocated.discretization.diffusion.central_diff import (
-    compute_diffusive_flux,
+    compute_diffusive_flux_matrix_entry,
+    compute_diffusive_correction,
+    compute_boundary_diffusive_correction,
+    compute_diffusive_skew_correction,
 )
 from naviflow_collocated.discretization.convection.upwind import (
-    compute_convective_flux_upwind,
+    compute_convective_stencil_upwind,
+    compute_boundary_convective_flux,
 )
 
+def assemble_diffusion_convection_matrix(mesh, phi, grad_phi,
+                                         rho, mu, u_field):
+    n_cells = mesh.cell_volumes.shape[0]
+    row, col, data = [], [], []
+    b = np.zeros(n_cells)
 
-def assemble_momentum_matrix(u, grad_u, mesh, rho, mu):
-    """
-    Assemble momentum matrix A and source vector b using:
-    - Central differencing with non-orthogonal correction for diffusion
-    - Upwind scheme for convection (can be switched later)
-    - Practice B BC handling (modifying coefficients)
-
-    Parameters:
-    - u: ndarray (n_cells,) — current velocity field
-    - grad_u: ndarray (n_cells, 2) — velocity gradient field
-    - mesh: MeshData2D
-    - rho: float — fluid density
-    - mu: float — dynamic viscosity
-
-    Returns:
-    - a_P: ndarray (n_cells,) — diagonal coefficients
-    - a_N_list: list of (P, N, value) — off-diagonal entries
-    - b_P: ndarray (n_cells,) — source terms
-    """
-    a_P = np.zeros_like(u)
-    b_P = np.zeros_like(u)
-    a_N_list = []
-
-    # Internal faces: handle convection and diffusion
+    # ───────────────────────── internal faces ───────────────────────────────
     for f in mesh.internal_faces:
-        # --- Diffusion ---
-        P, N, a_PP_diff, a_PN_diff, b_corr_diff = compute_diffusive_flux(
-            f, u, grad_u, mesh, mu
-        )
-        a_P[P] += a_PP_diff
-        a_N_list.append((P, N, a_PN_diff))
-        b_P[P] += b_corr_diff
+        P, N, D_f = compute_diffusive_flux_matrix_entry(f, mesh, mu)
 
-        # --- Convection ---
-        uf = np.array([1.0, 0.0])  # Replace with interpolated field later
-        P_c, N_c, a_PP_conv, a_PN_conv, b_corr_conv = compute_convective_flux_upwind(
-            f, u, mesh, uf, rho
-        )
-        a_P[P_c] += a_PP_conv
-        a_N_list.append((P_c, N_c, a_PN_conv))
-        b_P[P_c] += b_corr_conv
+        row.extend([P, P, N, N])
+        col.extend([P, N, N, P])
+        data.extend([ D_f, -D_f,  D_f, -D_f ])
 
+        # explicit non‑orthogonal part — split ½ to each cell
+        _, _, bcorr = compute_diffusive_correction(f, grad_phi, mesh, mu)
+        b[P] -= 0.5 * bcorr
+        b[N] -= 0.5 * bcorr
+
+        # --- NEW: skewness correction --------------------------------------------
+        _, _, bskew = compute_diffusive_skew_correction(f, grad_phi, mesh, mu)
+        b[P] -= 0.5 *  bskew
+        b[N] -= 0.5 * bskew
+
+                # convection (if present)
+        if rho != 0.0:
+            aP, aN, b_conv = compute_convective_stencil_upwind(
+                f, phi, grad_phi, mesh, rho, u_field)
+
+            if aP: row.append(P); col.append(P); data.append(aP)
+            if aN: row.append(P); col.append(N); data.append(aN)
+
+            b[P] -= b_conv        # upwind flux goes to owner only
+
+    # ───────────────────────── boundary faces ───────────────────────────────
     for f in mesh.boundary_faces:
-        P = mesh.owner_cells[f]
-        bc_val = mesh.boundary_values[f, 0]
+        bc_type  = mesh.boundary_types[f, 0]
+        bc_val   = mesh.boundary_values[f, 0]
 
-        E_f = mesh.e_f[f]
-        T_f = mesh.non_ortho_correction[f]
-        delta = mesh.d_PB[f] + 1e-14  # Avoid divide-by-zero
+        P, a_P, b_P = compute_boundary_diffusive_correction(
+            f, phi, grad_phi, mesh, mu, bc_type, bc_val)
 
-        # --- Diffusion ---
-        D_f = mu * np.dot(E_f, E_f) / delta
-        a_P[P] += D_f
-        b_P[P] += D_f * bc_val
+        if a_P: row.append(P); col.append(P); data.append(a_P)
+        b[P] -= b_P
 
-        grad_u_P = grad_u[P]  # <- FIXED
-        b_corr = -mu * np.dot(grad_u_P, T_f)
-        b_P[P] += b_corr
+        # boundary convection (e.g. outlet Neumann)
+        if rho != 0.0:
+            aP_cnv, _, b_cnv = compute_boundary_convective_flux(
+                f, phi, grad_phi, mesh, rho, u_field, bc_type, bc_val)
 
-        # --- Convection (inflow only) ---
-        uf = np.array([1.0, 0.0])
-        S_f_vec = mesh.face_normals[f]
-        F = rho * np.dot(uf, S_f_vec)
+            if aP_cnv: row.append(P); col.append(P); data.append(aP_cnv)
+            b[P] -= b_cnv
 
-        if F < 0:  # Inflow
-            a_P[P] += -F
-            b_P[P] += -F * bc_val
-
-    return a_P, a_N_list, b_P
+    return row, col, data, b

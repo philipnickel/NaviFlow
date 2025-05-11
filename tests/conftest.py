@@ -2,10 +2,6 @@
 
 import pytest
 from pathlib import Path
-from naviflow_collocated.mesh.structured_uniform import (
-    generate as generate_structured_uniform,
-)
-from naviflow_collocated.mesh.unstructured import generate as generate_unstructured
 from naviflow_collocated.mesh.mesh_loader import load_mesh
 
 
@@ -25,6 +21,14 @@ def find_test_meshes():
         base_dir
         / "meshing/experiments/cylinderFlow/unstructured/coarse/cylinderFlow_unstructured_coarse.msh"
     )
+    sanity_check_uni_form_file = (
+        base_dir
+        / "meshing/experiments/sanityCheck/structuredUniform/coarse/sanityCheck_uniform_coarse.msh"
+    )
+    sanity_check_unstructured_file = (
+        base_dir
+        / "meshing/experiments/sanityCheck/unstructured/coarse/sanityCheck_unstructured_coarse.msh"
+    )
 
     mesh_files = {}
 
@@ -43,29 +47,21 @@ def find_test_meshes():
     else:
         print(f"Warning: Cylinder flow mesh file not found at {cylinder_file}")
 
+    if sanity_check_uni_form_file.exists():
+        mesh_files["sanity_check_uniform"] = str(sanity_check_uni_form_file)
+    else:
+        print(
+            f"Warning: Sanity check uniform mesh file not found at {sanity_check_uni_form_file}"
+        )
+
+    if sanity_check_unstructured_file.exists():
+        mesh_files["sanity_check_unstructured"] = str(sanity_check_unstructured_file)
+    else:
+        print(
+            f"Warning: Sanity check unstructured mesh file not found at {sanity_check_unstructured_file}"
+        )
+
     return mesh_files
-
-
-def generate_test_mesh(mesh_type):
-    """Generate a test mesh if no .msh files found."""
-    output_file = f"test_{mesh_type}.msh"
-
-    if mesh_type == "structured_uniform":
-        generate_structured_uniform(L=1.0, nx=15, ny=15, output_filename=output_file)
-    elif mesh_type == "unstructured_refined":
-        generate_unstructured(
-            Lx=1.0, Ly=1.0, n_cells=100, ratio=2.5, output_filename=output_file
-        )
-    elif mesh_type == "cylinder_flow":
-        generate_unstructured(
-            Lx=4.0,
-            Ly=1.0,
-            n_cells=200,
-            ratio=2.5,
-            obstacle={"type": "circle", "center": (1.0, 0.5), "radius": 0.1},
-            output_filename=output_file,
-        )
-    return output_file
 
 
 @pytest.fixture
@@ -79,5 +75,10 @@ def pytest_generate_tests(metafunc):
     if "mesh_label" in metafunc.fixturenames:
         metafunc.parametrize(
             "mesh_label",
-            ["structured_uniform", "unstructured_refined"],  # , "cylinder_flow"],
+            [
+                #"structured_uniform",
+                #"unstructured_refined",
+                "sanity_check_uniform",
+                "sanity_check_unstructured",
+            ],  # , "cylinder_flow"],
         )

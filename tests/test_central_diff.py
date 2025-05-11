@@ -1,91 +1,97 @@
 import numpy as np
-from numba import float64, int64
-from numba.experimental import jitclass
+from naviflow_collocated.mesh.mesh_loader import load_mesh
+from naviflow_collocated.discretization.diffusion.central_diff import compute_diffusive_flux
 
-spec = [
-    ("owner_cells", int64[:]),
-    ("neighbor_cells", int64[:]),
-    ("delta_PN", float64[:]),
-    ("e_f", float64[:, :]),
-    ("non_ortho_correction", float64[:, :]),
-    ("cell_centers", float64[:, :]),
-    ("face_normals", float64[:, :]),
-    ("face_areas", float64[:]),
-]
+def u_sine(xy):
+    return np.sin(np.pi * xy[:, 0]) * np.sin(np.pi * xy[:, 1])
 
+def grad_sine(xy):
+    gx = np.pi * np.cos(np.pi * xy[:, 0]) * np.sin(np.pi * xy[:, 1])
+    gy = np.pi * np.sin(np.pi * xy[:, 0]) * np.cos(np.pi * xy[:, 1])
+    return np.stack([gx, gy], axis=1)
 
-@jitclass(spec)
-class SimpleMockMesh:
-    def __init__(self):
-        self.cell_centers = np.array([[0.0, 0.0], [1.0, 0.0]])  # Example values
-        self.face_normals = np.array([[1.0, 0.0]])
-        self.face_areas = np.array([1.0])
-        self.owner_cells = np.array([0])
-        self.neighbor_cells = np.array([1])
-        self.delta_PN = np.array([1.0])
-        self.e_f = np.array([[1.0, 0.0]])
-        self.non_ortho_correction = np.array([[0.0, 0.0]])
+def test_single_face_diffusion_flux():
+    mesh_path = "meshing/experiments/sanityCheck/structuredUniform/coarse/sanityCheck_uniform_coarse.msh"
+    bc_path = "shared_configs/domain/sanityCheckDiffusion.yaml"
+    mesh = load_mesh(mesh_path, bc_path)
 
-
-def test_diffusive_flux_mms_internal(mesh_instance):
-    from naviflow_collocated.discretization.diffusion.central_diff import (
-        compute_diffusive_flux,
-    )
-    import numpy as np
-
+    # Pick a face (ideally not at boundary)
+    f = mesh.internal_faces[0]
+    P = mesh.owner_cells[f]
+    N = mesh.neighbor_cells[f]
+    
     mu = 1.0
-    u = np.zeros(len(mesh_instance.cell_volumes))
-    grad_u = np.zeros_like(mesh_instance.cell_centers)
+    grad_u = grad_sine(mesh.cell_centers)
+    
+    # Evaluate face-center analytical value
+    x_P = mesh.cell_centers[P]
+    x_N = mesh.cell_centers[N]
+    x_f = mesh.face_centers[f]
+    phi_P = u_sine(mesh.cell_centers[[P]])[0]
+    phi_N = u_sine(mesh.cell_centers[[N]])[0]
+    delta = np.linalg.norm(x_N - x_P)
 
-    # Manufactured solution: u(x,y) = sin(pi x) * sin(pi y)
-    for i, x in enumerate(mesh_instance.cell_centers):
-        u[i] = np.sin(np.pi * x[0]) * np.sin(np.pi * x[1])
-        grad_u[i, 0] = np.pi * np.cos(np.pi * x[0]) * np.sin(np.pi * x[1])
-        grad_u[i, 1] = np.pi * np.sin(np.pi * x[0]) * np.cos(np.pi * x[1])
+    # Analytical normal vector and flux
+    S_f = mesh.face_normals[f]
+    n_hat = S_f / (np.linalg.norm(S_f) + 1e-14)
+    phi_grad_exact = (phi_N - phi_P) / (delta + 1e-14)
+    flux_exact = -mu * phi_grad_exact * np.linalg.norm(S_f)
 
-    for f in mesh_instance.internal_faces:
-        P, N, a_PP, a_PN, b_corr = compute_diffusive_flux(
-            f, u, grad_u, mesh_instance, mu
-        )
+    # From your numerical scheme
+    a_PP, a_PN, b_corr = compute_diffusive_flux(f, grad_u, mesh, mu)
+    flux_num = a_PN * phi_N + a_PP * phi_P + b_corr
 
-        u_P = u[P]
-        u_N = u[N]
-        delta = mesh_instance.delta_PN[f]
-        E_mag = np.linalg.norm(mesh_instance.e_f[f])
-        T_f = mesh_instance.non_ortho_correction[f]
+    print(f"Face {f}")
+    print(f"Analytic flux:     {flux_exact:.6f}")
+    print(f"Numerical flux:    {flux_num:.6f}")
+    print(f"Difference:        {abs(flux_exact - flux_num):.2e}")
 
-        # Discrete flux directly from the analytical formula
-        flux_numerical = -mu * (u_N - u_P) / delta * E_mag - mu * np.dot(grad_u[P], T_f)
-        print(f"Face {f}: flux = {flux_numerical:.6e}")
-        assert np.isfinite(flux_numerical), f"Flux is not finite at face {f}"
+    assert np.isclose(flux_num, flux_exact, atol=1e-6), "Flux mismatch!"
 
-        # Optional: check symmetry (anti-symmetry of fluxes)
-        assert np.isfinite(a_PP)
-        assert np.isfinite(a_PN)
-        assert np.isfinite(b_corr)
-
-
-def test_diffusive_flux_minimal_mock():
-    from naviflow_collocated.discretization.diffusion.central_diff import (
-        compute_diffusive_flux,
-    )
-
-    mesh = SimpleMockMesh()
+def test_all_faces_diffusion_flux():
+    mesh_path = "meshing/experiments/sanityCheck/structuredUniform/coarse/sanityCheck_uniform_coarse.msh"
+    bc_path = "shared_configs/domain/sanityCheckDiffusion.yaml"
+    mesh = load_mesh(mesh_path, bc_path)
+    
     mu = 1.0
-    u = np.array([1.0, 3.0])  # u_P = 1.0, u_N = 3.0
-    grad_u = np.array([[1.0, 2.0], [0.0, 0.0]])  # Only grad_u_P used, constant field
+    grad_u = grad_sine(mesh.cell_centers)
+    
+    # Evaluate analytical solution at cell centers
+    phi = u_sine(mesh.cell_centers)
+    
+    errors = []
+    for f in mesh.internal_faces:
+        P = mesh.owner_cells[f]
+        N = mesh.neighbor_cells[f]
+        
+        # Cell-center values and distance
+        x_P = mesh.cell_centers[P]
+        x_N = mesh.cell_centers[N]
+        phi_P = phi[P]
+        phi_N = phi[N]
+        delta = np.linalg.norm(x_N - x_P)
+        
+        # Analytical normal vector and flux
+        S_f = mesh.face_normals[f]
+        phi_grad_exact = (phi_N - phi_P) / (delta + 1e-14)
+        flux_exact = -mu * phi_grad_exact * np.linalg.norm(S_f)
+        
+        # Numerical flux using our scheme
+        a_PP, a_PN, b_corr = compute_diffusive_flux(f, grad_u, mesh, mu)
+        flux_num = a_PN * phi_N + a_PP * phi_P + b_corr
+        
+        error = abs(flux_exact - flux_num)
+        errors.append(error)
+    
+    print(f"Total internal faces tested: {len(mesh.internal_faces)}")
+    print(f"Max error: {np.max(errors):.2e}")
+    print(f"Mean error: {np.mean(errors):.2e}")
+    print(f"Median error: {np.median(errors):.2e}")
+    
+    # Check if all errors are within tolerance
+    assert np.all(np.array(errors) < 1e-5), "Excessive flux errors found across mesh"
 
-    f = 0  # only one face
-
-    P, N, a_PP, a_PN, b_corr = compute_diffusive_flux(f, u, grad_u, mesh, mu)
-
-    delta = mesh.delta_PN[f]
-    E_mag = np.linalg.norm(mesh.e_f[f])
-    T_f = mesh.non_ortho_correction[f]
-
-    flux_expected = -mu * (u[N] - u[P]) / delta * E_mag - mu * np.dot(grad_u[P], T_f)
-    flux_numerical = a_PP * u[P] + a_PN * u[N] + b_corr
-
-    assert np.isclose(flux_numerical, flux_expected, rtol=1e-12), (
-        "Mismatch in minimal test"
-    )
+if __name__ == "__main__":
+    test_single_face_diffusion_flux()
+    print("\nTesting all internal faces...")
+    test_all_faces_diffusion_flux()

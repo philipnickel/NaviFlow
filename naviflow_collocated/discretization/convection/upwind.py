@@ -1,59 +1,109 @@
-# Placeholder for Upwind convection scheme
-
+import numpy as np
 from numba import njit
 
+# Boundary condition identifiers
+BC_DIRICHLET = 1
+BC_NEUMANN = 2
+BC_CONVECTIVE = 4
+BC_ZEROGRADIENT = 3
+BC_WALL = 0
 
-@njit(inline="always")
-def compute_convective_flux_upwind(f, u, mesh, uf, rho):
+#@njit(inline="always")
+def compute_convective_stencil_upwind(f, phi, grad_phi, mesh, rho, u_field):
     """
-    Compute convective flux contributions using the upwind scheme.
-
-    Parameters
-    ----------
-    f : int
-        Face index.
-    u : ndarray
-        Solution field at cell centers.
-    mesh : MeshData2D (numba.experimental.jitclass.boxing.MeshData2D)
-        Mesh data structure.
-    uf : ndarray
-        Face velocity vector [ux, uy].
-    rho : float
-        Density.
-
-    Returns
-    -------
-    tuple
-        (P, N, a_P_P, a_P_N, b_P): Convective flux coefficients for cell P
-        such that Flux_conv = a_P_P * u_P + a_P_N * u_N + b_P.
+    Upwind convection scheme with skewness correction for interior faces.
     """
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
 
-    # Face normal vector (area weighted)
-    Sf_x = mesh.face_normals[f, 0]
-    Sf_y = mesh.face_normals[f, 1]
+    Sf = mesh.face_normals[f]
+    
+    # Interpolate velocity to face
+    alpha = mesh.face_interp_factors[f]
+    u_f = (1 - alpha) * u_field[P] + alpha * u_field[N]
+    
+    # Calculate mass flux through face
+    F = rho * np.dot(u_f, Sf)
 
-    # Mass flux through the face
-    # F > 0 if flow is from P to N (along face normal)
-    # F < 0 if flow is from N to P (opposite to face normal)
-    F = rho * (uf[0] * Sf_x + uf[1] * Sf_y)
+    # Determine upwind direction and values
+    if F >= 0:
+        # Flow P -> N
+        phi_upwind = phi[P]
+        grad_upwind = grad_phi[P]
+        a_P = F
+        a_N = -F
+    else:
+        # Flow N -> P
+        phi_upwind = phi[N]
+        grad_upwind = grad_phi[N]
+        a_P = 0.0
+        a_N = F
+    
+    # Skewness correction
+    d_f = mesh.skewness_vectors[f]
+    b_corr = F * np.dot(grad_upwind, d_f)
 
-    # For upwind scheme:
-    # Flux = F * u_face
-    # if F > 0, u_face = u_P => Flux = F * u_P
-    # if F < 0, u_face = u_N => Flux = F * u_N
-    # This can be written as: max(F, 0)*u_P + min(F, 0)*u_N
+    return a_P, a_N, b_corr
 
-    a_P_P = max(F, 0.0)  # Coefficient for u_P in the flux expression
-    a_P_N = min(F, 0.0)  # Coefficient for u_N in the flux expression
-    b_P = 0.0  # No explicit source term from upwind convection itself
 
-    # Note: u_N for boundary faces (where N < 0) is not handled here explicitly.
-    # The calling routine or assembly process should manage boundary conditions.
-    # If N < 0, u[N] would cause an error if not handled.
-    # However, a_P_N will be zero if F > 0, so u_N isn't used.
-    # If F < 0 and N is a boundary, then min(F,0) * u_N needs u_N (boundary value).
-    # The test will likely use internal faces, so N should be valid.
+#@njit(inline="always")
+def compute_boundary_convective_flux(f, phi, grad_phi, mesh, rho, u_field, bc_type, bc_value):
+    """
+    Compute convection stencil at boundary face.
 
-    return P, N, a_P_P, a_P_N, b_P
+    Parameters:
+        f         : face ID (boundary face)
+        phi       : scalar field at cells
+        grad_phi  : gradient field at cells
+        mesh      : MeshData2D object
+        rho       : density (float)
+        u_field   : velocity field at cells (n_cells x 2)
+        bc_type   : velocity BC type (Dirichlet, Neumann, etc.)
+        bc_value  : value for Dirichlet BC (float), ignored for outflow
+
+    Returns:
+        a_PP      : matrix coefficient for owner
+        a_PN      : always 0.0
+        b_corr    : source correction term
+    """
+    P = mesh.owner_cells[f]
+    Sf = mesh.face_normals[f]
+    
+    # Use prescribed velocity if Dirichlet, otherwise use cell velocity
+    if bc_type == BC_DIRICHLET:
+        # For Dirichlet, use prescribed boundary value for velocity
+        u_f = mesh.boundary_values[f, :2]  # Use boundary velocity vector
+    else:
+        # For other BCs, use cell velocity
+        u_f = u_field[P]
+    
+    F = rho * np.dot(u_f, Sf)
+    phi_P = phi[P]
+    grad_P = grad_phi[P]
+    d_f = mesh.skewness_vectors[f]
+
+    if F >= 0:
+        # Flow leaving domain: upwind from P
+        a_P = F
+        b_corr = F * np.dot(grad_P, d_f)
+    else:
+        # Inflow: value from boundary
+        if bc_type == BC_DIRICHLET:
+            # Use prescribed value at boundary
+            a_P = 0.0
+            b_corr = F * (bc_value + np.dot(grad_P, d_f))
+        elif bc_type == BC_ZEROGRADIENT:
+            # For zerogradient, use cell value at boundary face
+            a_P = F  # Implicit contribution on P
+            b_corr = F * np.dot(grad_P, d_f)
+        elif bc_type == BC_NEUMANN:
+            # Usually only for pressure
+            a_P = 0.0
+            b_corr = 0.0
+        elif bc_type == BC_CONVECTIVE:
+            a_P = 0.0
+            b_corr = F * bc_value  # Assuming convective extrapolation already applied
+        else:
+            raise ValueError(f"Unsupported boundary BC type: {bc_type}")
+
+    return a_P, 0.0, b_corr

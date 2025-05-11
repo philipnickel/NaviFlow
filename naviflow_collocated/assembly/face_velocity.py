@@ -9,6 +9,11 @@ with OpenFOAM and Matlab'.
 
 import numpy as np
 from numba import njit, prange
+from naviflow_collocated.mesh.mesh_loader import (
+    BC_WALL, BC_DIRICHLET, BC_NEUMANN, BC_ZEROGRADIENT, BC_CONVECTIVE, BC_SYMMETRY
+)
+
+from naviflow_collocated.utils.gradient_utils import compute_all_cell_gradients
 
 # Boundary condition type codes (must match momentum_eq_assembly.py)
 BC_WALL_NO_SLIP = 1
@@ -21,93 +26,9 @@ BC_SYMMETRY = 5
 _SMALL = 1.0e-12
 
 
-@njit
-def interpolate_scalar_to_face(phi, mesh, f):
-    """
-    Interpolate a scalar from cell centers to a face.
-
-    Parameters
-    ----------
-    phi : ndarray
-        Scalar field at cell centers
-    mesh : MeshData2D
-        Mesh data structure
-    f : int
-        Face index
-
-    Returns
-    -------
-    phi_f : float
-        Interpolated scalar value at the face
-    """
-    C = mesh.owner_cells[f]
-    F = mesh.neighbor_cells[f]
-
-    # For internal faces, use linear interpolation
-    if F >= 0:
-        fx = mesh.face_interp_factors[f]
-        return fx * phi[F] + (1.0 - fx) * phi[C]
-    else:
-        # For boundary faces, return cell value (zero gradient)
-        # This is a simplification; in practice, use proper boundary conditions
-        return phi[C]
-
-
-@njit
-def calculate_pressure_gradient(p, mesh, cell_idx):
-    """
-    Calculate pressure gradient at a cell center.
-
-    Parameters
-    ----------
-    p : ndarray
-        Pressure field
-    mesh : MeshData2D
-        Mesh data
-    cell_idx : int
-        Cell index
-
-    Returns
-    -------
-    grad_p : ndarray
-        Pressure gradient vector [dp/dx, dp/dy]
-    """
-    # Initialize gradient vector
-    grad_p = np.zeros(2)
-
-    # Get cell volume
-    vol = mesh.cell_volumes[cell_idx]
-
-    # Loop over all faces of the cell
-    for face_idx in range(mesh.cell_faces.shape[1]):
-        f = mesh.cell_faces[cell_idx, face_idx]
-        if f < 0:
-            continue  # Skip invalid faces
-
-        # Get face area and normal
-        area = mesh.face_areas[f]
-        normal = mesh.face_normals[f]
-
-        # Determine face pressure
-        p_f = interpolate_scalar_to_face(p, mesh, f)
-
-        # Determine sign based on face orientation
-        sign = -1.0 if mesh.owner_cells[f] == cell_idx else 1.0
-
-        # Add contribution to gradient
-        grad_p[0] += sign * p_f * area * normal[0]
-        grad_p[1] += sign * p_f * area * normal[1]
-
-    # Normalize by cell volume
-    if vol > _SMALL:
-        grad_p /= vol
-
-    return grad_p
-
-
 @njit(parallel=True)
 def compute_rhie_chow_face_velocities(
-    mesh, u, v, p, mu, rho, u_prime=None, v_prime=None, p_prime=None
+    mesh, u, v, p, Ap_u_cell, Ap_v_cell, u_prime=None, v_prime=None, p_prime=None
 ):
     """
     Compute face velocities using Rhie-Chow interpolation.
@@ -120,57 +41,44 @@ def compute_rhie_chow_face_velocities(
     mesh : MeshData2D
         Mesh data structure
     u, v : ndarray
-        Velocity fields at cell centers
+        Velocity fields at cell centers (u*, v*)
     p : ndarray
-        Pressure field at cell centers
-    mu : float or ndarray
-        Dynamic viscosity
-    rho : float
-        Density
+        Pressure field at cell centers (p*)
+    Ap_u_cell : ndarray
+        Diagonal coefficients from U-momentum equation at cell centers
+    Ap_v_cell : ndarray
+        Diagonal coefficients from V-momentum equation at cell centers
     u_prime, v_prime : ndarray, optional
         Velocity corrections for SIMPLE algorithm
     p_prime : ndarray, optional
         Pressure correction for SIMPLE algorithm
 
     Returns
-    -------
+    ------
     face_velocity : ndarray
         Face velocities [n_faces, 2]
     """
     n_faces = len(mesh.face_areas)
     n_cells = len(mesh.cell_volumes)
 
-    # Calculate pressure gradients at cell centers
-    grad_p = np.zeros((n_cells, 2))
-    for c in prange(n_cells):
-        grad_p[c] = calculate_pressure_gradient(p, mesh, c)
+    # Calculate pressure gradients at cell centers using the utility function
+    grad_p = compute_all_cell_gradients(p, mesh)
 
     # Calculate correction pressure gradients if provided
     grad_p_prime = None
     if p_prime is not None:
-        grad_p_prime = np.zeros((n_cells, 2))
-        for c in prange(n_cells):
-            grad_p_prime[c] = calculate_pressure_gradient(p_prime, mesh, c)
+        grad_p_prime = compute_all_cell_gradients(p_prime, mesh)
 
     # Initialize face velocities
     face_velocity = np.zeros((n_faces, 2))
 
-    # Calculate A_P for each cell (approximate diagonal coefficient)
-    # This is a simplification; in a full solver, A_P would come from matrix assembly
-    a_P = np.zeros(n_cells)
+    # Precompute Vol/Ap for each cell and each component
+    # These are the d_u, d_v terms from Moukalled (e.g., d_u = Vol/a_P_u)
+    d_u_cell = np.zeros(n_cells)
+    d_v_cell = np.zeros(n_cells)
     for c in range(n_cells):
-        # For diffusion contribution
-        a_P_diff = 0.0
-        for face_idx in range(mesh.cell_faces.shape[1]):
-            f = mesh.cell_faces[c, face_idx]
-            if f >= 0:
-                a_P_diff += mu * mesh.face_areas[f] / max(mesh.delta_CF[f], _SMALL)
-
-        # For convection contribution (simplified)
-        a_P_conv = rho * mesh.cell_volumes[c]
-
-        # Combine and ensure non-zero
-        a_P[c] = max(a_P_diff + a_P_conv, _SMALL)
+        d_u_cell[c] = mesh.cell_volumes[c] / max(Ap_u_cell[c], _SMALL)
+        d_v_cell[c] = mesh.cell_volumes[c] / max(Ap_v_cell[c], _SMALL)
 
     # Compute face velocities for each face
     for f in prange(n_faces):
@@ -191,21 +99,29 @@ def compute_rhie_chow_face_velocities(
                     break
 
             if boundary_idx >= 0:  # Found the boundary index
-                bc_type = mesh.boundary_types[boundary_idx]
+                bc_type = mesh.boundary_types[f, 0]  # Use velocity BC type (index 0)
 
-                if bc_type == BC_WALL_NO_SLIP:
+                if bc_type == BC_WALL:  # Wall
                     # No-slip wall: zero velocity
                     face_velocity[f, 0] = 0.0
                     face_velocity[f, 1] = 0.0
-                elif bc_type == BC_INLET_VELOCITY:
+                elif bc_type == BC_DIRICHLET:  # Dirichlet
                     # Inlet: use boundary values
-                    face_velocity[f, 0] = mesh.boundary_values[boundary_idx, 0]
-                    face_velocity[f, 1] = mesh.boundary_values[boundary_idx, 1]
-                elif bc_type == BC_OUTLET_PRESSURE:
+                    face_velocity[f, 0] = mesh.boundary_values[f, 0]  # Use face index directly
+                    face_velocity[f, 1] = mesh.boundary_values[f, 1]
+                elif bc_type == BC_NEUMANN:  # Neumann
                     # Outlet: zero gradient
                     face_velocity[f, 0] = u[C]
                     face_velocity[f, 1] = v[C]
-                elif bc_type == BC_SYMMETRY:
+                elif bc_type == BC_ZEROGRADIENT:  # ZeroGradient
+                    # Zero gradient
+                    face_velocity[f, 0] = u[C]
+                    face_velocity[f, 1] = v[C]
+                elif bc_type == BC_CONVECTIVE:  # Convective
+                    # For now, just use zero gradient for convective boundaries
+                    face_velocity[f, 0] = u[C]
+                    face_velocity[f, 1] = v[C]
+                elif bc_type == BC_SYMMETRY:  # Symmetry
                     # Symmetry: zero normal component, tangential copy
                     normal = mesh.face_normals[f]
                     nmag = np.sqrt(normal[0] ** 2 + normal[1] ** 2)
@@ -223,6 +139,9 @@ def compute_rhie_chow_face_velocities(
                         # Set face velocity
                         face_velocity[f, 0] = u_t * tx
                         face_velocity[f, 1] = u_t * ty
+                else:  # Default to zero gradient for any other type
+                    face_velocity[f, 0] = u[C]
+                    face_velocity[f, 1] = v[C]
 
         # For internal faces, use Rhie-Chow interpolation
         else:
@@ -236,41 +155,49 @@ def compute_rhie_chow_face_velocities(
             grad_p_x_interp = fx * grad_p[F, 0] + (1.0 - fx) * grad_p[C, 0]
             grad_p_y_interp = fx * grad_p[F, 1] + (1.0 - fx) * grad_p[C, 1]
 
-            # Interpolated reciprocal of A_P with safety against division by zero
-            reciprocal_aP_C = 1.0 / a_P[C]
-            reciprocal_aP_F = 1.0 / a_P[F]
-            a_P_interp = fx * reciprocal_aP_F + (1.0 - fx) * reciprocal_aP_C
+            # Interpolate d_u = Vol/Ap_u and d_v = Vol/Ap_v to the face
+            d_u_face = fx * d_u_cell[F] + (1.0 - fx) * d_u_cell[C]
+            d_v_face = fx * d_v_cell[F] + (1.0 - fx) * d_v_cell[C]
 
-            # Face normal and area
-            normal = mesh.face_normals[f]
-            nmag = np.sqrt(normal[0] ** 2 + normal[1] ** 2)
-            if nmag > _SMALL:
-                nx = normal[0] / nmag
-                ny = normal[1] / nmag
+            # Face normal and area (normal vector components nx, ny)
+            normal = mesh.face_normals[
+                f
+            ]  # This is S_fx, S_fy (Area * normal_unit_vector)
+            face_area_mag = mesh.face_areas[f]  # Magnitude of face area vector
 
-                # Calculate pressure difference across the face
-                # p_f = interpolate_scalar_to_face(p, mesh, f) # Variable not used
-                dp_dn = (p[F] - p[C]) / max(mesh.delta_CF[f], _SMALL)
+            nx_unit, ny_unit = 0.0, 0.0
+            if face_area_mag > _SMALL:
+                nx_unit = normal[0] / face_area_mag
+                ny_unit = normal[1] / face_area_mag
 
-                # Calculate pressure term at face
-                rhie_chow_corr_x = a_P_interp * (dp_dn * nx - grad_p_x_interp)
-                rhie_chow_corr_y = a_P_interp * (dp_dn * ny - grad_p_y_interp)
+                # Calculate pressure difference term normal to the face (P_F - P_C)/d_CF
+                dp_dCF = (p[F] - p[C]) / max(mesh.delta_CF[f], _SMALL)
+
+                # Rhie-Chow correction for u-component of face velocity
+                # (Vol/Ap_u)_f * [ ( (P_F-P_C)/d_CF * nx_unit ) - (gradP_x)_f_bar ]
+                rhie_chow_corr_x = d_u_face * (dp_dCF * nx_unit - grad_p_x_interp)
+
+                # Rhie-Chow correction for v-component of face velocity
+                # (Vol/Ap_v)_f * [ ( (P_F-P_C)/d_CF * ny_unit ) - (gradP_y)_f_bar ]
+                rhie_chow_corr_y = d_v_face * (dp_dCF * ny_unit - grad_p_y_interp)
 
                 # Apply Rhie-Chow correction
                 face_velocity[f, 0] = u_interp + rhie_chow_corr_x
                 face_velocity[f, 1] = v_interp + rhie_chow_corr_y
 
-                # Add correction velocities if provided (for SIMPLE algorithm)
+                # Add correction velocities if provided (for SIMPLE algorithm velocity update)
+                # This part is for U = U* + U' where U' depends on p'
+                # The Rhie-Chow form for U' is similar to the one for U*
                 if (
-                    u_prime is not None
-                    and v_prime is not None
-                    and grad_p_prime is not None
+                    u_prime is not None  # cell centered u'
+                    and v_prime is not None  # cell centered v'
+                    and grad_p_prime is not None  # cell centered grad_p'
                 ):
-                    # Linear interpolation for correction velocities
+                    # Linear interpolation for correction velocities u', v'
                     u_prime_interp = fx * u_prime[F] + (1.0 - fx) * u_prime[C]
                     v_prime_interp = fx * v_prime[F] + (1.0 - fx) * v_prime[C]
 
-                    # Correction pressure gradient
+                    # Interpolated grad_p_prime
                     grad_p_prime_x_interp = (
                         fx * grad_p_prime[F, 0] + (1.0 - fx) * grad_p_prime[C, 0]
                     )
@@ -278,31 +205,69 @@ def compute_rhie_chow_face_velocities(
                         fx * grad_p_prime[F, 1] + (1.0 - fx) * grad_p_prime[C, 1]
                     )
 
-                    # Calculate correction pressure difference
-                    dp_prime_dn = (p_prime[F] - p_prime[C]) / max(
+                    # Pressure correction difference term normal to the face (P'_F - P'_C)/d_CF
+                    # p_prime is cell-centered p'
+                    dp_prime_dCF = (p_prime[F] - p_prime[C]) / max(
                         mesh.delta_CF[f], _SMALL
                     )
 
-                    # Apply correction
-                    rhie_chow_corr_x = a_P_interp * (
-                        dp_prime_dn * nx - grad_p_prime_x_interp
+                    # Velocity correction due to p' (Rhie-Chow form for the U' part)
+                    # d_u_face is (Vol/Ap_u)_f from the original momentum equation a_P
+                    vel_corr_prime_x = d_u_face * (
+                        dp_prime_dCF * nx_unit - grad_p_prime_x_interp
                     )
-                    rhie_chow_corr_y = a_P_interp * (
-                        dp_prime_dn * ny - grad_p_prime_y_interp
+                    vel_corr_prime_y = d_v_face * (
+                        dp_prime_dCF * ny_unit - grad_p_prime_y_interp
                     )
 
-                    face_velocity[f, 0] += u_prime_interp + rhie_chow_corr_x
-                    face_velocity[f, 1] += v_prime_interp + rhie_chow_corr_y
+                    # Add to the already corrected U* face velocity
+                    # U_f_final = (U_f_interp_star + RC_corr_star) + (U_f_interp_prime + RC_corr_prime)
+                    # Or, if u_prime, v_prime are d_u * grad_p', then it's simpler.
+                    # Moukalled 7.108: U_f = U_f_rc_star + U_f_rc_prime
+                    # U_f_rc_prime = U_f_prime_bar - (Vol/Ap)_f_bar * ( (grad p')_f - (grad p')_f_bar )
+                    # where U_f_prime_bar is interpolated from cell-centered u_c' = -(Vol/Ap_c) grad p'_c
+                    # The current u_prime, v_prime are just cell-centered velocity corrections, not yet the full u_c'
+                    # This section is for the velocity UPDATE step using p', so u_prime, v_prime here are the
+                    # dAp/Ap_P * (p'_face_east - p'_face_west) type terms.
+                    # For now, let's assume u_prime and v_prime are the FINAL cell-centered corrections.
+                    # The velocity update step in SIMPLE is:
+                    # u_c_new = u_c_star + u_c_correction_term
+                    # U_f_new = U_f_star_rc + correction_term_for_Uf_rc
+                    # The correction_term_for_Uf_rc is d_f * (p'_N - p'_S) for a u-velocity face.
+                    # This part of the code with u_prime, v_prime, p_prime seems more related to
+                    # how velocities are *updated* after p' is found, rather than calculating U_f_star.
+                    # Let's simplify for now and assume this function is primarily for U*_rc_f.
+                    # The velocity update step will be separate.
+                    # So, removing the u_prime, v_prime, p_prime handling from *this* function
+                    # makes it purely for calculating U*_rc_f.
+
+                    # REVISITING: The parameters u_prime, v_prime, p_prime are optional.
+                    # If they are provided, it means we are calculating the FULLY corrected face velocity.
+                    # U_total_f = U*_rc_f + U'_rc_f
+                    # U*_rc_f part is already calculated above.
+                    # U'_rc_f = U'_f_bar - (Vol/Ap)_f_bar * ( (grad p')_f - (grad p')_f_bar )
+                    # where U'_f_bar is interpolated from cell-centered U'_c.
+                    # And U'_c = - (Vol/Ap)_c * (grad p')_c.
+                    # So, if u_prime, v_prime are cell-centered U'_c, then we interpolate them to get U'_f_bar.
+                    # And grad_p_prime is cell-centered grad_p'.
+
+                    # Add interpolated cell-centered velocity correction
+                    face_velocity[f, 0] += u_prime_interp  # U_f_bar_prime
+                    face_velocity[f, 1] += v_prime_interp  # V_f_bar_prime
+
+                    # Add RC correction for the prime field
+                    face_velocity[f, 0] += vel_corr_prime_x
+                    face_velocity[f, 1] += vel_corr_prime_y
+
             else:
                 # Fallback to simple interpolation if normal is degenerate
                 face_velocity[f, 0] = u_interp
                 face_velocity[f, 1] = v_interp
-
     return face_velocity
 
 
 @njit(parallel=True)
-def compute_face_fluxes(mesh, face_velocity):
+def compute_face_fluxes(mesh, face_velocity, rho):
     """
     Compute mass fluxes at faces from face velocities.
 
@@ -312,30 +277,31 @@ def compute_face_fluxes(mesh, face_velocity):
         Mesh data structure
     face_velocity : ndarray
         Face velocities [n_faces, 2]
+    rho : float
+        Density
 
     Returns
-    -------
-    face_fluxes : ndarray
+    ------
+    face_mass_fluxes : ndarray
         Mass fluxes at faces
     """
     n_faces = len(mesh.face_areas)
-    face_fluxes = np.zeros(n_faces)
+    face_mass_fluxes = np.zeros(n_faces)
 
     for f in prange(n_faces):
-        # Get face area and normal
-        area = mesh.face_areas[f]
-        normal = mesh.face_normals[f]
+        # Get face area and normal vector (Sf_x, Sf_y)
+        normal_vector = mesh.face_normals[f]  # This is already Area * unit_normal
 
-        # Normalize normal vector
-        nmag = np.sqrt(normal[0] ** 2 + normal[1] ** 2)
-        if nmag > _SMALL:
-            nx = normal[0] / nmag
-            ny = normal[1] / nmag
+        # Dot product of velocity and normal vector (U_f . S_f)
+        # S_f = [S_fx, S_fy]
+        # U_f = [u_f, v_f]
+        # U_f . S_f = u_f * S_fx + v_f * S_fy
+        vol_flux = (
+            face_velocity[f, 0] * normal_vector[0]
+            + face_velocity[f, 1] * normal_vector[1]
+        )
 
-            # Dot product of velocity and normal
-            u_n = face_velocity[f, 0] * nx + face_velocity[f, 1] * ny
+        # Calculate mass flux
+        face_mass_fluxes[f] = rho * vol_flux
 
-            # Calculate mass flux
-            face_fluxes[f] = area * u_n
-
-    return face_fluxes
+    return face_mass_fluxes

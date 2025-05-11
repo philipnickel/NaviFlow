@@ -1,200 +1,188 @@
-from naviflow_collocated.discretization.diffusion.central_diff import (
-    compute_diffusive_flux,
-)
-from naviflow_collocated.discretization.convection.upwind import (
-    compute_convective_flux_upwind,
-)
+import sympy as sp
+from sympy.utilities.lambdify import lambdify
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.tri as tri
-from pathlib import Path  # Use pathlib for path handling
+from utils.plot_style import plt
+from pathlib import Path
+from scipy.sparse import coo_matrix
+from scipy.sparse.linalg import spsolve
 
-from naviflow_collocated.assembly.momentumMatrix import assemble_momentum_matrix
-
-
-# --- Discrete RHS computation helper ---
-def compute_discrete_rhs(u, grad_u, mesh, rho, mu, include_convection=True):
-    n_cells = len(mesh.cell_volumes)
-    rhs = np.zeros(n_cells)
-
-    for f in mesh.internal_faces:
-        # Diffusion
-        P, N, a_PP_d, a_PN_d, b_corr_d = compute_diffusive_flux(f, u, grad_u, mesh, mu)
-        rhs[P] += a_PP_d * u[P] + a_PN_d * u[N] + b_corr_d
-
-        if include_convection:
-            uf = np.array([1.0, 0.0])
-            P_c, N_c, a_PP_c, a_PN_c, b_corr_c = compute_convective_flux_upwind(
-                f, u, mesh, uf, rho
-            )
-            rhs[P_c] += a_PP_c * u[P_c] + a_PN_c * u[N_c] + b_corr_c
-
-    for f in mesh.boundary_faces:
-        P = mesh.owner_cells[f]
-        bc_val = mesh.boundary_values[f, 0]
-        d_PB_val = mesh.d_PB[f]
-        S_f = mesh.face_normals[f] * mesh.face_areas[f]
-
-        # Diffusion
-        diff_coeff = mu * np.linalg.norm(S_f) / (d_PB_val + 1e-14)
-        rhs[P] += diff_coeff * (bc_val - u[P])
-
-        if include_convection:
-            uf = np.array([1.0, 0.0])
-            m_dot_f = rho * np.dot(uf, S_f)
-            if m_dot_f < 0:
-                rhs[P] += -m_dot_f * (bc_val - u[P])
-
-    return rhs
+from naviflow_collocated.mesh.mesh_loader import load_mesh
+from naviflow_collocated.assembly.momentumMatrix import assemble_diffusion_convection_matrix
+from naviflow_collocated.discretization.gradient.leastSquares import compute_cell_gradients
 
 
-# --- Helper Plotting Function ---
-def plot_mms_results(
-    mesh,
-    mesh_label,
-    test_name,
-    u_exact,
-    Ax,
-    expected_rhs,
-    filename_suffix,
-):
-    """Generates and saves plots for MMS test results."""
+def plot_field(mesh, field, ax=None, title=None):
+    if ax is None:
+        fig, ax = plt.subplots()
+    sc = ax.scatter(mesh.cell_centers[:, 0], mesh.cell_centers[:, 1],
+                    c=field, cmap="viridis", s=30, edgecolor="k", linewidth=0.3)
+    plt.colorbar(sc, ax=ax, shrink=0.75)
+    if title:
+        ax.set_title(title)
+    ax.set_aspect("equal")
 
-    # --- Define output directory ---
-    # Corrected path to be inside the tests directory
-    output_dir = Path("tests/test_output/momentum_equations")
-    output_dir.mkdir(
-        parents=True, exist_ok=True
-    )  # Create directory if it doesn't exist
-    # --- End Define output directory ---
-    x_coords = mesh.cell_centers[:, 0]
-    y_coords = mesh.cell_centers[:, 1]
+def run_mms_test(mesh_file, bc_file, u_exact_fn, grad_exact_fn, rhs_fn, mu, rho, u_field_fn, tag_prefix):
+    mesh = load_mesh(mesh_file, bc_file)
 
-    # residual field
-    fields_to_plot = {
-        "Ax (Assembled)": Ax,
-        "Expected RHS": expected_rhs,
+    phi_exact = u_exact_fn(mesh.cell_centers)
+    grad_phi = grad_exact_fn(mesh.cell_centers)
+    #grad_phi_exact = compute_cell_gradients(mesh, phi_exact)
+
+    u_field = u_field_fn(mesh)
+
+    row, col, data, b = assemble_diffusion_convection_matrix(
+        mesh, np.zeros_like(phi_exact), grad_phi, rho, mu, u_field
+    )
+
+    A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
+
+    rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b
+    print(f" sum(b) = {np.sum(b)}")
+
+    phi_numeric = spsolve(A, rhs)
+
+    err = np.abs(phi_numeric - phi_exact)
+    max_err, l2_err = np.max(err), np.sqrt(np.mean(err ** 2))
+    print(f"[{tag_prefix}] Max error: {max_err:.2e}, L2 error: {l2_err:.2e}")
+
+    fig, axs = plt.subplots(1, 3, figsize=(15, 4))
+    plot_field(mesh, phi_numeric, ax=axs[0], title="Numerical")
+    plot_field(mesh, phi_exact, ax=axs[1], title="Exact")
+    plot_field(mesh, err, ax=axs[2], title="Error")
+    plt.tight_layout()
+    outdir = Path("tests/test_output")
+    outdir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(outdir / f"mms_{tag_prefix}.png", dpi=300)
+    plt.close()
+
+
+# The following test follows the Method of Manufactured Solutions (MMS) approach
+# to verify spatial convergence of the numerical scheme by comparing numerical
+# and exact solutions on a sequence of refined meshes.
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, grad_exact_fn, rhs_fn, mu, rho, u_field_fn, tag_prefix):
+    hs = []
+    errors = []
+
+    for mesh_file in mesh_files:
+        mesh = load_mesh(mesh_file, bc_file)
+        h = np.sqrt(len(mesh.cell_volumes))
+
+        #h = np.sqrt(np.mean(mesh.cell_volumes))
+        hs.append(h)
+
+        phi_exact = u_exact_fn(mesh.cell_centers)
+        #grad_phi = compute_cell_gradients(mesh, phi_exact)
+        grad_phi = grad_exact_fn(mesh.cell_centers)
+
+        u_field = u_field_fn(mesh)
+
+        row, col, data, b = assemble_diffusion_convection_matrix(
+            mesh, np.zeros_like(phi_exact), grad_phi, rho, mu, u_field
+        )
+
+        A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
+        rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b
+
+        phi_numeric = spsolve(A, rhs)
+
+        err = np.abs(phi_numeric - phi_exact)
+        l2_err = np.sqrt(np.mean(err**2))
+        errors.append(l2_err)
+
+        print(f"[{tag_prefix}] h = {h:.4f}, L2 error = {l2_err:.3e}")
+
+    hs = np.array(hs)
+    errors = np.array(errors)
+    rate = np.log(errors[:-1] / errors[1:]) / np.log(hs[:-1] / hs[1:])
+    print("\nObserved convergence rates:")
+    # The slope of the error vs. grid size in log-log scale approximates the observed order of convergence.
+    for i, r in enumerate(rate):
+        print(f"{tag_prefix}: from h={hs[i]:.4f} to h={hs[i+1]:.4f} --> rate ≈ {r:.2f}")
+
+    plt.figure()
+    plt.loglog(hs, errors, label=tag_prefix)
+    # Add reference line for second-order convergence
+    ref_slope = errors[0] * (hs / hs[0])**2 *0.9
+    plt.loglog(hs, ref_slope, 'k--', label='Second-order')
+    plt.grid(True, which="both")
+    plt.xlabel("Grid size h")
+    plt.ylabel("L2 Error")
+    plt.title("Grid Convergence Study")
+    plt.legend()
+    Path("tests/test_output").mkdir(parents=True, exist_ok=True)
+    plt.savefig(f"tests/test_output/convergence_plot_{tag_prefix}.png", dpi=300)
+    plt.close()
+
+
+
+# === MMS Functions ===
+# The exact solution u_sin is chosen to be smooth and not exactly representable by the discrete scheme,
+# to validate the convergence behavior of the numerical method.
+
+def generate_mms_functions(expr_str):
+    x, y = sp.symbols("x y")
+    expr = sp.sympify(expr_str)
+
+    # Compute gradient
+    grad = [sp.diff(expr, var) for var in (x, y)]
+
+    # Compute Laplacian for diffusion source term
+    laplacian = sum(sp.diff(expr, var, 2) for var in (x, y))
+
+    # Lambdify for fast numerical evaluation
+    u_func = lambdify((x, y), expr, modules="numpy")
+    grad_func = lambdify((x, y), grad, modules="numpy")
+    rhs_diff_func = lambdify((x, y), -laplacian, modules="numpy")
+
+    def u(xy): return u_func(xy[:, 0], xy[:, 1])
+    def rhs(xy): return rhs_diff_func(xy[:, 0], xy[:, 1])
+    def grad(xy): 
+        grad_vals = grad_func(xy[:, 0], xy[:, 1])
+        return np.column_stack(grad_vals)  # Stack gradients into a 2D array
+
+    return u, grad, rhs
+
+def u_zero(mesh): return np.zeros((mesh.cell_centers.shape[0], 2))
+
+u_sin, grad_sin, rhs_sin_diffusion = generate_mms_functions("sin(pi*x)*sin(pi*y)")
+# === Run Tests ===
+if __name__ == "__main__":
+    structured_uniform = {
+        "coarse": "meshing/experiments/lidDrivenCavity/structuredUniform/coarse/lidDrivenCavity_uniform_coarse.msh",
+        "medium": "meshing/experiments/lidDrivenCavity/structuredUniform/medium/lidDrivenCavity_uniform_medium.msh",
+        "fine": "meshing/experiments/lidDrivenCavity/structuredUniform/fine/lidDrivenCavity_uniform_fine.msh",
     }
+    unstructured = {
+        "coarse": "meshing/experiments/lidDrivenCavity/unstructured/coarse/lidDrivenCavity_unstructured_coarse.msh",
+        "medium": "meshing/experiments/lidDrivenCavity/unstructured/medium/lidDrivenCavity_unstructured_medium.msh",
+        "fine": "meshing/experiments/lidDrivenCavity/unstructured/fine/lidDrivenCavity_unstructured_fine.msh",
+    }
+    run_convergence_study(
+        [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+        "shared_configs/domain/sanityCheckDiffusion.yaml",
+        u_sin, grad_sin, rhs_sin_diffusion,
+        mu=1.0, rho=0.0, u_field_fn=u_zero,
+        tag_prefix="diffusion_structured"
+    )
+    run_convergence_study(
+        [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+        "shared_configs/domain/sanityCheckDiffusion.yaml",
+        u_sin, grad_sin, rhs_sin_diffusion,
+        mu=1.0, rho=0.0, u_field_fn=u_zero,
+        tag_prefix="diffusion_unstructured"
+    )
 
-    fig, axes = plt.subplots(1, 2, figsize=(18, 10))  # Changed to 1x2 layout
-    fig.suptitle(f"MMS Results: {test_name} ({mesh_label})", fontsize=16)
-
-    all_axes = axes.flatten()
-    plot_titles = list(fields_to_plot.keys())
-
-    for i in range(len(all_axes)):
-        ax = all_axes[i]
-        if i < len(plot_titles):
-            title = plot_titles[i]
-            field = fields_to_plot[title]
-
-            # Check if there are enough points to create a triangulation
-            if np.sum(~np.isnan(field)) >= 3:
-                triang = tri.Triangulation(x_coords, y_coords)
-                if triang.triangles.shape[0] > 0:
-                    contour = ax.tricontourf(triang, field, cmap="viridis", levels=15)
-                    fig.colorbar(contour, ax=ax)
-                else:
-                    ax.text(
-                        0.5,
-                        0.5,
-                        "No triangles in triangulation",
-                        horizontalalignment="center",
-                        verticalalignment="center",
-                        transform=ax.transAxes,
-                    )
-            else:  # Handle cases where all data is masked or too few points
-                ax.text(
-                    0.5,
-                    0.5,
-                    "Not enough data to plot",
-                    horizontalalignment="center",
-                    verticalalignment="center",
-                    transform=ax.transAxes,
-                )
-
-            ax.set_title(title)
-            ax.set_xlabel("X")
-            ax.set_ylabel("Y")
-            ax.set_aspect("equal", "box")
-        else:
-            ax.axis("off")  # Hide unused subplots
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout to prevent title overlap
-
-    # Construct filename with the new directory
-    filename = output_dir / f"mms_results_{mesh_label}_{filename_suffix}.png"
-    plt.savefig(filename)
-    print(f"Saved MMS plot: {filename}")
-    plt.close(fig)  # Close the figure to free memory
-
-
-# --- End Helper Plotting Function ---
-
-
-def test_assemble_momentum_matrix_structure(mesh_instance, mesh_label):
-    mesh = mesh_instance
-    num_cells = len(mesh.cell_volumes)
-    # Dummy velocity field: constant
-    u = np.ones(num_cells)
-    # Dummy gradient: sinusoidal
-    grad_u = np.zeros((num_cells, 2))
-    for i, x in enumerate(mesh.cell_centers):
-        grad_u[i, 0] = np.sin(np.pi * x[0])
-        grad_u[i, 1] = np.cos(np.pi * x[1])
-    rho = 1.0
-    mu = 0.01
-    a_P, a_N_list, b_P = assemble_momentum_matrix(u, grad_u, mesh, rho, mu)
-    # Assert main diagonal length
-    assert len(a_P) == num_cells
-    # Assert off-diagonal structure: list of (P, N, value)
-    assert isinstance(a_N_list, list)
-    for entry in a_N_list:
-        assert isinstance(entry, tuple)
-        assert len(entry) == 3
-        P, N, value = entry
-        assert isinstance(P, (int, np.integer))
-        assert isinstance(N, (int, np.integer))
-    # Assert source term length
-    assert len(b_P) == num_cells
-    # Assert main diagonal not all zeros
-    assert np.any(np.abs(a_P) > 0)
-
-
-def test_assemble_momentum_matrix_mms(mesh_instance, mesh_label):
-    mesh = mesh_instance
-    num_cells = len(mesh.cell_volumes)
-    rho = 1.0
-    mu = 0.01
-
-    # Manufactured solution: u(x, y) = sin(pi x) * sin(pi y)
-    u_exact = np.zeros(num_cells)
-    grad_u_exact = np.zeros((num_cells, 2))
-
-    for i, x in enumerate(mesh.cell_centers):
-        u_exact[i] = np.sin(np.pi * x[0]) * np.sin(np.pi * x[1])
-        grad_u_exact[i, 0] = np.pi * np.cos(np.pi * x[0]) * np.sin(np.pi * x[1])
-        grad_u_exact[i, 1] = np.pi * np.sin(np.pi * x[0]) * np.cos(np.pi * x[1])
-
-    # Assemble matrix and source
-    a_P, a_N_list, b_P = assemble_momentum_matrix(u_exact, grad_u_exact, mesh, rho, mu)
-
-    # Apply matrix to exact solution
-    Ax = np.copy(b_P)
-    for P, N, val in a_N_list:
-        Ax[P] += val * u_exact[N]
-    Ax += a_P * u_exact
-
-    # Discrete RHS using FV operators for direct comparison
-    expected_rhs_integrated = compute_discrete_rhs(u_exact, grad_u_exact, mesh, rho, mu)
-
-    # Plot results before assertion
-    plot_mms_results(
-        mesh,
-        mesh_label,
-        "ConvectionDiffusion",
-        u_exact,
-        Ax,
-        expected_rhs_integrated,
-        "conv_diff_mms_volscaled",
+    run_mms_test(
+        unstructured["fine"],
+        "shared_configs/domain/sanityCheckDiffusion.yaml",
+        u_sin, grad_sin, rhs_sin_diffusion,
+        mu=1.0, rho=0.0, u_field_fn=u_zero,
+        tag_prefix="diffusion_unstructured_fine"
+    )
+    run_mms_test(
+        structured_uniform["fine"],
+        "shared_configs/domain/sanityCheckDiffusion.yaml",
+        u_sin, grad_sin, rhs_sin_diffusion,
+        mu=1.0, rho=0.0, u_field_fn=u_zero,
+        tag_prefix="diffusion_structured_fine"
     )
