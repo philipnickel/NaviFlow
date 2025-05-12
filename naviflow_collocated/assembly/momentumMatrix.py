@@ -18,7 +18,7 @@ BC_CONVECTIVE   = 4
 EPS = 1.0e-14
 
 @njit
-def assemble_diffusion_convection_matrix(mesh, phi, grad_phi,
+def assemble_diffusion_convection_matrix(mesh, grad_phi,
     rho, mu, u_field, component_idx=0):
     n_cells = mesh.cell_volumes.shape[0]
     row, col, data = [], [], []
@@ -47,7 +47,7 @@ def assemble_diffusion_convection_matrix(mesh, phi, grad_phi,
         # ---------------- convection term (unchanged) ----------------------
         if rho != 0.0:
             a_P, a_N, b_conv = compute_convective_stencil_upwind(
-                f, phi, grad_phi, mesh, rho, u_field)
+                f, mesh, rho, u_field, grad_phi, component_idx)
 
             if a_P != 0.0:
                 row.append(P)
@@ -68,7 +68,7 @@ def assemble_diffusion_convection_matrix(mesh, phi, grad_phi,
         bc_val = mesh.boundary_values[f, component_idx]
 
         P, a_P, b_P = compute_boundary_diffusive_correction(
-        f, phi, grad_phi, mesh, mu, bc_type, bc_val)
+        f, grad_phi, mesh, mu, bc_type, bc_val)
 
         if a_P: row.append(P); col.append(P); data.append(a_P)
         b[P] -= b_P
@@ -76,7 +76,7 @@ def assemble_diffusion_convection_matrix(mesh, phi, grad_phi,
         # boundary convection (e.g. outlet Neumann)
         if rho != 0.0:
             aP_cnv, _, b_cnv = compute_boundary_convective_flux(
-                f, phi, grad_phi, mesh, rho, u_field, bc_type, bc_val)
+                f, mesh, rho, u_field, bc_type, bc_val, component_idx)
 
             if aP_cnv != 0.0:
                 row.append(P)

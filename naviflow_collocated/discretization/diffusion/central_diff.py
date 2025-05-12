@@ -6,7 +6,7 @@ EPS = 1.0e-14
 BC_DIRICHLET    = 1
 BC_NEUMANN      = 2
 BC_ZEROGRADIENT = 3
-
+BC_CONVECTIVE   = 4
 # ──────────────────────────────────────────────────────────────────────────────
 # Internal faces
 # ──────────────────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ def compute_diffusive_correction(f, grad_phi, mesh, mu):
     e_hat    = d_PN / d_PN_mag                     # unit vector along C→N
 
     # distance from P to intersection point f′ along PN
-    delta_Pf = np.dot(x_fprime - x_P, e_hat)
+    delta_Pf = np.dot(np.ascontiguousarray(x_fprime - x_P), np.ascontiguousarray(e_hat))
     g_f      = delta_Pf / d_PN_mag                 # true interpolation factor [0,1]
 
     # Interpolate gradient using corrected weights
@@ -86,11 +86,11 @@ def compute_diffusive_correction(f, grad_phi, mesh, mu):
     e_hat = mesh.unit_vector_e[f]
     
     # Project gradient onto skewness direction
-    scalar = np.dot(d_skew, grad_fmark)
+    scalar = np.dot(np.ascontiguousarray(d_skew), np.ascontiguousarray(grad_fmark))
     grad_f = grad_fmark + scalar * e_hat
 
     # Compute cross-diffusion term
-    b_corr = -muF * np.dot(grad_f, T_f)
+    b_corr = -muF * np.dot(np.ascontiguousarray(grad_f), np.ascontiguousarray(T_f))
     return P, N, b_corr
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ def compute_diffusive_correction(f, grad_phi, mesh, mu):
 # ──────────────────────────────────────────────────────────────────────────────
 @njit(inline="always")
 def compute_boundary_diffusive_correction(
-        f, phi, grad_phi, mesh, mu, bc_type, bc_val):
+        f, grad_phi, mesh, mu, bc_type, bc_val):
     """
     Return (P, a_P, b_P)  —  everything is written to the owner cell only.
 
@@ -126,7 +126,7 @@ def compute_boundary_diffusive_correction(
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
-        fluxVb = -muF * np.dot(grad_P, T_f)
+        fluxVb = -muF * np.dot(np.ascontiguousarray(grad_P), np.ascontiguousarray(T_f))
         b_P += fluxVb
     
     elif bc_type == BC_NEUMANN:

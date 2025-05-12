@@ -9,70 +9,62 @@ BC_ZEROGRADIENT = 3
 BC_WALL = 0
 
 @njit(inline="always")
-def compute_convective_stencil_upwind(f, phi, grad_phi, mesh, rho, u_field):
-    """
-    First-order upwind convection scheme with skewness correction for interior faces.
-    """
+def compute_convective_stencil_upwind(f, mesh, rho, u_field, grad_phi, component_idx):
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
 
+    g_f = mesh.face_interp_factors[f]
     Sf = mesh.vector_S_f[f]
-    alpha = mesh.face_interp_factors[f]
-    u_f = (1 - alpha) * u_field[P] + alpha * u_field[N]  # TODO: Replace with Rhie-Chow if pressure coupling is used
+    d_skew = mesh.vector_skewness[f]
 
-    F = rho * np.dot(u_f, Sf)  # Mass flux through face
-
-    d_f = mesh.vector_skewness[f]
+    # Interpolate velocity vector at face
+    u_face = (1 - g_f) * u_field[P] + g_f * u_field[N]
+    F = rho * np.dot(u_face, Sf)
+    """
+    # Interpolate scalar component with skewness correction
+    phi_P = u_field[P, component_idx]
+    phi_N = u_field[N, component_idx]
+    grad_P = grad_phi[P]
+    grad_N = grad_phi[N]
+    grad_f = (1 - g_f) * grad_P + g_f * grad_N
+    phi_fmark = (1 - g_f) * phi_P + g_f * phi_N
+    phi_f = phi_fmark + np.dot(grad_f, d_skew)
+    """
 
     if F >= 0:
-        grad_upwind = grad_phi[P]
-        b_corr = F * np.dot(grad_upwind, d_f)
-        return F, -F, b_corr  # a_P, a_N
+        return -F, F, 0.0
     else:
-        grad_upwind = grad_phi[N]
-        b_corr = F * np.dot(grad_upwind, d_f)
-        return 0.0, F, b_corr
-
-
+        return -F, F, 0.0
 
 @njit(inline="always")
-def compute_boundary_convective_flux(f, phi, grad_phi, mesh, rho, u_field, bc_type, bc_value):
+def compute_boundary_convective_flux(f, mesh, rho, u_field, bc_type, bc_value, component_idx):
     """
-    Compute convection term stencil and source correction for boundary face.
+    First-order upwind boundary convection flux for a specific velocity component.
+    Skewness correction is ignored at boundaries.
     """
     P = mesh.owner_cells[f]
     Sf = mesh.vector_S_f[f]
-    d_f = mesh.vector_skewness[f]
-    grad_P = grad_phi[P]
+    e_hat = mesh.unit_vector_e[f]
 
-    # Determine face velocity
+    # Interpolate velocity component at the face
     if bc_type == BC_DIRICHLET:
-        u_f = mesh.boundary_values[f, :2]
+        phi_f = mesh.boundary_values[f, component_idx]
     else:
-        u_f = u_field[P]
+        phi_f = u_field[P, component_idx]
 
-    F = rho * np.dot(u_f, Sf)
+    F = rho * phi_f * np.dot(np.ascontiguousarray(Sf), np.ascontiguousarray(u_field[P]))
 
     if F >= 0:
-        # Outflow: interior field controls face value
-        a_P = F
-        b_corr = F * np.dot(grad_P, d_f)
+        return F, 0.0, 0.0
     else:
-        # Inflow: external BC prescribes face value
+        # Inflow — depends on boundary type
         if bc_type == BC_DIRICHLET:
-            a_P = 0.0
-            b_corr = F * bc_value  # No skewness correction
+            return 0.0, 0.0, -F * bc_value
         elif bc_type == BC_ZEROGRADIENT:
-            a_P = F
-            b_corr = 0.0
+            return F, 0.0, 0.0
         elif bc_type == BC_NEUMANN:
-            a_P = 0.0
-            b_corr = 0.0
+            return 0.0, 0.0, 0.0
         elif bc_type == BC_CONVECTIVE:
-            a_P = 0.0
-            b_corr = F * bc_value
+            return 0.0, 0.0, F * bc_value
         else:
-            a_P = 0.0
-            b_corr = 0.0
-
-    return a_P, 0.0, b_corr
+            return 0.0, 0.0, 0.0
