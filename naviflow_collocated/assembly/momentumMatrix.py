@@ -1,56 +1,74 @@
 import numpy as np
+from numba import njit, prange
 from naviflow_collocated.discretization.diffusion.central_diff import (
-    compute_diffusive_flux_matrix_entry,
-    compute_diffusive_correction,
-    compute_boundary_diffusive_correction,
-    compute_diffusive_skew_correction,
+compute_diffusive_flux_matrix_entry,
+compute_diffusive_correction,
+compute_boundary_diffusive_correction,
 )
 from naviflow_collocated.discretization.convection.upwind import (
-    compute_convective_stencil_upwind,
-    compute_boundary_convective_flux,
+compute_convective_stencil_upwind,
+compute_boundary_convective_flux,
 )
 
+BC_DIRICHLET    = 1
+BC_NEUMANN      = 2
+BC_ZEROGRADIENT = 3
+BC_CONVECTIVE   = 4
+
+EPS = 1.0e-14
+
+@njit
 def assemble_diffusion_convection_matrix(mesh, phi, grad_phi,
-                                         rho, mu, u_field):
+    rho, mu, u_field, component_idx=0):
     n_cells = mesh.cell_volumes.shape[0]
     row, col, data = [], [], []
     b = np.zeros(n_cells)
 
-    # ───────────────────────── internal faces ───────────────────────────────
-    for f in mesh.internal_faces:
-        P, N, D_f = compute_diffusive_flux_matrix_entry(f, mesh, mu)
+    # Note: Full parallelization requires restructuring away from dynamic Python lists.
+    # The loops below are marked prange-ready but still use Python lists and thus are not fully parallel.
 
+    n_internal = len(mesh.internal_faces)
+    for i in range(n_internal):
+        f = mesh.internal_faces[i]
+        # -------- orthogonal (over‑relaxed) Laplacian ----------------------
+        P, N, D_f = compute_diffusive_flux_matrix_entry(f, mesh, mu)
         row.extend([P, P, N, N])
         col.extend([P, N, N, P])
-        data.extend([ D_f, -D_f,  D_f, -D_f ])
+        data.extend([ D_f, -D_f, D_f, -D_f ])
 
-        # explicit non‑orthogonal part — split ½ to each cell
+
+        # -------- cross‑diffusion (non‑orth) ------------------------------
+        # explicit part (distributed symmetrically between P and N)
         _, _, bcorr = compute_diffusive_correction(f, grad_phi, mesh, mu)
-        b[P] -= 0.5 * bcorr
-        b[N] -= 0.5 * bcorr
+        b[P] -=  bcorr
+        b[N] +=  bcorr
 
-        # --- NEW: skewness correction --------------------------------------------
-        _, _, bskew = compute_diffusive_skew_correction(f, grad_phi, mesh, mu)
-        b[P] -= 0.5 *  bskew
-        b[N] -= 0.5 * bskew
 
-                # convection (if present)
+        # ---------------- convection term (unchanged) ----------------------
         if rho != 0.0:
-            aP, aN, b_conv = compute_convective_stencil_upwind(
+            a_P, a_N, b_conv = compute_convective_stencil_upwind(
                 f, phi, grad_phi, mesh, rho, u_field)
 
-            if aP: row.append(P); col.append(P); data.append(aP)
-            if aN: row.append(P); col.append(N); data.append(aN)
+            if a_P != 0.0:
+                row.append(P)
+                col.append(P)
+                data.append(a_P)
+            if a_N != 0.0:
+                row.append(P)
+                col.append(N)
+                data.append(a_N)
 
-            b[P] -= b_conv        # upwind flux goes to owner only
+            b[P] -= b_conv
 
-    # ───────────────────────── boundary faces ───────────────────────────────
-    for f in mesh.boundary_faces:
-        bc_type  = mesh.boundary_types[f, 0]
-        bc_val   = mesh.boundary_values[f, 0]
+
+    n_boundary = len(mesh.boundary_faces)
+    for i in range(n_boundary):
+        f = mesh.boundary_faces[i]
+        bc_type = mesh.boundary_types[f, 0]
+        bc_val = mesh.boundary_values[f, component_idx]
 
         P, a_P, b_P = compute_boundary_diffusive_correction(
-            f, phi, grad_phi, mesh, mu, bc_type, bc_val)
+        f, phi, grad_phi, mesh, mu, bc_type, bc_val)
 
         if a_P: row.append(P); col.append(P); data.append(a_P)
         b[P] -= b_P
@@ -60,7 +78,11 @@ def assemble_diffusion_convection_matrix(mesh, phi, grad_phi,
             aP_cnv, _, b_cnv = compute_boundary_convective_flux(
                 f, phi, grad_phi, mesh, rho, u_field, bc_type, bc_val)
 
-            if aP_cnv: row.append(P); col.append(P); data.append(aP_cnv)
+            if aP_cnv != 0.0:
+                row.append(P)
+                col.append(P)
+                data.append(aP_cnv)
             b[P] -= b_cnv
 
+    
     return row, col, data, b

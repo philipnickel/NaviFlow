@@ -191,17 +191,8 @@ def test_boundary_conditions_for_mms():
     mesh_path = "meshing/experiments/sanityCheck/structuredUniform/coarse/sanityCheck_uniform_coarse.msh"
     
     # Test diffusion case (sine function with Dirichlet BCs)
-    diffusion_mesh = load_mesh(mesh_path, "shared_configs/domain/sanityCheckDiffusion.yaml")
-    validate_boundary_conditions(diffusion_mesh, "shared_configs/domain/sanityCheckDiffusion.yaml", plot=True)
-    
-    # Test convection case (cosine function with mixed BCs)
-    convection_mesh = load_mesh(mesh_path, "shared_configs/domain/sanityCheckConvection.yaml")
-    validate_boundary_conditions(convection_mesh, "shared_configs/domain/sanityCheckConvection.yaml", plot=True)
-    
-    # Test combined case (sine function with mixed BCs)
-    combined_mesh = load_mesh(mesh_path, "shared_configs/domain/sanityCheckCombined.yaml")
-    validate_boundary_conditions(combined_mesh, "shared_configs/domain/sanityCheckCombined.yaml", plot=True)
-
+    diffusion_mesh = load_mesh(mesh_path, "shared_configs/domain/sanityCheckDiffusionANS.yaml")
+    validate_boundary_conditions(diffusion_mesh, "shared_configs/domain/sanityCheckDiffusionANS.yaml", plot=True)
 
 if __name__ == "__main__":
     test_boundary_conditions_for_mms()

@@ -8,102 +8,71 @@ BC_CONVECTIVE = 4
 BC_ZEROGRADIENT = 3
 BC_WALL = 0
 
-#@njit(inline="always")
+@njit(inline="always")
 def compute_convective_stencil_upwind(f, phi, grad_phi, mesh, rho, u_field):
     """
-    Upwind convection scheme with skewness correction for interior faces.
+    First-order upwind convection scheme with skewness correction for interior faces.
     """
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
 
-    Sf = mesh.face_normals[f]
-    
-    # Interpolate velocity to face
+    Sf = mesh.vector_S_f[f]
     alpha = mesh.face_interp_factors[f]
-    u_f = (1 - alpha) * u_field[P] + alpha * u_field[N]
-    
-    # Calculate mass flux through face
-    F = rho * np.dot(u_f, Sf)
+    u_f = (1 - alpha) * u_field[P] + alpha * u_field[N]  # TODO: Replace with Rhie-Chow if pressure coupling is used
 
-    # Determine upwind direction and values
+    F = rho * np.dot(u_f, Sf)  # Mass flux through face
+
+    d_f = mesh.vector_skewness[f]
+
     if F >= 0:
-        # Flow P -> N
-        phi_upwind = phi[P]
         grad_upwind = grad_phi[P]
-        a_P = F
-        a_N = -F
+        b_corr = F * np.dot(grad_upwind, d_f)
+        return F, -F, b_corr  # a_P, a_N
     else:
-        # Flow N -> P
-        phi_upwind = phi[N]
         grad_upwind = grad_phi[N]
-        a_P = 0.0
-        a_N = F
-    
-    # Skewness correction
-    d_f = mesh.skewness_vectors[f]
-    b_corr = F * np.dot(grad_upwind, d_f)
-
-    return a_P, a_N, b_corr
+        b_corr = F * np.dot(grad_upwind, d_f)
+        return 0.0, F, b_corr
 
 
-#@njit(inline="always")
+
+@njit(inline="always")
 def compute_boundary_convective_flux(f, phi, grad_phi, mesh, rho, u_field, bc_type, bc_value):
     """
-    Compute convection stencil at boundary face.
-
-    Parameters:
-        f         : face ID (boundary face)
-        phi       : scalar field at cells
-        grad_phi  : gradient field at cells
-        mesh      : MeshData2D object
-        rho       : density (float)
-        u_field   : velocity field at cells (n_cells x 2)
-        bc_type   : velocity BC type (Dirichlet, Neumann, etc.)
-        bc_value  : value for Dirichlet BC (float), ignored for outflow
-
-    Returns:
-        a_PP      : matrix coefficient for owner
-        a_PN      : always 0.0
-        b_corr    : source correction term
+    Compute convection term stencil and source correction for boundary face.
     """
     P = mesh.owner_cells[f]
-    Sf = mesh.face_normals[f]
-    
-    # Use prescribed velocity if Dirichlet, otherwise use cell velocity
-    if bc_type == BC_DIRICHLET:
-        # For Dirichlet, use prescribed boundary value for velocity
-        u_f = mesh.boundary_values[f, :2]  # Use boundary velocity vector
-    else:
-        # For other BCs, use cell velocity
-        u_f = u_field[P]
-    
-    F = rho * np.dot(u_f, Sf)
-    phi_P = phi[P]
+    Sf = mesh.vector_S_f[f]
+    d_f = mesh.vector_skewness[f]
     grad_P = grad_phi[P]
-    d_f = mesh.skewness_vectors[f]
+
+    # Determine face velocity
+    if bc_type == BC_DIRICHLET:
+        u_f = mesh.boundary_values[f, :2]
+    else:
+        u_f = u_field[P]
+
+    F = rho * np.dot(u_f, Sf)
 
     if F >= 0:
-        # Flow leaving domain: upwind from P
+        # Outflow: interior field controls face value
         a_P = F
         b_corr = F * np.dot(grad_P, d_f)
     else:
-        # Inflow: value from boundary
+        # Inflow: external BC prescribes face value
         if bc_type == BC_DIRICHLET:
-            # Use prescribed value at boundary
             a_P = 0.0
-            b_corr = F * (bc_value + np.dot(grad_P, d_f))
+            b_corr = F * bc_value  # No skewness correction
         elif bc_type == BC_ZEROGRADIENT:
-            # For zerogradient, use cell value at boundary face
-            a_P = F  # Implicit contribution on P
-            b_corr = F * np.dot(grad_P, d_f)
+            a_P = F
+            b_corr = 0.0
         elif bc_type == BC_NEUMANN:
-            # Usually only for pressure
             a_P = 0.0
             b_corr = 0.0
         elif bc_type == BC_CONVECTIVE:
             a_P = 0.0
-            b_corr = F * bc_value  # Assuming convective extrapolation already applied
+            b_corr = F * bc_value
         else:
-            raise ValueError(f"Unsupported boundary BC type: {bc_type}")
+            a_P = 0.0
+            b_corr = 0.0
 
     return a_P, 0.0, b_corr

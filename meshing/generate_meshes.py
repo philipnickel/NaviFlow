@@ -161,7 +161,7 @@ def generate_experiment_meshes(exp_name, exp_config, base_dir, selected_resoluti
                     obstacle=obstacle,
                     refinement_factors=res_config.get("refinement_factors", {}),
                     output_filename=msh_file,
-                    model_name=f"{exp_name}_unstructured_{res_name}"
+                    model_name=f"{exp_name}_unstructured_{res_name}",
                 )
                 export_mesh(msh_file)
             except Exception as e:

@@ -125,10 +125,9 @@ def visualize_mesh(file_path):
         lut = GetColorTransferFunction(color_field[1])
         
         # Get available boundary IDs from the data by checking which ones actually have elements
-        available_boundaries = set()
         reader.UpdatePipeline()
         data_info = reader.GetCellDataInformation().GetArray(color_field[1])
-        min_val, max_val = int(data_info.GetRange()[0]), int(data_info.GetRange()[1])
+        _min_val, _max_val = int(data_info.GetRange()[0]), int(data_info.GetRange()[1])
         
         # Check if boundaries actually have elements
         valid_boundaries = set()
@@ -240,7 +239,7 @@ def visualize_mesh(file_path):
             if is_structured:
                 # Count vertex points
                 points_info = reader.GetPointDataInformation()
-                num_points = points_info.GetNumberOfArrays()
+                points_info.GetNumberOfArrays()
                 
                 # Estimate n and m based on total cells and assumption of an n×m grid
                 # For a square domain (n=m): total_cells = n² + 4n

@@ -3,7 +3,7 @@ Unstructured mesh generator using Gmsh.
 
 Generates a 2D triangular mesh for a rectangular domain with optional internal
 obstacles (circle, rectangle, or custom shape like a NACA airfoil). Applies
-boundary tagging.
+boundary tagging. This generator now always produces linear triangular meshes.
 """
 
 import gmsh
@@ -19,7 +19,6 @@ def generate(
     output_filename=None,
     model_name="unstructured_gmsh",
     refinement_factors={},
-    use_quads=False,
 ):
     if refinement_factors is None:
         raise ValueError("refinement_factors must be provided")
@@ -124,12 +123,9 @@ def generate(
     surface = geom.addPlaneSurface(surface_loops)
     geom.synchronize()
 
-    gmsh.option.setNumber("Mesh.RecombineAll", 0)  # use triangles globally by default
-    if use_quads and obstacle_lines:
-        for line in obstacle_lines:
-            gmsh.model.mesh.setRecombine(1, line)  # recombine only around obstacle
-        gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 1)
-        gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 1)
+    # -- Triangular mesh setup ----------------------------------------------
+    gmsh.option.setNumber("Mesh.RecombineAll", 0)   # triangles only
+    gmsh.option.setNumber("Mesh.Algorithm", 6)      # Adv Front / Delaunay
 
     # Physical tags
     tags = {
@@ -258,18 +254,19 @@ def generate(
 
     gmsh.option.setNumber("Mesh.CharacteristicLengthFromPoints", 0)
     gmsh.option.setNumber("Mesh.CharacteristicLengthExtendFromBoundary", 0)
-    gmsh.option.setNumber("Mesh.Algorithm", 5)  # Delaunay
+    #gmsh.option.setNumber("Mesh.Algorithm", 5)  # Delaunay
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 20)
 
     # Mesh options
     gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
     gmsh.option.setNumber("Mesh.Binary", 0)
     gmsh.option.setNumber("Mesh.SaveGroupsOfElements", 1)
-    gmsh.option.setNumber("Mesh.Algorithm", 6)
 
     print("[Gmsh] Finalizing and generating mesh with applied refinement fields...")
-    gmsh.option.setNumber("Mesh.ElementOrder", 1)
     gmsh.model.mesh.generate(2)
+
+
+    gmsh.model.mesh.optimize("Netgen")
 
     if output_filename:
         gmsh.write(output_filename)

@@ -1,5 +1,8 @@
 # CFD Experiment Meshes
 
+### sanityCheck
+Sanity check for mesh generation
+
 ### lidDrivenCavity
 Classic lid-driven cavity problem with moving top wall
 

@@ -206,7 +206,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, grad_fn, rhs_fn, mu, rho, u_fie
     )
 
     rhs = rhs_fn(mesh.cell_centers)
-    b_rhs = rhs * mesh.cell_volumes
+    b_rhs = rhs * mesh.cell_volumes + b
 
     A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
     phi_numeric = spsolve(A, b_rhs)

@@ -21,7 +21,7 @@ def test_basic_mesh_integrity(mesh_instance):
     # Core shape checks
     assert mesh.cell_centers.shape == (n_cells, 2)
     assert mesh.face_centers.shape == (n_faces, 2)
-    assert mesh.face_normals.shape == (n_faces, 2)
+    assert mesh.vector_S_f.shape == (n_faces, 2)
     assert mesh.owner_cells.shape[0] == n_faces
     assert mesh.neighbor_cells.shape[0] == n_faces
 
@@ -48,42 +48,40 @@ def test_face_cell_symmetry(mesh_instance):
     )
 
 
-def test_unique_face_vertices(mesh_instance):
+def test_vector_S_f_orientation(mesh_instance):
     mesh = mesh_instance
-    face_keys = [tuple(sorted(face.tolist())) for face in mesh.face_vertices]
-    assert len(set(face_keys)) == len(face_keys), "Duplicate face vertices detected"
+    internal_mask = mesh.neighbor_cells >= 0
+    vec_d_CE_internal = mesh.vector_d_CE[internal_mask]
+    vector_S_f_internal = mesh.vector_S_f[internal_mask]
+    dot_product = np.einsum("ij,ij->i", vec_d_CE_internal, vector_S_f_internal)
+    assert np.all(dot_product > -1e-9), "Some internal face S_f vectors do not align with owner to neighbor direction (d_CE)"
+    boundary_mask = ~internal_mask
+    owner_centers_bf = mesh.cell_centers[mesh.owner_cells[boundary_mask]]
+    vec_owner_to_face_center_bf = mesh.face_centers[boundary_mask] - owner_centers_bf
+    vector_S_f_bf = mesh.vector_S_f[boundary_mask]
+    dot_product_bf = np.einsum("ij,ij->i", vec_owner_to_face_center_bf, vector_S_f_bf)
+    assert np.all(dot_product_bf > -1e-9), "Some boundary face S_f vectors do not point outwards from owner cell"
 
 
-def test_face_normal_orientation(mesh_instance):
-    mesh = mesh_instance
-    internal = mesh.neighbor_cells >= 0
-    vec = mesh.d_PN[internal]  # Use precomputed owner→neighbor vectors from meshdata
-    dot = np.einsum("ij,ij->i", vec, mesh.face_normals[internal])
-    assert np.all(dot > 0), "Some face normals do not point from owner to neighbor"
-
-
-def test_delta_PN_matches_geometry(mesh_instance):
+def test_vector_d_CE_magnitude_matches_geometry(mesh_instance):
     mesh = mesh_instance
     mask = mesh.neighbor_cells >= 0
-    P = mesh.owner_cells[mask]
-    N = mesh.neighbor_cells[mask]
-    expected = np.linalg.norm(mesh.cell_centers[N] - mesh.cell_centers[P], axis=1)
-    assert np.allclose(mesh.delta_PN[mask], expected, rtol=1e-3), "Mismatch in delta_PN"
+    P_coords = mesh.cell_centers[mesh.owner_cells[mask]]
+    N_coords = mesh.cell_centers[mesh.neighbor_cells[mask]]
+    expected_d_CE_mag = np.linalg.norm(N_coords - P_coords, axis=1)
+    actual_d_CE_mag = np.linalg.norm(mesh.vector_d_CE[mask], axis=1)
+    assert np.allclose(actual_d_CE_mag, expected_d_CE_mag, rtol=1e-6), "Mismatch in vector_d_CE magnitude"
 
 
-def test_non_ortho_projection_decomposition(mesh_instance):
+def test_over_relaxed_decomposition(mesh_instance):
     mesh = mesh_instance
-    internal = mesh.neighbor_cells >= 0
-    vec_pn = mesh.d_PN[internal]
-    n_hat = mesh.face_normals[internal] / (
-        np.linalg.norm(mesh.face_normals[internal], axis=1)[:, None] + 1e-12
-    )
-    proj_len = np.einsum("ij,ij->i", vec_pn, n_hat)
-    t_f = mesh.non_ortho_correction[internal]
-    reconstructed = proj_len[:, None] * n_hat + t_f
-    assert np.allclose(vec_pn, reconstructed, rtol=1e-6), (
-        "Projection decomposition failed"
-    )
+    reconstructed_S_f = mesh.vector_E_f + mesh.vector_T_f
+    assert np.allclose(mesh.vector_S_f, reconstructed_S_f, atol=1e-9), \
+        "Over-relaxed decomposition S_f = E_f + T_f failed."
+    
+    internal_mask = mesh.neighbor_cells >= 0
+    dot_Tf_Sf = np.einsum("ij,ij->i", mesh.vector_T_f[internal_mask], mesh.vector_S_f[internal_mask])
+    assert np.allclose(dot_Tf_Sf, 0, atol=1e-9), "vector_T_f is not orthogonal to vector_S_f for some internal faces."
 
 
 def test_boundary_patch_consistency(mesh_instance):
@@ -119,12 +117,15 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
     if mesh.cell_volumes.shape[0] > 200:
         return
 
-    mesh = mesh_instance
+    # --- Uniform scaling for vector field visualization ---
+    vector_scale = 0.2
+
     os.makedirs("tests/test_output", exist_ok=True)
     path = f"tests/test_output/mesh_diagnostics_{mesh_label}.pdf"
 
     fig, ax = plt.subplots(figsize=(11, 11))
     ax.set_aspect("equal")
+    ax.axis('off')
     # Draw cell polygons
     for c, face_ids in enumerate(mesh.cell_faces):
         verts_idx = []
@@ -138,177 +139,192 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
         center = mesh.cell_centers[c]
         angles = np.arctan2(verts[:, 1] - center[1], verts[:, 0] - center[0])
         poly_coords = verts[np.argsort(angles)]
-        ax.add_patch(Polygon(poly_coords, facecolor="none", edgecolor="gray", lw=1))
+        ax.add_patch(Polygon(poly_coords, facecolor="none", edgecolor="gray", lw=0.3))
 
     # Cell centres
     ax.scatter(
         mesh.cell_centers[:, 0],
         mesh.cell_centers[:, 1],
         s=6,
-        color="blue",
+        color=colors[0],
         zorder=3,
         label="Cell Centres",
     )
 
-    # Annotate with cell info: ID, volume, type (internal/boundary) using LaTeX-style formatting
-    for cid, (x, y) in enumerate(mesh.cell_centers):
-        # Determine cell type: boundary if any face is boundary
-        face_ids = mesh.cell_faces[cid]
-        is_boundary = any((f >= 0 and f in mesh.boundary_faces) for f in face_ids)
-        cell_type = "boundary" if is_boundary else "internal"
-        vol = mesh.cell_volumes[cid]
-        ax.annotate(
-            f"$\\text{{Cell}}\\ {cid}$\n$\\text{{Vol}} = {vol:.4g}$\n$\\text{{Type}}: \\text{{{cell_type}}}$",
-            xy=(x, y),
-            xytext=(x + 0.01, y + 0.01),
-            textcoords="data",
-            fontsize=7,
-            ha="left",
-            va="bottom",
-            bbox=dict(
-                boxstyle="round,pad=0.2", facecolor="white", edgecolor="black", lw=0.2
-            ),
-            arrowprops=dict(arrowstyle="->", color="black", lw=0.2),
-        )
 
     # --- Face Normals Visualization ---
-    face_normals = mesh.face_normals
-    face_normal_magnitude = np.linalg.norm(face_normals, axis=1)
-    unit_dPN_mags = np.linalg.norm(mesh.unit_dPN, axis=1)
-    scale_factor = 0.05
-    # Plot area-weighted face normals (S_f)
-    ax.quiver(
-        mesh.face_centers[:, 0],
-        mesh.face_centers[:, 1],
-        face_normals[:, 0] * scale_factor,
-        face_normals[:, 1] * scale_factor,
-        angles="xy",
-        scale_units="xy",
-        scale=1,
-        color=colors[0],
-        width=0.001,
-        alpha=0.8,
-        label="Face Normals (S_f)",
-    )
+    internal_mask = mesh.neighbor_cells >= 0
+    boundary_mask = ~internal_mask
 
-    # Plot unit normals (unit_dPN) -- not scaled by magnitude, just unit vectors
-    ax.quiver(
-        mesh.face_centers[:, 0],
-        mesh.face_centers[:, 1],
-        mesh.unit_dPN[:, 0] * scale_factor * 0.5,
-        mesh.unit_dPN[:, 1] * scale_factor * 0.5,
-        angles="xy",
-        scale_units="xy",
-        scale=1,
-        color=colors[1],
-        width=0.001,
-        alpha=0.8,
-        label="Unit Normal ($\\hat{n}_f$)",
-    )
+    # scale_factor = 0.05 * np.mean(mesh.face_areas**0.5) # Dynamic scaling
+    # if scale_factor == 0 or np.isnan(scale_factor):
+    #     scale_factor = 0.05 # Fallback
+    # unit_vec_scale = scale_factor # For unit vectors
 
-    # Removed separate annotation of face normal magnitudes to avoid duplication
+    # --- Plotting for INTERNAL FACES --- 
+    if np.any(internal_mask):
+        fc_internal = mesh.face_centers[internal_mask]
+        cc_owner_internal = mesh.cell_centers[mesh.owner_cells[internal_mask]]
 
-    # d_PN and non-ortho vectors (no scaling)
-    internal = mesh.neighbor_cells >= 0
-    t_f = mesh.non_ortho_correction[internal]
+        # Normalize unit_vector_e for visualization
+        #unit_vector_e_viz = mesh.unit_vector_e[internal_mask] / (np.linalg.norm(mesh.unit_vector_e[internal_mask], axis=1, keepdims=True) + 1e-12)
+        # Normalize unit_vector_n for visualization (if not already normalized)
+        #unit_vector_n_viz = mesh.unit_vector_n[internal_mask] / (np.linalg.norm(mesh.unit_vector_n[internal_mask], axis=1, keepdims=True) + 1e-12)
 
-    ax.quiver(
-        mesh.face_centers[internal, 0],
-        mesh.face_centers[internal, 1],
-        t_f[:, 0],
-        t_f[:, 1],
-        angles="xy",
-        scale_units="xy",
-        scale=1,
-        color=colors[3],
-        width=0.0015,
-        alpha=0.8,
-        label="Non-Ortho Correction ($\\vec{k}_f$)",
-    )
+        # 1. vector_S_f (Internal, scaled, at face centers)
+        ax.quiver(fc_internal[:, 0], fc_internal[:, 1],
+                  mesh.vector_S_f[internal_mask, 0] * vector_scale,
+                  mesh.vector_S_f[internal_mask, 1] * vector_scale,
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
 
-    # Optional skewness overlay (no scaling)
-    skew = mesh.skewness_vectors[internal]
-    ax.quiver(
-        mesh.face_centers[internal, 0],
-        mesh.face_centers[internal, 1],
-        -skew[:, 0],
-        -skew[:, 1],
-        angles="xy",
-        scale_units="xy",
-        scale=1,
-        color=colors[4],
-        width=0.0012,
-        alpha=0.8,
-        label="Skew Vector ($\\vec{d}_f$)",
-    )
+        # 2. vector_d_CE (Internal, from Owner Cell Center)
+        ax.quiver(cc_owner_internal[:, 0], cc_owner_internal[:, 1],
+                  mesh.vector_d_CE[internal_mask, 0],
+                  mesh.vector_d_CE[internal_mask, 1],
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.2)
+        # Annotate vector_d_CE at every internal face (perpendicular offset from centerline)
+        for i in range(cc_owner_internal.shape[0]):
+            v = mesh.vector_d_CE[internal_mask][i]
+            mid = cc_owner_internal[i] + 0.25 * v
+            label_pos = mid + mesh.vector_T_f[internal_mask][i] / np.linalg.norm(mesh.vector_T_f[internal_mask][i]) * 0.1
+            ax.annotate(r"$\vec{d}_{CE}$", xy=cc_owner_internal[i], xytext=(label_pos[0], label_pos[1]),
+                        fontsize=6, color=colors[0])
 
-    # Plot combined correction vectors: t_f + d_f (no scaling)
-    correction_sum = t_f + skew
-    ax.quiver(
-        mesh.face_centers[internal, 0],
-        mesh.face_centers[internal, 1],
-        correction_sum[:, 0],
-        correction_sum[:, 1],
-        angles="xy",
-        scale_units="xy",
-        scale=1,
-        color=colors[5],
-        width=0.001,
-        alpha=0.8,
-        label="Correction Sum ($\\vec{k}_f + \\vec{d}_f$)",
-    )
+        # 3. unit_vector_n (Internal, normalized, at face centers, no scaling)
+        ax.quiver(fc_internal[:, 0], fc_internal[:, 1],
+                  mesh.unit_vector_n[internal_mask, 0] * vector_scale*2,
+                  mesh.unit_vector_n[internal_mask, 1] * vector_scale*2,
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+        # Annotate unit_vector_n at every internal face (perpendicular offset from centerline)
+        for i in range(fc_internal.shape[0]):
+            v = mesh.unit_vector_n[internal_mask][i] * vector_scale*2
+            mid = fc_internal[i] + 0.3 * v
+            label_pos = mid + mesh.vector_T_f[internal_mask][i] / np.linalg.norm(mesh.vector_T_f[internal_mask][i]) * 0.1
+            ax.annotate(r"$\vec{n}$", xy=fc_internal[i], xytext=(label_pos[0], label_pos[1]),
+                        fontsize=6, color=colors[0])
 
-    # Add per-face labels: face ID, owner, neighbor, area, boundary type/internal using annotation with arrow and yellow box (LaTeX-style)
-    for i, (fc, owner, neighbor, area, mag, e_mag) in enumerate(
-        zip(
-            mesh.face_centers,
-            mesh.owner_cells,
-            mesh.neighbor_cells,
-            mesh.face_areas,
-            face_normal_magnitude,
-            unit_dPN_mags,
-        )
-    ):
-        if i in mesh.boundary_faces:
-            patch = mesh.boundary_patches[i]
-            # Try to get boundary type name if available (optional)
-            # patch mapping: top=3, bottom=1, left=4, right=2, etc.
-            patch_name = {3: "Top", 1: "Bottom", 4: "Left", 2: "Right"}.get(
-                patch, "unknown"
-            )
-            btype_str = f"$\\text{{Boundary:}}\\ {patch_name}$"
-        else:
-            btype_str = "$\\text{Internal}$"
-        ax.annotate(
-            f"$\\text{{Face}}\\ {i}$\n"
-            f"$\\text{{O:}}\\ {owner}\\ \\text{{N:}}\\ {neighbor}$\n"
-            f"$\\text{{Area}} = {area:.3g}$\n"
-            f"$|\\vec{{S}}_f| = {mag:.3f}$\n"
-            f"$|\\hat{{n}}_f| = {e_mag:.3f}$\n"
-            f"{btype_str}",
-            xy=(fc[0], fc[1]),
-            xytext=(fc[0] + 0.01, fc[1] + 0.01),
-            textcoords="data",
-            fontsize=7,
-            ha="left",
-            va="bottom",
-            bbox=dict(
-                boxstyle="round,pad=0.15", facecolor="white", edgecolor="black", lw=0.2
-            ),
-            arrowprops=dict(arrowstyle="->", color="black", lw=0.2),
-        )
-    ax.legend(
-        fontsize="small",
-        frameon=True,
-        edgecolor="black",
-        facecolor="white",
-        framealpha=0.9,
-        loc="upper right",
-    )
+        # 4. unit_vector_e (Internal, normalized, at owner cell center, no scaling)
+        ax.quiver(cc_owner_internal[:, 0], cc_owner_internal[:, 1],
+                  mesh.unit_vector_e[internal_mask, 0] * vector_scale*2,
+                  mesh.unit_vector_e[internal_mask, 1] * vector_scale*2,
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+        # Annotate unit_vector_e at every internal face (perpendicular offset from centerline)
+        for i in range(cc_owner_internal.shape[0]):
+            v = mesh.unit_vector_e[internal_mask][i] * vector_scale*2
+            mid = cc_owner_internal[i] + 0.35 * v
+            e_orth = np.array([-v[1], v[0]])
+            label_pos = mid + e_orth * 0.2
+            ax.annotate(r"$\vec{e}$", xy=cc_owner_internal[i], xytext=(label_pos[0], label_pos[1]),
+                        fontsize=6, color=colors[0])
+
+        # 5. vector_E_f (Internal, scaled, at face centers)
+        ax.quiver(fc_internal[:, 0], fc_internal[:, 1],
+                  mesh.vector_E_f[internal_mask, 0] * vector_scale,
+                  mesh.vector_E_f[internal_mask, 1] * vector_scale,
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+
+        # 6. vector_T_f (Internal, scaled, at tf_origin = fc_internal + vector_E_f * vector_scale)
+        tf_origin = fc_internal + mesh.vector_E_f[internal_mask] * vector_scale
+        ax.quiver(tf_origin[:, 0], tf_origin[:, 1],
+                  mesh.vector_T_f[internal_mask, 0] * vector_scale,
+                  mesh.vector_T_f[internal_mask, 1] * vector_scale,
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+
+        # --- Annotate S_f, E_f, T_f using midpoint-to-midpoint triangle center logic ---
+        for i in range(fc_internal.shape[0]):
+            S_vec = mesh.vector_S_f[internal_mask][i] * vector_scale
+            E_vec = mesh.vector_E_f[internal_mask][i] * vector_scale
+            T_vec = mesh.vector_T_f[internal_mask][i] * vector_scale
+
+            O_S = fc_internal[i]
+            O_E = fc_internal[i]
+            O_T = tf_origin[i]
+
+            mid_S = O_S + 0.5 * S_vec
+            mid_E = O_E + 0.5 * E_vec
+            mid_T = O_T + 0.5 * T_vec
+
+            # Triangle center = midpoint of face center to midpoint of T_f
+            triangle_center = O_S + 0.5 * (mid_T - O_S)
+
+            # Annotate S_f
+            label_pos_S = mid_S + T_vec / np.linalg.norm(T_vec) * 0.2
+            ax.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
+                        fontsize=5, color=colors[0])
+
+            # Annotate E_f
+            label_pos_E = mid_E - T_vec / np.linalg.norm(T_vec) * 0.2
+            ax.annotate(r"$\vec{E}_f$", xy=O_E, xytext=label_pos_E,
+                        fontsize=5, color=colors[0])
+
+            # Annotate T_f
+            dir_T = mid_T - triangle_center
+            label_pos_T = triangle_center + 1.2 * dir_T
+            ax.annotate(r"$\vec{T}_f$", xy=O_T, xytext=label_pos_T,
+                        fontsize=5, color=colors[0])
+
+        # 7. vector_skewness (Internal, scaled, at face centers)
+        ax.quiver(fc_internal[:, 0]- mesh.vector_skewness[internal_mask, 0] , fc_internal[:, 1]- mesh.vector_skewness[internal_mask, 1] ,
+                  mesh.vector_skewness[internal_mask, 0],
+                  mesh.vector_skewness[internal_mask, 1],
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+        # Annotate vector_skewness at every internal face (perpendicular offset from centerline)
+        for i in range(fc_internal.shape[0]):
+            v = mesh.vector_skewness[internal_mask][i]
+            mid = fc_internal[i]- mesh.vector_skewness[internal_mask][i] + 0.5 * v
+            label_pos = mid - mesh.unit_vector_n[internal_mask][i] * vector_scale * 0.75
+            ax.annotate(r"$\vec{d}_{f'f}$", xy=fc_internal[i], xytext=(label_pos[0], label_pos[1]),
+                        fontsize=4, color=colors[0])
+
+    # --- Plotting for BOUNDARY FACES --- 
+    if np.any(boundary_mask):
+        fc_boundary = mesh.face_centers[boundary_mask]
+        cc_owner_boundary = mesh.cell_centers[mesh.owner_cells[boundary_mask]]
+
+        # 1. vector_S_f (Boundary, scaled, at face centers)
+        ax.quiver(fc_boundary[:, 0], fc_boundary[:, 1],
+                  mesh.vector_S_f[boundary_mask, 0] * vector_scale*0.4,
+                  mesh.vector_S_f[boundary_mask, 1] * vector_scale*0.4,
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+        # Annotate boundary vector_S_f near tip
+        for i in range(fc_boundary.shape[0]):
+            Sf_orth = np.array([-mesh.vector_S_f[boundary_mask][i][1], mesh.vector_S_f[boundary_mask][i][0]])
+            Sf_mid = fc_boundary[i] + mesh.vector_S_f[boundary_mask][i] * vector_scale*0.2
+            Sf_tip = Sf_mid + Sf_orth*vector_scale*0.2
+            ax.annotate(r"$\vec{S}_f$", xy=fc_boundary[i],
+                        xytext=(Sf_tip[0] + 0.01, Sf_tip[1] + 0.01),
+                        fontsize=5, color=colors[0])
+
+        # 2. Vector from Owner Cell Center to Boundary Face Center (P->f), scaled
+        vec_Pf_boundary = fc_boundary - cc_owner_boundary
+        ax.quiver(cc_owner_boundary[:, 0], cc_owner_boundary[:, 1],
+                  vec_Pf_boundary[:, 0],
+                  vec_Pf_boundary[:, 1],
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.2)
+        # Annotate boundary d_Pf near tip
+        for i in range(cc_owner_boundary.shape[0]):
+            Pf_orth = np.array([-vec_Pf_boundary[i][1], vec_Pf_boundary[i][0]])
+            Pf_mid = cc_owner_boundary[i] + vec_Pf_boundary[i] * 0.5
+            Pf_tip = Pf_mid + Pf_orth * 0.1
+            ax.annotate(r"$\vec{d}_{Pf}$", xy=cc_owner_boundary[i],
+                    xytext=(Pf_tip[0] + 0.01, Pf_tip[1] + 0.01),
+                    fontsize=5, color=colors[0])
+
+  
+    # Remove legend, use inline annotations instead
     plt.tight_layout()
+
     plt.savefig(path, dpi=300)
     plt.close()
-
     assert os.path.exists(path), f"Failed to create {path}"
 
 
@@ -328,7 +344,7 @@ def test_mesh_data_completeness(mesh_instance):
     # --- Shape checks ---
     assert mesh.cell_centers.shape == (n_cells, 2), "cell_centers shape mismatch"
     assert mesh.face_centers.shape == (n_faces, 2), "face_centers shape mismatch"
-    assert mesh.face_normals.shape == (n_faces, 2), "face_normals shape mismatch"
+    assert mesh.vector_S_f.shape == (n_faces, 2), "vector_S_f shape mismatch"
     assert mesh.face_vertices.shape[0] == n_faces, "face_vertices count mismatch"
     assert mesh.owner_cells.shape[0] == n_faces, "owner_cells count mismatch"
     assert mesh.neighbor_cells.shape[0] == n_faces, "neighbor_cells count mismatch"
@@ -336,24 +352,11 @@ def test_mesh_data_completeness(mesh_instance):
     assert mesh.boundary_values.shape == (n_faces, 3), "boundary_values shape mismatch"
 
     # --- Finite‑value checks ---
-    import numpy as np
-
     numeric_fields = [
-        "cell_volumes",
-        "cell_centers",
-        "face_areas",
-        "face_normals",
-        "face_centers",
-        "vertices",
-        "d_PN",
-        "unit_dPN",
-        "delta_PN",
-        "delta_Pf",
-        "delta_fN",
-        "non_ortho_correction",
-        "face_interp_factors",
-        "d_PB",
-        "rc_interp_weights",
+        "cell_volumes", "cell_centers", "face_areas", "vector_S_f", "face_centers", 
+        "vertices", "vector_d_CE", "unit_vector_n", "unit_vector_e", 
+        "vector_E_f", "vector_T_f", "vector_skewness",
+        "face_interp_factors", "d_Cb", "rc_interp_weights"
     ]
     for field in numeric_fields:
         arr = getattr(mesh, field)
@@ -402,8 +405,8 @@ def test_mesh_data_completeness(mesh_instance):
     # --- Full-face indexing checks for boundary fields ---
     # boundary_types: -1 for internal, >=0 for boundary (already checked above)
     # boundary_values: e.g. zero vector for internal faces
-    # d_PB: 0 for internal faces
-    # These checks assume that boundary_values is at least 1D (n_faces, ...) and d_PB is (n_faces,) or (n_faces, ...)
+    # d_Cb: 0 for internal faces (or for faces not in boundary_faces)
+    # These checks assume that boundary_values is at least 1D (n_faces, ...) and d_Cb is (n_faces,) or (n_faces, ...)
     # For boundary_values, zero vector for internal faces
     if mesh.boundary_values.ndim == 2:
         zero_vec = np.zeros(mesh.boundary_values.shape[1])
@@ -416,7 +419,75 @@ def test_mesh_data_completeness(mesh_instance):
         assert np.allclose(
             mesh.boundary_values[mesh.internal_faces], 0.0, atol=1e-12
         ), "boundary_values for internal faces should be zero"
-    # d_PB: 0 for internal faces
-    assert np.allclose(mesh.d_PB[mesh.internal_faces], 0.0, atol=1e-12), (
-        "d_PB should be 0 for internal faces"
-    )
+    # d_Cb: 0 for internal faces (or for faces not in boundary_faces)
+    non_boundary_mask = np.ones(n_faces, dtype=bool)
+    if len(mesh.boundary_faces) > 0:
+      non_boundary_mask[mesh.boundary_faces] = False
+    assert np.allclose(mesh.d_Cb[non_boundary_mask], 0.0, atol=1e-12), \
+        "d_Cb should be 0 for internal faces"
+
+
+def test_internal_face_vector_sanity(mesh_instance):
+    """
+    Performs detailed sanity checks on geometric vectors for internal faces.
+    """
+    mesh = mesh_instance
+    if mesh.internal_faces.shape[0] == 0:
+        pytest.skip("No internal faces in this mesh to test vector sanity.")
+
+    internal_mask = np.zeros(mesh.face_areas.shape[0], dtype=bool)
+    internal_mask[mesh.internal_faces] = True
+
+    # 1. vector_d_CE (Owner-to-Neighbor Vector)
+    vec_d_CE_internal = mesh.vector_d_CE[internal_mask]
+    mag_d_CE_internal = np.linalg.norm(vec_d_CE_internal, axis=1)
+    assert np.all(mag_d_CE_internal > 1e-12), \
+        "Internal faces: vector_d_CE magnitude should be positive."
+    
+    # Re-verify d_CE direction and magnitude (subset of test_vector_d_CE_magnitude_matches_geometry)
+    P_coords = mesh.cell_centers[mesh.owner_cells[internal_mask]]
+    N_coords = mesh.cell_centers[mesh.neighbor_cells[internal_mask]]
+    expected_d_CE_vec = N_coords - P_coords
+    assert np.allclose(vec_d_CE_internal, expected_d_CE_vec, atol=1e-9), \
+        "Internal faces: vector_d_CE does not match owner-to-neighbor cell center vector."
+
+    # 2. unit_vector_e (Unit Vector along d_CE)
+    unit_e_internal = mesh.unit_vector_e[internal_mask]
+    mag_unit_e_internal = np.linalg.norm(unit_e_internal, axis=1)
+    assert np.allclose(mag_unit_e_internal, 1.0, atol=1e-9), \
+        "Internal faces: unit_vector_e magnitude is not 1.0."
+    # Check alignment with d_CE (normalized dot product should be ~1)
+    # (d_CE / |d_CE|) . unit_e  (where unit_e is already supposed to be d_CE / |d_CE|)
+    normalized_d_CE = vec_d_CE_internal / (mag_d_CE_internal[:, np.newaxis] + 1e-12)
+    dot_prod_e_dCE = np.einsum("ij,ij->i", unit_e_internal, normalized_d_CE)
+    assert np.allclose(dot_prod_e_dCE, 1.0, atol=1e-9), \
+        "Internal faces: unit_vector_e is not aligned with vector_d_CE."
+
+    # 3. Over-Relaxed Decomposition (vector_E_f, vector_T_f)
+    vec_S_f_internal = mesh.vector_S_f[internal_mask]
+    vec_E_f_internal = mesh.vector_E_f[internal_mask]
+    vec_T_f_internal = mesh.vector_T_f[internal_mask]
+
+   
+
+    # T_f should be orthogonal to S_f
+    dot_Tf_Sf = np.einsum("ij,ij->i", vec_T_f_internal, vec_S_f_internal)
+    assert np.allclose(dot_Tf_Sf, 0.0, atol=1e-9), \
+        "Internal faces: vector_T_f is not orthogonal to vector_S_f."
+    
+    # S_f = E_f + T_f (already in test_over_relaxed_decomposition, but good for completeness here too)
+    assert np.allclose(vec_S_f_internal, vec_E_f_internal + vec_T_f_internal, atol=1e-9), \
+        "Internal faces: S_f != E_f + T_f."
+
+    # 4. vector_skewness
+    vec_skew_internal = mesh.vector_skewness[internal_mask]
+    unit_n_internal = mesh.unit_vector_n[internal_mask]
+    # Skewness vector should be orthogonal to face normal unit_vector_n
+    dot_skew_n = np.einsum("ij,ij->i", vec_skew_internal, unit_n_internal)
+    assert np.allclose(dot_skew_n, 0.0, atol=1e-9), \
+        "Internal faces: vector_skewness is not orthogonal to unit_vector_n."
+
+    # 5. face_interp_factors (alpha_f)
+    interp_factors_internal = mesh.face_interp_factors[internal_mask]
+    assert np.all((interp_factors_internal >= 0.0) & (interp_factors_internal <= 1.0)), \
+        "Internal faces: face_interp_factors are out of range [0, 1]."
