@@ -18,8 +18,11 @@ BC_CONVECTIVE   = 4
 EPS = 1.0e-14
 
 @njit
-def assemble_diffusion_convection_matrix(mesh, grad_phi,
-    rho, mu, u_field, component_idx=0):
+def assemble_diffusion_convection_matrix(mesh, phi, grad_phi, u_field, u_grad,
+    rho, mu, component_idx):
+
+
+
     n_cells = mesh.cell_volumes.shape[0]
     row, col, data = [], [], []
     b = np.zeros(n_cells)
@@ -31,7 +34,7 @@ def assemble_diffusion_convection_matrix(mesh, grad_phi,
     for i in range(n_internal):
         f = mesh.internal_faces[i]
         # -------- orthogonal (over‑relaxed) Laplacian ----------------------
-        P, N, D_f = compute_diffusive_flux_matrix_entry(f, mesh, mu)
+        P, N, D_f = compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu)
         row.extend([P, P, N, N])
         col.extend([P, N, N, P])
         data.extend([ D_f, -D_f, D_f, -D_f ])
@@ -40,8 +43,8 @@ def assemble_diffusion_convection_matrix(mesh, grad_phi,
         # -------- cross‑diffusion (non‑orth) ------------------------------
         # explicit part (distributed symmetrically between P and N)
         _, _, bcorr = compute_diffusive_correction(f, grad_phi, mesh, mu)
-        b[P] -=  bcorr
-        b[N] +=  bcorr
+        b[P] -=   bcorr
+        b[N] +=   bcorr
 
 
         # ---------------- convection term (unchanged) ----------------------
@@ -67,11 +70,11 @@ def assemble_diffusion_convection_matrix(mesh, grad_phi,
         bc_type = mesh.boundary_types[f, 0]
         bc_val = mesh.boundary_values[f, component_idx]
 
-        P, a_P, b_P = compute_boundary_diffusive_correction(
+        P, a_P, b_P= compute_boundary_diffusive_correction(
         f, grad_phi, mesh, mu, bc_type, bc_val)
 
         if a_P: row.append(P); col.append(P); data.append(a_P)
-        b[P] -= b_P
+        if b_P: b[P] -= b_P
 
         # boundary convection (e.g. outlet Neumann)
         if rho != 0.0:

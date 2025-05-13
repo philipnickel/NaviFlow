@@ -22,8 +22,8 @@ def compute_convective_stencil_upwind(f, mesh, rho, u_field, grad_phi, component
     F = rho * np.dot(u_face, Sf)
     """
     # Interpolate scalar component with skewness correction
-    phi_P = u_field[P, component_idx]
-    phi_N = u_field[N, component_idx]
+    phi_P = u_field[P, bc_component_idx]
+    phi_N = u_field[N, bc_component_idx]
     grad_P = grad_phi[P]
     grad_N = grad_phi[N]
     grad_f = (1 - g_f) * grad_P + g_f * grad_N

@@ -11,7 +11,7 @@ BC_CONVECTIVE   = 4
 # Internal faces
 # ──────────────────────────────────────────────────────────────────────────────
 @njit(inline="always")
-def compute_diffusive_flux_matrix_entry(f, mesh, mu):
+def compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu):
     """
     Over‑relaxed implicit conductance for one internal face.
 
@@ -33,13 +33,8 @@ def compute_diffusive_flux_matrix_entry(f, mesh, mu):
     D_f : float
         Positive conductance that multiplies (φ_N − φ_P) in the matrix
         stencil.  
-
-    Notes
-    -----
-    The sign convention is handled by the assembler: it adds +D_f to the
-    diagonal of each cell and −D_f to the off‑diagonal, yielding a
-    symmetric negative‑definite Laplacian block.
     """
+
     P   = mesh.owner_cells[f]
     N   = mesh.neighbor_cells[f]
     mu_f = mu 
@@ -53,6 +48,7 @@ def compute_diffusive_flux_matrix_entry(f, mesh, mu):
     # ---- over‑relaxed orthogonal conductance (Eq 8.58) --------------------
     # |E_f|  = projection length of S_f on d_CE after over‑relaxed scaling
     D_f = mu_f * E_mag / d_mag
+
     return P, N, D_f
 
 
@@ -63,34 +59,15 @@ def compute_diffusive_correction(f, grad_phi, mesh, mu):
     muF = mu 
     T_f = mesh.vector_T_f[f]
 
-    # True interpolation factor using intersection point f' (Eq 8.89)
-    x_f      = mesh.face_centers[f]
-    d_skew   = mesh.vector_skewness[f]            # f – f′
-    x_fprime = x_f - d_skew                        # intersection of PN with face
-    x_P      = mesh.cell_centers[P]
-    x_N      = mesh.cell_centers[N]
-
-    d_PN     = x_N - x_P
-    d_PN_mag = np.linalg.norm(d_PN) + EPS
-    e_hat    = d_PN / d_PN_mag                     # unit vector along C→N
-
-    # distance from P to intersection point f′ along PN
-    delta_Pf = np.dot(np.ascontiguousarray(x_fprime - x_P), np.ascontiguousarray(e_hat))
-    g_f      = delta_Pf / d_PN_mag                 # true interpolation factor [0,1]
-
-    # Interpolate gradient using corrected weights
-    grad_fmark = (1.0 - g_f) * grad_phi[P] + g_f * grad_phi[N]
-
-    # Apply skewness correction (now uses actual face position)
-    d_skew = mesh.vector_skewness[f]
-    e_hat = mesh.unit_vector_e[f]
-    
-    # Project gradient onto skewness direction
-    scalar = np.dot(np.ascontiguousarray(d_skew), np.ascontiguousarray(grad_fmark))
-    grad_f = grad_fmark + scalar * e_hat
-
     # Compute cross-diffusion term
-    b_corr = -muF * np.dot(np.ascontiguousarray(grad_f), np.ascontiguousarray(T_f))
+    grad_P = grad_phi[P]
+    grad_N = grad_phi[N]
+    g_f = mesh.face_interp_factors[f]
+    grad_f = (1 - g_f) * grad_P + g_f * grad_N
+    d_skew = mesh.vector_skewness[f]
+
+    grad_f_mark = grad_f + np.dot(grad_f, d_skew)
+    b_corr = -muF * np.dot(grad_f_mark, T_f)
     return P, N, b_corr
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -119,6 +96,7 @@ def compute_boundary_diffusive_correction(
     T_f = mesh.vector_T_f[f]
     d_PB = mesh.d_Cb[f]
 
+    
     if bc_type == BC_DIRICHLET:
         E_mag = np.linalg.norm(E_f) + EPS
         a_P = muF * E_mag / (d_PB + EPS)
@@ -126,12 +104,15 @@ def compute_boundary_diffusive_correction(
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
-        fluxVb = -muF * np.dot(np.ascontiguousarray(grad_P), np.ascontiguousarray(T_f))
-        b_P += fluxVb
-    
+        d_skew = mesh.vector_skewness[f]
+        grad_P_mark = grad_P + np.dot(grad_P, d_skew)
+        fluxVb = -muF * np.dot(grad_P_mark, T_f)
+        b_P += fluxVb 
+        
     elif bc_type == BC_NEUMANN:
-        S_mag = np.linalg.norm(mesh.vector_S_f[f]) + EPS
-        b_P = muF * bc_val * S_mag
+        pass
+        # TODO: Neumann boundary condition
+       
     
     elif bc_type == BC_ZEROGRADIENT:
         # Zero gradient (Neumann with zero flux): no contribution to matrix or RHS
@@ -144,4 +125,3 @@ def compute_boundary_diffusive_correction(
         b_P = 0.0
 
     return P, a_P, b_P
-

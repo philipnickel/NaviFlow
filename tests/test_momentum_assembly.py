@@ -21,37 +21,40 @@ def plot_field(mesh, field, ax=None, title=None):
         ax.set_title(title)
     ax.set_aspect("equal")
 
-def run_mms_test(mesh_file, bc_file, u_exact_fn, grad_exact_fn, rhs_fn, mu, rho, u_field_fn, tag_prefix, component_idx=0):
+def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0):
     mesh = load_mesh(mesh_file, bc_file)
 
     phi_exact = u_exact_fn(mesh.cell_centers)
+    u_field = np.zeros((mesh.cell_centers.shape[0], 2)) # both components 
+    phi_field = np.zeros((mesh.cell_centers.shape[0])) # scalar field
+    scalar_u_field = u_field[:, component_idx]
+    grad_component = compute_cell_gradients(mesh,scalar_u_field)
     grad_phi = compute_cell_gradients(mesh, phi_exact)
-    phi = phi_exact if phi_exact.ndim == 1 else phi_exact[:, component_idx]
-    grad = grad_phi if grad_phi.ndim == 2 else grad_phi[:, :, component_idx]
 
-    u_field = u_field_fn(mesh)
 
     row, col, data, b_correction = assemble_diffusion_convection_matrix(
-        mesh, phi, grad, rho, mu, u_field
+        mesh, phi_field, grad_phi, u_field, grad_component,
+        rho, mu, component_idx
     )
 
     A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
     print(f"MMS rhs = {np.sum(rhs_fn(mesh.cell_centers) * mesh.cell_volumes)}")
-    rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes #+ b_correction
+    rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
+    
     print(f" sum(b_correction) = {np.sum(b_correction)}")
 
     phi_numeric = spsolve(A, rhs)
 
-    err = np.abs(phi_numeric - phi)
+    err = np.abs(phi_numeric - phi_exact)
     max_err, l2_err = np.max(err), np.sqrt(np.mean(err ** 2))
     print(f"[{tag_prefix}] Max error: {max_err:.2e}, L2 error: {l2_err:.2e}")
 
     fig, axs = plt.subplots(1, 3, figsize=(15, 4))
     plot_field(mesh, phi_numeric, ax=axs[0], title="Numerical")
-    plot_field(mesh, phi, ax=axs[1], title="Exact")
+    plot_field(mesh, phi_exact, ax=axs[1], title="Exact")
     plot_field(mesh, err, ax=axs[2], title="Error")
     plt.tight_layout()
-    outdir = Path("tests/test_output")
+    outdir = Path("tests/test_output/MMS_solutions")
     outdir.mkdir(parents=True, exist_ok=True)
     plt.savefig(outdir / f"mms_{tag_prefix}.png", dpi=300)
     plt.close()
@@ -60,7 +63,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, grad_exact_fn, rhs_fn, mu, rho,
 # The following test follows the Method of Manufactured Solutions (MMS) approach
 # to verify spatial convergence of the numerical scheme by comparing numerical
 # and exact solutions on a sequence of refined meshes.
-def run_convergence_study(mesh_files, bc_file, u_exact_fn, grad_exact_fn, rhs_fn, mu, rho, u_field_fn, tag_prefix, component_idx=0):
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0):
     hs = []
     errors = []
 
@@ -69,24 +72,27 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, grad_exact_fn, rhs_fn
         h = np.sqrt(np.mean(mesh.cell_volumes))
         hs.append(h)
 
+
         phi_exact = u_exact_fn(mesh.cell_centers)
+        u_field = np.zeros((mesh.cell_centers.shape[0], 2)) # both components 
+        phi_field = np.zeros((mesh.cell_centers.shape[0])) # scalar field
+        scalar_u_field = u_field[:, component_idx]
+        grad_component = compute_cell_gradients(mesh,scalar_u_field)
         grad_phi = compute_cell_gradients(mesh, phi_exact)
 
-        phi = phi_exact if phi_exact.ndim == 1 else phi_exact[:, component_idx]
-        grad = grad_phi if grad_phi.ndim == 2 else grad_phi[:, :, component_idx]
-
-        u_field = u_field_fn(mesh)
 
         row, col, data, b_correction = assemble_diffusion_convection_matrix(
-            mesh, phi, grad, rho, mu, u_field
+            mesh, phi_field, grad_phi, u_field, grad_component,
+            rho, mu, component_idx
         )
 
+
         A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
-        rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes #+ b_correction
+        rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
 
         phi_numeric = spsolve(A, rhs)
 
-        err = np.abs(phi_numeric - phi)
+        err = np.abs(phi_numeric - phi_exact)
         l2_err = np.sqrt(np.mean(err**2))
         errors.append(l2_err)
 
@@ -110,8 +116,8 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, grad_exact_fn, rhs_fn
     plt.ylabel("L2 Error")
     plt.title("Grid Convergence Study")
     plt.legend()
-    Path("tests/test_output").mkdir(parents=True, exist_ok=True)
-    plt.savefig(f"tests/test_output/convergence_plot_{tag_prefix}.png", dpi=300)
+    Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
+    plt.savefig(f"tests/test_output/MMS_convergence/convergence_plot_{tag_prefix}.png", dpi=300)
     plt.close()
 
 
@@ -131,7 +137,7 @@ def generate_mms_functions(expr_str, velocity=("1.0", "0.0"), mu=1.0, rho=1.0):
 
     conv_term = rho * (u_x_expr * grad[0] + u_y_expr * grad[1])
     diff_term = mu * laplacian
-    total_rhs = conv_term #- diff_term
+    total_rhs = conv_term - diff_term
 
     u_func = lambdify((x, y), expr, modules="numpy")
     grad_func = lambdify((x, y), grad, modules="numpy")
@@ -179,52 +185,44 @@ if __name__ == "__main__":
     # === Additional MMS Cases ===
     mms_cases = {
         "sinusoidal": "sin(pi*x)*sin(pi*y)",
-        #"quadratic": "x**2 + y**2 + x*y",
-        #"anisotropic": "sin(2*pi*x) + 0.5*cos(3*pi*y)"
+        "quadratic": "x**2 + y**2 + x*y",
+        "anisotropic": "sin(2*pi*x) + 0.5*cos(3*pi*y)"
     }
     BC_files = {
-        "sinusoidal": "shared_configs/domain/sanityCheckCombined.yaml",
-        #"quadratic": "shared_configs/domain/sanityCheckDiffusionQUADD.yaml",
-        #"anisotropic": "shared_configs/domain/sanityCheckDiffusionANS.yaml"
+        "sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckDiffusionSIN.yaml",
+        "quadratic": "shared_configs/domain/sanityChecks/sanityCheckDiffusionQUADD.yaml",
+        "anisotropic": "shared_configs/domain/sanityChecks/sanityCheckDiffusionANS.yaml"
     }
-    # time it
-    start_time = time.time()
-    for tag, expr in mms_cases.items():
-        u_fn, grad_fn, rhs_fn = generate_mms_functions(expr, velocity=("-cos(pi*x)*sin(pi*y)", "sin(pi*x)*cos(pi*y)"), mu=0.0, rho=1.0)
-        bc_file = BC_files[tag]
-        run_convergence_study(
-            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
-            bc_file,
-        u_fn, grad_fn, rhs_fn,
-            mu=0.0, rho=1.0, u_field_fn=u_mms,
-            tag_prefix=f"{tag}_structured"
-        )
-        run_convergence_study(
-                [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
-                bc_file,
-                u_fn, grad_fn, rhs_fn,
-                mu=1.0, rho=1.0, u_field_fn=u_mms,
-                tag_prefix=f"{tag}_unstructured"
-            )
-    # print("\nRunning combined convection-diffusion MMS tests...\n")
 
-    print("\nRunning combined convection-diffusion MMS test (single fine mesh)...\n")
     for tag, expr in mms_cases.items():
-        u_fn, grad_fn, rhs_fn = generate_mms_functions(expr, velocity=("-cos(pi*x)*sin(pi*y)", "sin(pi*x)*cos(pi*y)"), mu=0.0, rho=1.0)
+        u_fn, grad_fn, rhs_fn = generate_mms_functions(expr, velocity=("0.0", "0.0"), mu=1.0, rho=0.0)
         bc_file = BC_files[tag]
         run_mms_test(
             structured_uniform["fine"],
             bc_file,
-            u_fn, grad_fn, rhs_fn,
-            mu=0.0, rho=1, u_field_fn=u_mms,
-            tag_prefix=f"{tag}_structured_fine_combined"
+            u_fn, rhs_fn, 1.0, 0.0,
+            tag_prefix=f"{tag}_structured",
+            
         )
         run_mms_test(
             unstructured["fine"],
             bc_file,
-            u_fn, grad_fn, rhs_fn,
-            mu=0.0, rho=1, u_field_fn=u_mms,
-            tag_prefix=f"{tag}_unstructured_fine_combined"
+            u_fn, rhs_fn, 1.0, 0.0,
+            tag_prefix=f"{tag}_unstructured",
+            
         )
-    end_time = time.time()
-    print(f"Total time taken: {end_time - start_time:.2f} seconds")
+
+        # Uncomment to run convergence studies
+        run_convergence_study(
+            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+            bc_file,
+            u_fn, rhs_fn, 1.0, 0.0,
+            tag_prefix=f"{tag}_structured"
+        )
+        run_convergence_study(
+            [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+            bc_file,
+            u_fn, rhs_fn, 1.0, 0.0,
+            tag_prefix=f"{tag}_unstructured"
+        )
+ 

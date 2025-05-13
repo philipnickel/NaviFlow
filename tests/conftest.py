@@ -76,8 +76,8 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize(
             "mesh_label",
             [
-                #"structured_uniform",
-                #"unstructured_refined",
+                "structured_uniform",
+                "unstructured_refined",
                 "sanity_check_uniform",
                 "sanity_check_unstructured",
             ],  # , "cylinder_flow"],

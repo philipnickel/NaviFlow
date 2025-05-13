@@ -8,34 +8,33 @@ from naviflow_collocated.discretization.gradient.leastSquares import compute_cel
 
 
 # New test: Lid-driven cavity
-def test_momentum_solver_lid_driven(mesh_file, u_field, bc_file, mu=0.01, rho=1.0):
+def test_momentum_solver_lid_driven(mesh, u_field, mu=0.01, rho=1.0):
     """
     Tests the momentum matrix assembly for lid-driven cavity (top wall drives flow).
     Tests both u and v components.
     """
     print("[Test] Lid-driven cavity momentum solve")
 
-    mesh = load_mesh(mesh_file, bc_file)
     n_cells = mesh.cell_centers.shape[0]
     phi_full = np.zeros((n_cells, 2))
 
     for comp_idx, comp_name in enumerate(['u', 'v']):
 
            # Extract the specific component as a scalar field before passing to gradient calculation
-        scalar_field = u_field[:, comp_idx]
-        grad_component = compute_cell_gradients(mesh, scalar_field)
+        u_field = np.zeros((mesh.cell_centers.shape[0], 2)) # both components 
+        u_field[:, comp_idx] = u_field_dummy[:, comp_idx]
+        phi_field = np.zeros((mesh.cell_centers.shape[0])) # scalar field
+        scalar_u_field = u_field[:, comp_idx]
+        grad_component = compute_cell_gradients(mesh,scalar_u_field)
+        grad_phi = compute_cell_gradients(mesh, u_field[:, comp_idx])
 
-        row, col, data, b = assemble_diffusion_convection_matrix(
-            mesh=mesh, 
-            grad_phi=grad_component, 
-            rho=rho, 
-            mu=mu,
-            u_field=u_field, 
-            component_idx=comp_idx
-        )
+        row, col, data, b_correction = assemble_diffusion_convection_matrix(
+            mesh, phi_field, grad_phi, u_field, grad_component,
+            rho, mu, comp_idx
+        ) 
 
         A = coo_matrix((data, (row, col)), shape=(n_cells, n_cells)).tocsr()
-        rhs = b   # no body force
+        rhs = b_correction   # no body force
 
         phi_numeric = spsolve(A, rhs)
         phi_full[:, comp_idx] = phi_numeric
@@ -59,7 +58,7 @@ def test_momentum_solver_lid_driven(mesh_file, u_field, bc_file, mu=0.01, rho=1.
             assert np.max(phi_numeric) > 0.1, "No flow induced by lid in u-component!"
         print(f"[OK] Lid-driven flow computed for {comp_name}. max = {np.max(phi_numeric):.3e}")
     return phi_full
-
+"""
 def plot_upwind_directions(mesh_file, bc_file, u_field_fn, title="Upwind Direction Visualization"):
     mesh = load_mesh(mesh_file, bc_file)
     u_field = u_field_fn(mesh)
@@ -96,6 +95,7 @@ def plot_upwind_directions(mesh_file, bc_file, u_field_fn, title="Upwind Directi
     plt.tight_layout()
     plt.savefig("tests/test_output/upwind_face_directions.png", dpi=300)
     plt.close()
+"""
 
 def lid_top_wall_flow(mesh):
     u_field = np.zeros((mesh.cell_centers.shape[0], 2))
@@ -104,26 +104,22 @@ def lid_top_wall_flow(mesh):
 
 
 
-# Example usage
 if __name__ == "__main__":
     Re = 100
     mu = 1.0 / Re
     rho = 1
-    mesh = load_mesh("meshing/experiments/lidDrivenCavity/structuredUniform/fine/lidDrivenCavity_uniform_fine.msh", "shared_configs/domain/sanityCheckMomentum.yaml")
+    mesh = load_mesh("meshing/experiments/lidDrivenCavity/structuredUniform/fine/lidDrivenCavity_uniform_fine.msh", "shared_configs/domain/boundaries_lid_driven_cavity.yaml")
+    mesh = load_mesh("meshing/experiments/lidDrivenCavity/unstructured/fine/lidDrivenCavity_unstructured_fine.msh", "shared_configs/domain/boundaries_lid_driven_cavity.yaml")
 
     n_cells = mesh.cell_centers.shape[0]
-    u_field_dummy = np.zeros((n_cells, 2))  # unused
+    u_field_dummy = np.zeros((n_cells, 2))  
     u_field_dummy[:, 0] = 1.0
 
 
-    mesh_file = "meshing/experiments/lidDrivenCavity/unstructured/medium/lidDrivenCavity_unstructured_medium.msh"
-    bc_file = "shared_configs/domain/sanityCheckMomentum.yaml"  # BCs: u = 1 on top wall 0 on all other walls
     #test_momentum_solver_lid_driven(mesh_file, bc_file, mu, rho)
-    mesh_file = "meshing/experiments/lidDrivenCavity/structuredUniform/fine/lidDrivenCavity_uniform_fine.msh"
-    bc_file = "shared_configs/domain/sanityCheckMomentum.yaml"  # BCs: u = 1 on top wall 0 on all other walls
+    #mesh_file = "meshing/experiments/lidDrivenCavity/structuredUniform/fine/lidDrivenCavity_uniform_fine.msh"
     phi = u_field_dummy
-    for i in range(1):
-        phi = test_momentum_solver_lid_driven(mesh_file, phi, bc_file, mu, rho)
+    _ = test_momentum_solver_lid_driven(mesh, phi, mu, rho)
 
 
 """
