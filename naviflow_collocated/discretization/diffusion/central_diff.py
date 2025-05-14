@@ -57,14 +57,14 @@ def compute_diffusive_correction(f, grad_phi, mesh, mu):
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
     muF = mu 
-    T_f = mesh.vector_T_f[f]
+    T_f = np.ascontiguousarray(mesh.vector_T_f[f])
 
     # Compute cross-diffusion term
     grad_P = grad_phi[P]
     grad_N = grad_phi[N]
     g_f = mesh.face_interp_factors[f]
     grad_f = (1 - g_f) * grad_P + g_f * grad_N
-    d_skew = mesh.vector_skewness[f]
+    d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
 
     grad_f_mark = grad_f + np.dot(grad_f, d_skew)
     b_corr = -muF * np.dot(grad_f_mark, T_f)
@@ -92,8 +92,8 @@ def compute_boundary_diffusive_correction(
     a_P = 0.0
     b_P = 0.0
 
-    E_f = mesh.vector_E_f[f]
-    T_f = mesh.vector_T_f[f]
+    E_f = np.ascontiguousarray(mesh.vector_E_f[f])
+    T_f = np.ascontiguousarray(mesh.vector_T_f[f])
     d_PB = mesh.d_Cb[f]
 
     
@@ -104,7 +104,7 @@ def compute_boundary_diffusive_correction(
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
-        d_skew = mesh.vector_skewness[f]
+        d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
         grad_P_mark = grad_P + np.dot(grad_P, d_skew)
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
         b_P += fluxVb 

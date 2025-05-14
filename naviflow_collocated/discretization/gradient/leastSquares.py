@@ -72,4 +72,4 @@ def compute_cell_gradients(mesh, u):
             grad_u[c] = 0.0
 
     # Returned gradients are accurate vector fields, suitable for use in ∇φ ⋅ (t_f + d_f) deferred correction terms
-    return grad_u
+    return np.ascontiguousarray(grad_u)

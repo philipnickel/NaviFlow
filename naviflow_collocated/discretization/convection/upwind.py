@@ -14,8 +14,8 @@ def compute_convective_stencil_upwind(f, mesh, rho, u_field, grad_phi, component
     N = mesh.neighbor_cells[f]
 
     g_f = mesh.face_interp_factors[f]
-    Sf = mesh.vector_S_f[f]
-    d_skew = mesh.vector_skewness[f]
+    Sf = np.ascontiguousarray(mesh.vector_S_f[f])
+    d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
 
     # Interpolate velocity vector at face
     u_face = (1 - g_f) * u_field[P] + g_f * u_field[N]
@@ -43,8 +43,8 @@ def compute_boundary_convective_flux(f, mesh, rho, u_field, bc_type, bc_value, c
     Skewness correction is ignored at boundaries.
     """
     P = mesh.owner_cells[f]
-    Sf = mesh.vector_S_f[f]
-    e_hat = mesh.unit_vector_e[f]
+    Sf = np.ascontiguousarray(mesh.vector_S_f[f])
+    e_hat = np.ascontiguousarray(mesh.unit_vector_e[f])
 
     # Interpolate velocity component at the face
     if bc_type == BC_DIRICHLET:
@@ -52,7 +52,7 @@ def compute_boundary_convective_flux(f, mesh, rho, u_field, bc_type, bc_value, c
     else:
         phi_f = u_field[P, component_idx]
 
-    F = rho * phi_f * np.dot(np.ascontiguousarray(Sf), np.ascontiguousarray(u_field[P]))
+    F = rho * phi_f * np.dot(Sf, u_field[P])
 
     if F >= 0:
         return F, 0.0, 0.0

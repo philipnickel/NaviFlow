@@ -1,3 +1,12 @@
+import os
+os.environ["NUMBA_NUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["OMP_MAX_ACTIVE_LEVELS"] = "4"
+
+
+
+
+
 import sympy as sp
 from sympy.utilities.lambdify import lambdify
 import numpy as np
@@ -9,7 +18,6 @@ import time
 from naviflow_collocated.mesh.mesh_loader import load_mesh
 from naviflow_collocated.assembly.momentumMatrix import assemble_diffusion_convection_matrix
 from naviflow_collocated.discretization.gradient.leastSquares import compute_cell_gradients
-
 
 def plot_field(mesh, field, ax=None, title=None):
     if ax is None:
@@ -25,9 +33,13 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, co
     mesh = load_mesh(mesh_file, bc_file)
 
     phi_exact = u_exact_fn(mesh.cell_centers)
+    phi_exact = np.ascontiguousarray(phi_exact)
     u_field = np.zeros((mesh.cell_centers.shape[0], 2)) # both components 
+    u_field = np.ascontiguousarray(u_field)
+    #u_field[:, component_idx] = 0 
     phi_field = np.zeros((mesh.cell_centers.shape[0])) # scalar field
-    scalar_u_field = u_field[:, component_idx]
+    phi_field = np.ascontiguousarray(phi_field)
+    scalar_u_field = np.ascontiguousarray(u_field[:, component_idx])
     grad_component = compute_cell_gradients(mesh,scalar_u_field)
     grad_phi = compute_cell_gradients(mesh, phi_exact)
 
@@ -63,7 +75,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, co
 # The following test follows the Method of Manufactured Solutions (MMS) approach
 # to verify spatial convergence of the numerical scheme by comparing numerical
 # and exact solutions on a sequence of refined meshes.
-def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0):
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0, ax=None):
     hs = []
     errors = []
 
@@ -74,9 +86,12 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_
 
 
         phi_exact = u_exact_fn(mesh.cell_centers)
+        phi_exact = np.ascontiguousarray(phi_exact)
         u_field = np.zeros((mesh.cell_centers.shape[0], 2)) # both components 
+        u_field = np.ascontiguousarray(u_field)
         phi_field = np.zeros((mesh.cell_centers.shape[0])) # scalar field
-        scalar_u_field = u_field[:, component_idx]
+        phi_field = np.ascontiguousarray(phi_field)
+        scalar_u_field = np.ascontiguousarray(u_field[:, component_idx])
         grad_component = compute_cell_gradients(mesh,scalar_u_field)
         grad_phi = compute_cell_gradients(mesh, phi_exact)
 
@@ -106,27 +121,15 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_
     for i, r in enumerate(rate):
         print(f"{tag_prefix}: from h={hs[i]:.4f} to h={hs[i+1]:.4f} --> rate ≈ {r:.2f}")
 
-    plt.figure()
-    plt.loglog(hs, errors, label=tag_prefix)
-    # Add reference line for second-order convergence
-    ref_slope = errors[0] * (hs / hs[0])**2 *0.9
-    plt.loglog(hs, ref_slope, 'k--', label='Second-order')
-    plt.grid(True, which="both")
-    plt.xlabel("Grid size h")
-    plt.ylabel("L2 Error")
-    plt.title("Grid Convergence Study")
-    plt.legend()
-    Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
-    plt.savefig(f"tests/test_output/MMS_convergence/convergence_plot_{tag_prefix}.png", dpi=300)
-    plt.close()
-
+    if ax is not None:
+        ax.loglog(hs, errors, label=tag_prefix)
 
 
 # === MMS Functions ===
 # The exact solution u_sin is chosen to be smooth and not exactly representable by the discrete scheme,
 # to validate the convergence behavior of the numerical method.
 
-def generate_mms_functions(expr_str, velocity=("1.0", "0.0"), mu=1.0, rho=1.0):
+def generate_mms_functions(expr_str, velocity=("0.0", "0.0"), mu=1.0, rho=1.0):
     x, y = sp.symbols("x y")
     expr = sp.sympify(expr_str)
     u_x_expr = sp.sympify(velocity[0])
@@ -194,20 +197,23 @@ if __name__ == "__main__":
         "anisotropic": "shared_configs/domain/sanityChecks/sanityCheckDiffusionANS.yaml"
     }
 
+    fig, ax = plt.subplots()
+    time_start = time.time()
+
     for tag, expr in mms_cases.items():
-        u_fn, grad_fn, rhs_fn = generate_mms_functions(expr, velocity=("0.0", "0.0"), mu=1.0, rho=0.0)
+        u_fn, grad_fn, rhs_fn = generate_mms_functions(expr, velocity=("1.0", "0.0"), mu=0.01, rho=0.0)
         bc_file = BC_files[tag]
         run_mms_test(
             structured_uniform["fine"],
             bc_file,
-            u_fn, rhs_fn, 1.0, 0.0,
+            u_fn, rhs_fn, 0.01, 0.0,
             tag_prefix=f"{tag}_structured",
             
         )
         run_mms_test(
             unstructured["fine"],
             bc_file,
-            u_fn, rhs_fn, 1.0, 0.0,
+            u_fn, rhs_fn, 0.01, 0.0,
             tag_prefix=f"{tag}_unstructured",
             
         )
@@ -216,13 +222,32 @@ if __name__ == "__main__":
         run_convergence_study(
             [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
             bc_file,
-            u_fn, rhs_fn, 1.0, 0.0,
-            tag_prefix=f"{tag}_structured"
+            u_fn, rhs_fn, 0.01, 0.0,
+            tag_prefix=f"{tag}_structured",
+            ax=ax
         )
         run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
-            u_fn, rhs_fn, 1.0, 0.0,
-            tag_prefix=f"{tag}_unstructured"
+            u_fn, rhs_fn, 0.01, 0.0,
+            tag_prefix=f"{tag}_unstructured",
+            ax=ax
         )
- 
+
+    hs = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
+        structured_uniform["coarse"],
+        structured_uniform["medium"],
+        structured_uniform["fine"]
+    ]])
+    ref_slope = (0.1 * (hs / hs[0])**2)  # Normalize ref slope
+    ax.loglog(hs, ref_slope, 'k--', label='Second-order (ref)')
+
+    ax.grid(True, which="both")
+    ax.set_xlabel("Grid size h")
+    ax.set_ylabel("L2 Error")
+    ax.set_title("Order of accuracy")
+    ax.legend(loc="lower right")
+    Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
+    plt.savefig("tests/test_output/MMS_convergence/convergence_plot_combined.pdf", dpi=300)
+    plt.close()
+    print(f"Time taken: {time.time() - time_start:.2f} seconds")

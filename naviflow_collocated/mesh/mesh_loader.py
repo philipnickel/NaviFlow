@@ -35,6 +35,9 @@ BC_TYPE_MAP = {
     "convective": BC_CONVECTIVE,
     "symmetry": BC_SYMMETRY,
 }
+def ensure_contiguous(*arrays):
+    return [np.ascontiguousarray(a) for a in arrays]
+
 
 def load_mesh(filename, bc_config_file=None):
     """
@@ -261,14 +264,18 @@ def _build_meshdata2d(
     current_idx_for_cell = np.zeros(n_cells, dtype=np.int64)
     _populate_cell_faces_kernel(cell_faces, owner_cells, neighbor_cells, current_idx_for_cell, n_faces)
 
-    return MeshData2D(
+    unit_vector_n = vector_S_f / (face_areas[:, None] + 1e-12)
+
+    return MeshData2D(*ensure_contiguous(
         cell_volumes, cell_centers,
         face_areas, face_centers,
         owner_cells, neighbor_cells, cell_faces, face_vertices, points,
-        vector_S_f, vector_d_CE, vector_S_f / (face_areas[:, None] + 1e-12), # unit_vector_n
+        vector_S_f, vector_d_CE, unit_vector_n,
         unit_vector_e, vector_E_f, vector_T_f, skewness_vectors,
         face_interp_factors, rc_interp_weights,
         internal_faces, boundary_faces, boundary_patches,
         boundary_types, boundary_values, d_Cb,
         face_boundary_mask, face_flux_mask,
-    )
+    ))
+
+

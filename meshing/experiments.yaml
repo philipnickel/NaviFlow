@@ -28,58 +28,58 @@ lidDrivenCavity:
   uniform:
     description: Uniform structured mesh for lid-driven cavity at multiple resolutions
     resolutions:
-      coarse: {L: 1.0, nx: 20, ny: 20}
-      medium: {L: 1.0, nx: 40, ny: 40}
-      fine: {L: 1.0, nx: 80, ny: 80}
+      coarse: {L: 1.0, nx: 50, ny: 50}
+      medium: {L: 1.0, nx: 100, ny: 100}
+      fine: {L: 1.0, nx: 200, ny: 200}
   unstructured:
     description: Unstructured mesh with boundary refinement at multiple resolutions
     resolutions:
       coarse:
         Lx: 1.0
         Ly: 1.0
-        n_cells: 500
+        n_cells: 2000
         refinement_factors:
           boundaries:
-            left: [5, 1] # 10x refinement, 10% towards center
-            right: [5, 1]
-            top: [5, 1]
-            bottom: [5, 1]
+            left: [2, 1] # 10x refinement, 10% towards center
+            right: [2, 1]
+            top: [2, 1]
+            bottom: [2, 1]
           corners:
-            top_left: [10, 1] # 10x refinement, 75% towards center
-            top_right: [10, 1]
-            bottom_left: [8, 1]
-            bottom_right: [8, 1]
+            top_left: [2, 1] # 10x refinement, 75% towards center
+            top_right: [2, 1]
+            bottom_left: [2, 1]
+            bottom_right: [2, 1]
 
       medium:
         Lx: 1.0
         Ly: 1.0
-        n_cells: 5000
+        n_cells: 8500
         refinement_factors:
           boundaries:
-            left: [10, 1]
-            right: [10, 1]
-            top: [10, 1]
-            bottom: [10, 1]
+            left: [2, 1]
+            right: [2, 1]
+            top: [2, 1]
+            bottom: [2, 1]
           corners:
-            top_left: [10, 1]
-            top_right: [10, 1]
-            bottom_left: [8, 1]
-            bottom_right: [8, 1]
+            top_left: [2, 1]
+            top_right: [2, 1]
+            bottom_left: [2, 1]
+            bottom_right: [2, 1]
       fine:
         Lx: 1.0
         Ly: 1.0
-        n_cells: 10000
+        n_cells: 37000
         refinement_factors:
           boundaries:
-            left: [10, 1]
-            right: [10, 1]
-            top: [10, 1]
-            bottom: [10, 1]
+            left: [2, 1]
+            right: [2, 1]
+            top: [2, 1]
+            bottom: [2, 1]
           corners:
-            top_left: [10, 1]
-            top_right: [10, 1]
-            bottom_left: [8, 1]
-            bottom_right: [8, 1]
+            top_left: [2, 1]
+            top_right: [2, 1]
+            bottom_left: [2, 1]
+            bottom_right: [2, 1]
 
 cylinderFlow:
   description: Flow around a circular cylinder in a rectangular domain
