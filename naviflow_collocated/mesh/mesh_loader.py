@@ -38,6 +38,56 @@ BC_TYPE_MAP = {
 def ensure_contiguous(*arrays):
     return [np.ascontiguousarray(a) for a in arrays]
 
+def _compute_face_map(cells):
+    face_map = defaultdict(list)
+    for cid, cell in enumerate(cells):
+        for i in range(len(cell)):
+            edge = tuple(sorted((cell[i], cell[(i + 1) % len(cell)])))
+            face_map[edge].append(cid)
+    return face_map
+
+def _construct_faces(face_map, points, cell_centers):
+    face_centers_list, face_normals_list, edge_lengths_list = [], [], []
+    face_vertices_list, owner_cells_list, neighbor_cells_list = [], [], []
+
+    for edge, cids in face_map.items():
+        v0_idx, v1_idx = edge
+        v0, v1 = points[v0_idx], points[v1_idx]
+        center = 0.5 * (v0 + v1)
+
+        edge_vec = v1 - v0
+        edge_len = np.linalg.norm(edge_vec)
+
+        n_hat = np.zeros(2)
+        if edge_len > 1e-12:
+            n_hat = np.array([edge_vec[1], -edge_vec[0]]) / edge_len
+
+        owner = cids[0]
+        if len(cids) == 2:
+            neighbor = cids[1]
+            if np.dot(n_hat, cell_centers[neighbor] - cell_centers[owner]) < 0:
+                n_hat *= -1
+        else:
+            neighbor = -1
+            if np.dot(n_hat, center - cell_centers[owner]) < 0:
+                n_hat *= -1
+
+        face_vertices_list.append(edge)
+        owner_cells_list.append(owner)
+        neighbor_cells_list.append(neighbor)
+        face_centers_list.append(center)
+        face_normals_list.append(n_hat * edge_len)
+        edge_lengths_list.append(edge_len)
+
+    return (
+        np.array(face_centers_list),
+        np.array(face_normals_list),
+        np.array(edge_lengths_list),
+        np.array(face_vertices_list),
+        np.array(owner_cells_list),
+        np.array(neighbor_cells_list)
+    )
+
 
 def load_mesh(filename, bc_config_file=None):
     """
@@ -73,9 +123,6 @@ def _build_meshdata2d(
     boundary_conditions,
 ):
     # --- Phase 1: Initial Cell Properties & Basic Face Geometry/Connectivity ---
-    def sorted_edge(a, b):
-        return tuple(sorted((a, b)))
-
     n_cells = len(cells)
     cell_centers = np.mean(points[cells], axis=1)
     
@@ -84,53 +131,18 @@ def _build_meshdata2d(
         raise ValueError("Unsupported cell shape for volume calculation: cells must be triangles or quads.")
     cell_volumes = _calculate_cell_volumes(points, cells)
 
-    face_map = defaultdict(list)
-    for cid, cell in enumerate(cells):
-        for i in range(len(cell)):
-            edge = sorted_edge(cell[i], cell[(i + 1) % len(cell)])
-            face_map[edge].append(cid)
+    face_map = _compute_face_map(cells)
 
-    # Preallocate lists for initial face properties
-    face_centers_list, face_normals_list, edge_lengths_list = [], [], []
-    face_vertices_list, owner_cells_list, neighbor_cells_list = [], [], []
+    (
+        face_centers,
+        vector_S_f,
+        initial_edge_lengths,
+        face_vertices,
+        owner_cells,
+        neighbor_cells
+    ) = _construct_faces(face_map, points, cell_centers)
 
-    for edge, cids in face_map.items():
-        v0_idx, v1_idx = edge
-        v0, v1 = points[v0_idx], points[v1_idx]
-        center = 0.5 * (v0 + v1)
-
-        edge_vec = v1 - v0
-        edge_len = np.linalg.norm(edge_vec)
-        
-        n_hat = np.zeros(2)
-        if edge_len > 1e-12:
-            n_hat = np.array([edge_vec[1], -edge_vec[0]]) / edge_len
-        
-        owner = cids[0]
-        if len(cids) == 2:
-            neighbor = cids[1]
-            if np.dot(n_hat, cell_centers[neighbor] - cell_centers[owner]) < 0:
-                n_hat *= -1
-        else: # Boundary face
-            neighbor = -1
-            if np.dot(n_hat, center - cell_centers[owner]) < 0:
-                n_hat *= -1
-
-        face_vertices_list.append(edge)
-        owner_cells_list.append(owner)
-        neighbor_cells_list.append(neighbor)
-        face_centers_list.append(center)
-        face_normals_list.append(n_hat * edge_len) # S_f = n_hat * Area_f
-        edge_lengths_list.append(edge_len)
-
-    # Convert to NumPy arrays
-    face_centers   = np.array(face_centers_list)
-    vector_S_f     = np.array(face_normals_list)
-    initial_edge_lengths = np.array(edge_lengths_list)
     face_areas     = np.linalg.norm(vector_S_f, axis=1)
-    face_vertices  = np.array(face_vertices_list)
-    owner_cells    = np.array(owner_cells_list)
-    neighbor_cells = np.array(neighbor_cells_list)
     n_faces = len(face_areas)
 
     assert np.allclose(face_areas, initial_edge_lengths, rtol=1e-10, atol=1e-12), \
@@ -210,7 +222,7 @@ def _build_meshdata2d(
     boundary_values = np.full((n_faces, 3), 0.0, dtype=np.float64)
 
     for i, line in enumerate(boundary_lines):
-        edge = sorted_edge(*line)
+        edge = tuple(sorted(line))
         if edge not in edge_to_face: continue
 
         face_id = edge_to_face[edge]
@@ -277,5 +289,3 @@ def _build_meshdata2d(
         boundary_types, boundary_values, d_Cb,
         face_boundary_mask, face_flux_mask,
     ))
-
-
