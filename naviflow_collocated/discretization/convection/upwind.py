@@ -9,32 +9,54 @@ BC_ZEROGRADIENT = 3
 BC_WALL = 0
 
 @njit(inline="always")
-def compute_convective_stencil_upwind(f, mesh, rho, u_field, grad_phi, component_idx):
+def compute_convective_stencil_upwind(
+    f, mesh, rho, u_field, grad_phi, component_idx,
+    phi, beta=1.0, scheme="quick"
+):
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
 
     g_f = mesh.face_interp_factors[f]
     Sf = np.ascontiguousarray(mesh.vector_S_f[f])
-    d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+    d_CE = mesh.vector_d_CE[f]
 
-    # Interpolate velocity vector at face
     u_face = (1 - g_f) * u_field[P] + g_f * u_field[N]
-    F = rho * np.dot(u_face, Sf)
-    """
-    # Interpolate scalar component with skewness correction
-    phi_P = u_field[P, bc_component_idx]
-    phi_N = u_field[N, bc_component_idx]
-    grad_P = grad_phi[P]
-    grad_N = grad_phi[N]
-    grad_f = (1 - g_f) * grad_P + g_f * grad_N
-    phi_fmark = (1 - g_f) * phi_P + g_f * phi_N
-    phi_f = phi_fmark + np.dot(grad_f, d_skew)
-    """
+    mdot = rho * np.dot(u_face, Sf)
 
-    if F >= 0:
-        return -F, F, 0.0
+    phi_P = phi[P]
+    phi_N = phi[N]
+    phi_f_U = phi_P if mdot >= 0 else phi_N
+
+    if scheme == "powerlaw":
+        # Compute diffusive conductance D_f
+        d_PN = np.linalg.norm(d_CE)
+        mu = 1.0  # Assume unit viscosity; can generalize later
+        D_f = mu * np.linalg.norm(Sf) / (d_PN + 1e-14)
+        Pe_f = mdot / (D_f + 1e-14)
+        f_Pe = max(0.0, (1.0 - 0.1 * abs(Pe_f)) ** 5)
+        phi_f_PL = phi_P + f_Pe * (phi_N - phi_P)
+        F_low = mdot * phi_f_PL
     else:
-        return -F, F, 0.0
+        # Standard upwind
+        F_low = mdot * phi_f_U
+
+    # Deferred correction using QUICK
+    phiC = phi[P]
+    gradC = grad_phi[P]
+    gradN = grad_phi[N]
+    gf = mesh.face_interp_factors[f]
+    grad_f = gf * gradN + (1 - gf) * gradC
+    d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+    grad_f_mark = grad_f + np.dot(grad_f, d_skew)
+    phi_HO = phiC + 0.5 * np.dot(gradC + grad_f_mark, d_CE)
+    F_high = mdot * phi_HO
+
+    # Matrix coefficients (still from upwind splitting)
+    aP = -max(0, mdot)
+    aN = -max(0, -mdot)
+    b_corr = -beta * (F_high - F_low)
+
+    return aP, aN, b_corr
 
 @njit(inline="always")
 def compute_boundary_convective_flux(f, mesh, rho, u_field, bc_type, bc_value, component_idx):
@@ -52,19 +74,19 @@ def compute_boundary_convective_flux(f, mesh, rho, u_field, bc_type, bc_value, c
     else:
         phi_f = u_field[P, component_idx]
 
-    F = rho * phi_f * np.dot(Sf, u_field[P])
+    mdot = rho * np.dot(Sf, u_field[P])
 
-    if F >= 0:
-        return F, 0.0, 0.0
-    else:
-        # Inflow — depends on boundary type
-        if bc_type == BC_DIRICHLET:
-            return 0.0, 0.0, -F * bc_value
-        elif bc_type == BC_ZEROGRADIENT:
-            return F, 0.0, 0.0
-        elif bc_type == BC_NEUMANN:
-            return 0.0, 0.0, 0.0
-        elif bc_type == BC_CONVECTIVE:
-            return 0.0, 0.0, F * bc_value
+    # Inflow — depends on boundary type
+    if bc_type == BC_DIRICHLET:
+        if mdot <= 0:
+            return  0.0, 0.0
         else:
-            return 0.0, 0.0, 0.0
+            return mdot, -mdot * bc_value
+    elif bc_type == BC_ZEROGRADIENT:
+        return 0.0, 0.0
+    elif bc_type == BC_NEUMANN:
+        return 0.0, 0.0
+    elif bc_type == BC_CONVECTIVE:
+        return 0.0, mdot * bc_value
+    else:
+        return 0.0, 0.0

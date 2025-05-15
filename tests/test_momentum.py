@@ -21,15 +21,11 @@ def test_momentum_solver_lid_driven(mesh, u_field, mu=0.01, rho=1.0):
     for comp_idx, comp_name in enumerate(['u', 'v']):
 
            # Extract the specific component as a scalar field before passing to gradient calculation
-        u_field = np.zeros((mesh.cell_centers.shape[0], 2)) # both components 
-        u_field[:, comp_idx] = u_field_dummy[:, comp_idx]
-        phi_field = np.zeros((mesh.cell_centers.shape[0])) # scalar field
-        scalar_u_field = u_field[:, comp_idx]
-        grad_component = compute_cell_gradients(mesh,scalar_u_field)
+        phi = u_field[:, comp_idx]
         grad_phi = compute_cell_gradients(mesh, u_field[:, comp_idx])
 
         row, col, data, b_correction = assemble_diffusion_convection_matrix(
-            mesh, phi_field, grad_phi, u_field, grad_component,
+            mesh, phi, grad_phi, u_field,
             rho, mu, comp_idx
         ) 
 
@@ -41,13 +37,29 @@ def test_momentum_solver_lid_driven(mesh, u_field, mu=0.01, rho=1.0):
 
         # Plot
         fig, ax = plt.subplots(figsize=(6, 4))
-        sc = ax.scatter(mesh.cell_centers[:, 0], mesh.cell_centers[:, 1],
-                        c=phi_numeric, cmap='viridis', s=35, edgecolor='k')
-        plt.colorbar(sc, ax=ax, label=f'{comp_name} velocity')
+        
+        # Check if mesh is structured by attempting to form a square grid
+        n = int(np.sqrt(len(phi_numeric)))
+        if n*n == len(phi_numeric):  # Structured mesh
+            # Reshape data into 2D grid for matshow
+            phi_2d = phi_numeric.reshape(n, n)
+            phi_2d = np.rot90(phi_2d)  # Rotate 90 degrees counterclockwise
+            im = ax.matshow(phi_2d, cmap='viridis', aspect='equal')
+            ax.set_xlabel('y')
+            ax.set_ylabel('x')
+        else:  # Unstructured mesh
+            # Create tricontour plot colored by velocity values
+            triang = plt.matplotlib.tri.Triangulation(mesh.cell_centers[:, 0],
+                                                    mesh.cell_centers[:, 1])
+            im = ax.tricontourf(triang, phi_numeric,
+                              levels=20,
+                              cmap='viridis')
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_aspect('equal')
+            
+        plt.colorbar(im, ax=ax, label=f'{comp_name} velocity')
         ax.set_title(f'Lid-Driven: Velocity Field ({comp_name}-component)')
-        ax.set_xlabel('x')
-        ax.set_ylabel('y')
-        ax.set_aspect('equal')
         plt.tight_layout()
         plt.savefig(f"tests/test_output/test_momentum_lid_driven_{comp_name}.png", dpi=300)
         plt.close()
@@ -105,15 +117,16 @@ def lid_top_wall_flow(mesh):
 
 
 if __name__ == "__main__":
-    Re = 100
+    Re = 1000
     mu = 1.0 / Re
     rho = 1
     mesh = load_mesh("meshing/experiments/lidDrivenCavity/structuredUniform/fine/lidDrivenCavity_uniform_fine.msh", "shared_configs/domain/boundaries_lid_driven_cavity.yaml")
-    mesh = load_mesh("meshing/experiments/lidDrivenCavity/unstructured/fine/lidDrivenCavity_unstructured_fine.msh", "shared_configs/domain/boundaries_lid_driven_cavity.yaml")
+    #mesh = load_mesh("meshing/experiments/lidDrivenCavity/unstructured/fine/lidDrivenCavity_unstructured_fine.msh", "shared_configs/domain/boundaries_lid_driven_cavity.yaml")
 
     n_cells = mesh.cell_centers.shape[0]
     u_field_dummy = np.zeros((n_cells, 2))  
     u_field_dummy[:, 0] = 1.0
+    u_field_dummy[:, 1] = 0.0
 
 
     #test_momentum_solver_lid_driven(mesh_file, bc_file, mu, rho)

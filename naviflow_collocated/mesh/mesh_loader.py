@@ -38,54 +38,140 @@ BC_TYPE_MAP = {
 def ensure_contiguous(*arrays):
     return [np.ascontiguousarray(a) for a in arrays]
 
+
+# --- JIT-compatible face map construction ---
+@njit
+def _compute_face_map_jit(cells):
+    n_faces_est = cells.shape[0] * cells.shape[1]
+    face_pairs = np.empty((n_faces_est, 2), dtype=np.int64)
+    face_owners = np.empty(n_faces_est, dtype=np.int64)
+    count = 0
+    for cid in range(cells.shape[0]):
+        for i in range(cells.shape[1]):
+            a = cells[cid, i]
+            b = cells[cid, (i + 1) % cells.shape[1]]
+            edge = (a, b) if a < b else (b, a)
+            face_pairs[count, 0] = edge[0]
+            face_pairs[count, 1] = edge[1]
+            face_owners[count] = cid
+            count += 1
+    return face_pairs[:count], face_owners[:count]
+
+
+# --- JIT kernel for face map construction (fully JIT-compatible) ---
+from numba import njit
+
+@njit
+def _compute_face_map_kernel(face_pairs, face_owners):
+    # Sort the face pairs lexicographically
+    keys = face_pairs[:, 0] * 10000000 + face_pairs[:, 1]
+    order = np.argsort(keys)
+    sorted_faces = face_pairs[order]
+    sorted_owners = face_owners[order]
+
+    # First pass: count unique keys
+    n = sorted_faces.shape[0]
+    unique_count = 1
+    for i in range(1, n):
+        if sorted_faces[i, 0] != sorted_faces[i - 1, 0] or sorted_faces[i, 1] != sorted_faces[i - 1, 1]:
+            unique_count += 1
+
+    face_keys = np.empty((unique_count, 2), dtype=np.int64)
+    face_values = np.full((unique_count, 2), -1, dtype=np.int64)
+
+    # Second pass: fill face_keys and face_values
+    k = 0
+    current = sorted_faces[0]
+    face_keys[0] = current
+    face_values[0, 0] = sorted_owners[0]
+    count = 1
+
+    for i in range(1, n):
+        if sorted_faces[i, 0] == current[0] and sorted_faces[i, 1] == current[1]:
+            if count == 1:
+                face_values[k, 1] = sorted_owners[i]
+            count += 1
+        else:
+            k += 1
+            current = sorted_faces[i]
+            face_keys[k] = current
+            face_values[k, 0] = sorted_owners[i]
+            count = 1
+
+    return face_keys, face_values
+
+
 def _compute_face_map(cells):
-    face_map = defaultdict(list)
-    for cid, cell in enumerate(cells):
-        for i in range(len(cell)):
-            edge = tuple(sorted((cell[i], cell[(i + 1) % len(cell)])))
-            face_map[edge].append(cid)
-    return face_map
+    face_pairs, face_owners = _compute_face_map_jit(cells)
+    return _compute_face_map_kernel(face_pairs, face_owners)
 
-def _construct_faces(face_map, points, cell_centers):
-    face_centers_list, face_normals_list, edge_lengths_list = [], [], []
-    face_vertices_list, owner_cells_list, neighbor_cells_list = [], [], []
 
-    for edge, cids in face_map.items():
-        v0_idx, v1_idx = edge
+# --- JIT kernel for constructing faces ---
+from numba import njit
+
+@njit
+def _construct_faces_kernel(face_keys, face_values, points, cell_centers,
+                            face_centers_array, face_normals_array, edge_lengths_array,
+                            face_vertices_array, owner_cells_array, neighbor_cells_array):
+    for i in range(len(face_keys)):
+        v0_idx, v1_idx = face_keys[i]
         v0, v1 = points[v0_idx], points[v1_idx]
         center = 0.5 * (v0 + v1)
-
         edge_vec = v1 - v0
-        edge_len = np.linalg.norm(edge_vec)
+        edge_len = np.hypot(edge_vec[0], edge_vec[1])
 
-        n_hat = np.zeros(2)
+        n_hat_0, n_hat_1 = 0.0, 0.0
         if edge_len > 1e-12:
-            n_hat = np.array([edge_vec[1], -edge_vec[0]]) / edge_len
+            n_hat_0 = edge_vec[1] / edge_len
+            n_hat_1 = -edge_vec[0] / edge_len
 
-        owner = cids[0]
-        if len(cids) == 2:
-            neighbor = cids[1]
-            if np.dot(n_hat, cell_centers[neighbor] - cell_centers[owner]) < 0:
-                n_hat *= -1
+        owner = face_values[i][0]
+        if len(face_values[i]) == 2 and face_values[i][1] != -1:
+            neighbor = face_values[i][1]
+            d = cell_centers[neighbor] - cell_centers[owner]
+            if n_hat_0 * d[0] + n_hat_1 * d[1] < 0:
+                n_hat_0 *= -1
+                n_hat_1 *= -1
         else:
             neighbor = -1
-            if np.dot(n_hat, center - cell_centers[owner]) < 0:
-                n_hat *= -1
+            d = center - cell_centers[owner]
+            if n_hat_0 * d[0] + n_hat_1 * d[1] < 0:
+                n_hat_0 *= -1
+                n_hat_1 *= -1
 
-        face_vertices_list.append(edge)
-        owner_cells_list.append(owner)
-        neighbor_cells_list.append(neighbor)
-        face_centers_list.append(center)
-        face_normals_list.append(n_hat * edge_len)
-        edge_lengths_list.append(edge_len)
+        face_vertices_array[i, 0] = v0_idx
+        face_vertices_array[i, 1] = v1_idx
+        owner_cells_array[i] = owner
+        neighbor_cells_array[i] = neighbor
+        face_centers_array[i, 0] = center[0]
+        face_centers_array[i, 1] = center[1]
+        face_normals_array[i, 0] = n_hat_0 * edge_len
+        face_normals_array[i, 1] = n_hat_1 * edge_len
+        edge_lengths_array[i] = edge_len
+
+
+def _construct_faces(face_keys, face_values, points, cell_centers):
+    n_faces = len(face_keys)
+    face_centers_array = np.empty((n_faces, 2), dtype=np.float64)
+    face_normals_array = np.empty((n_faces, 2), dtype=np.float64)
+    edge_lengths_array = np.empty(n_faces, dtype=np.float64)
+    face_vertices_array = np.empty((n_faces, 2), dtype=np.int64)
+    owner_cells_array = np.empty(n_faces, dtype=np.int64)
+    neighbor_cells_array = np.empty(n_faces, dtype=np.int64)
+
+    _construct_faces_kernel(
+        face_keys, face_values, points, cell_centers,
+        face_centers_array, face_normals_array, edge_lengths_array,
+        face_vertices_array, owner_cells_array, neighbor_cells_array
+    )
 
     return (
-        np.array(face_centers_list),
-        np.array(face_normals_list),
-        np.array(edge_lengths_list),
-        np.array(face_vertices_list),
-        np.array(owner_cells_list),
-        np.array(neighbor_cells_list)
+        face_centers_array,
+        face_normals_array,
+        edge_lengths_array,
+        face_vertices_array,
+        owner_cells_array,
+        neighbor_cells_array
     )
 
 
@@ -131,7 +217,7 @@ def _build_meshdata2d(
         raise ValueError("Unsupported cell shape for volume calculation: cells must be triangles or quads.")
     cell_volumes = _calculate_cell_volumes(points, cells)
 
-    face_map = _compute_face_map(cells)
+    face_keys, face_values = _compute_face_map(cells)
 
     (
         face_centers,
@@ -140,7 +226,7 @@ def _build_meshdata2d(
         face_vertices,
         owner_cells,
         neighbor_cells
-    ) = _construct_faces(face_map, points, cell_centers)
+    ) = _construct_faces(face_keys, face_values, points, cell_centers)
 
     face_areas     = np.linalg.norm(vector_S_f, axis=1)
     n_faces = len(face_areas)
@@ -251,7 +337,7 @@ def _build_meshdata2d(
             boundary_values[face_id, 0] = eval_vel
         if isinstance(eval_p, (int, float, np.number)):
             boundary_values[face_id, 2] = eval_p
-    boundary_values = boundary_values #* -1
+    # boundary_values = boundary_values * -1  # Remove this commented-out debug line; do not flip sign
 
     boundary_faces = np.array(sorted(list(set(boundary_faces_list))), dtype=np.int64)
     face_boundary_mask = np.zeros(n_faces, dtype=np.int64)
@@ -278,6 +364,7 @@ def _build_meshdata2d(
 
     unit_vector_n = vector_S_f / (face_areas[:, None] + 1e-12)
 
+    # Ensure all arrays are contiguous before returning
     return MeshData2D(*ensure_contiguous(
         cell_volumes, cell_centers,
         face_areas, face_centers,

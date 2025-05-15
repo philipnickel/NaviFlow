@@ -29,24 +29,19 @@ def plot_field(mesh, field, ax=None, title=None):
         ax.set_title(title)
     ax.set_aspect("equal")
 
-def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0):
+def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0):
     mesh = load_mesh(mesh_file, bc_file)
 
     phi_exact = u_exact_fn(mesh.cell_centers)
     phi_exact = np.ascontiguousarray(phi_exact)
-    u_field = np.zeros((mesh.cell_centers.shape[0], 2)) # both components 
+    u_field = u_field_fn(mesh.cell_centers)
     u_field = np.ascontiguousarray(u_field)
-    #u_field[:, component_idx] = 0 
-    phi_field = np.zeros((mesh.cell_centers.shape[0])) # scalar field
-    phi_field = np.ascontiguousarray(phi_field)
-    scalar_u_field = np.ascontiguousarray(u_field[:, component_idx])
-    grad_component = compute_cell_gradients(mesh,scalar_u_field)
     grad_phi = compute_cell_gradients(mesh, phi_exact)
 
 
     row, col, data, b_correction = assemble_diffusion_convection_matrix(
-        mesh, phi_field, grad_phi, u_field, grad_component,
-        rho, mu, component_idx
+        mesh, grad_phi, u_field, 
+        rho, mu, component_idx, phi=phi_exact, beta=beta
     )
 
     A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
@@ -75,7 +70,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, co
 # The following test follows the Method of Manufactured Solutions (MMS) approach
 # to verify spatial convergence of the numerical scheme by comparing numerical
 # and exact solutions on a sequence of refined meshes.
-def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0, ax=None):
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0, ax=None):
     hs = []
     errors = []
 
@@ -87,18 +82,15 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_
 
         phi_exact = u_exact_fn(mesh.cell_centers)
         phi_exact = np.ascontiguousarray(phi_exact)
-        u_field = np.zeros((mesh.cell_centers.shape[0], 2)) # both components 
+        u_field = u_field_fn(mesh.cell_centers)
         u_field = np.ascontiguousarray(u_field)
-        phi_field = np.zeros((mesh.cell_centers.shape[0])) # scalar field
-        phi_field = np.ascontiguousarray(phi_field)
-        scalar_u_field = np.ascontiguousarray(u_field[:, component_idx])
-        grad_component = compute_cell_gradients(mesh,scalar_u_field)
         grad_phi = compute_cell_gradients(mesh, phi_exact)
 
 
+
         row, col, data, b_correction = assemble_diffusion_convection_matrix(
-            mesh, phi_field, grad_phi, u_field, grad_component,
-            rho, mu, component_idx
+            mesh, grad_phi, u_field,
+            rho, mu, component_idx, phi=phi_exact, beta=beta
         )
 
 
@@ -128,7 +120,6 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, mu, rho, tag_
 # === MMS Functions ===
 # The exact solution u_sin is chosen to be smooth and not exactly representable by the discrete scheme,
 # to validate the convergence behavior of the numerical method.
-
 def generate_mms_functions(expr_str, velocity=("0.0", "0.0"), mu=1.0, rho=1.0):
     x, y = sp.symbols("x y")
     expr = sp.sympify(expr_str)
@@ -147,18 +138,19 @@ def generate_mms_functions(expr_str, velocity=("0.0", "0.0"), mu=1.0, rho=1.0):
     rhs_func = lambdify((x, y), total_rhs, modules="numpy")
 
     def u(xy): return u_func(xy[:, 0], xy[:, 1])
+    def u_field(xy): 
+        return np.column_stack([
+            np.full(xy.shape[0], float(u_x_expr)),
+            np.full(xy.shape[0], float(u_y_expr))
+        ])
     def rhs(xy): return rhs_func(xy[:, 0], xy[:, 1])
     def grad(xy):
         grad_vals = grad_func(xy[:, 0], xy[:, 1])
         return np.column_stack(grad_vals)
 
-    return u, grad, rhs
+    return u, u_field, grad, rhs
 
-def u_zero(mesh):
-    x, y = mesh.cell_centers[:, 0], mesh.cell_centers[:, 1]
-    u_x = np.sin(np.pi * x) * np.sin(np.pi * y)
-    u_y = np.zeros_like(x)
-    return np.column_stack([u_x, u_y])
+
 
 def u_mms(mesh):
     x = mesh.cell_centers[:, 0]
@@ -169,9 +161,7 @@ def u_mms(mesh):
 
 
 
-def u_constant(mesh):
-    # Constant velocity field, e.g., [1, 0] everywhere
-    return np.ones((mesh.cell_centers.shape[0], 2))
+
 # === Run Tests ===
 if __name__ == "__main__":
     structured_uniform = {
@@ -197,40 +187,47 @@ if __name__ == "__main__":
         "anisotropic": "shared_configs/domain/sanityChecks/sanityCheckDiffusionANS.yaml"
     }
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(10, 7))
     time_start = time.time()
 
     for tag, expr in mms_cases.items():
-        u_fn, grad_fn, rhs_fn = generate_mms_functions(expr, velocity=("1.0", "0.0"), mu=0.01, rho=0.0)
+        mu = 0.01
+        rho = 1.0
+        beta = 1.0
+        u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, velocity=("1.0", "0.0"), mu=mu, rho=rho)
         bc_file = BC_files[tag]
+        """
         run_mms_test(
-            structured_uniform["fine"],
+            structured_uniform["medium"],
             bc_file,
-            u_fn, rhs_fn, 0.01, 0.0,
+            u_fn, u_field_fn, rhs_fn, mu, rho,
             tag_prefix=f"{tag}_structured",
-            
+            beta=beta
         )
         run_mms_test(
-            unstructured["fine"],
+            unstructured["medium"],
             bc_file,
-            u_fn, rhs_fn, 0.01, 0.0,
+            u_fn, u_field_fn, rhs_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
-            
+            beta=beta   
         )
+        """
 
         # Uncomment to run convergence studies
         run_convergence_study(
             [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
             bc_file,
-            u_fn, rhs_fn, 0.01, 0.0,
+            u_fn, u_field_fn, rhs_fn, mu, rho,
             tag_prefix=f"{tag}_structured",
+            beta=beta,
             ax=ax
         )
         run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
-            u_fn, rhs_fn, 0.01, 0.0,
+            u_fn, u_field_fn, rhs_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
+            beta=beta,
             ax=ax
         )
 
@@ -239,7 +236,7 @@ if __name__ == "__main__":
         structured_uniform["medium"],
         structured_uniform["fine"]
     ]])
-    ref_slope = (0.1 * (hs / hs[0])**2)  # Normalize ref slope
+    ref_slope = (0.001 * (hs / hs[0])**2)  # Normalize ref slope
     ax.loglog(hs, ref_slope, 'k--', label='Second-order (ref)')
 
     ax.grid(True, which="both")
