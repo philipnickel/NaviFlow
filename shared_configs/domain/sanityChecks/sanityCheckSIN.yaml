@@ -1,0 +1,13 @@
+boundaries:
+  left:
+    velocity: {bc: dirichlet, value: ["-np.cos(np.pi*x[0])*np.sin(np.pi*x[1])", "np.sin(np.pi*x[0])*np.cos(np.pi*x[1])"]}
+    pressure: {bc: neumann, gradient: 0.0}
+  right:
+    velocity: {bc: dirichlet, value: ["-np.cos(np.pi*x[0])*np.sin(np.pi*x[1])", "np.sin(np.pi*x[0])*np.cos(np.pi*x[1])"]}
+    pressure: {bc: neumann, gradient: 0.0}
+  top:
+    velocity: {bc: dirichlet, value: ["-np.cos(np.pi*x[0])*np.sin(np.pi*x[1])", "np.sin(np.pi*x[0])*np.cos(np.pi*x[1])"]}
+    pressure: {bc: neumann, gradient: 0.0}
+  bottom:
+    velocity: {bc: dirichlet, value: ["-np.cos(np.pi*x[0])*np.sin(np.pi*x[1])", "np.sin(np.pi*x[0])*np.cos(np.pi*x[1])"]}
+    pressure: {bc: neumann, gradient: 0.0}

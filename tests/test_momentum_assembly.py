@@ -22,21 +22,38 @@ from naviflow_collocated.discretization.gradient.leastSquares import compute_cel
 def plot_field(mesh, field, ax=None, title=None):
     if ax is None:
         fig, ax = plt.subplots()
-    sc = ax.scatter(mesh.cell_centers[:, 0], mesh.cell_centers[:, 1],
-                    c=field, cmap="viridis", s=30, edgecolor="k", linewidth=0.3)
-    plt.colorbar(sc, ax=ax, shrink=0.75)
-    if title:
-        ax.set_title(title)
+    x = mesh.cell_centers[:, 0]
+    y = mesh.cell_centers[:, 1]
+    try:
+        import matplotlib.tri as tri
+        triang = tri.Triangulation(x, y)
+        cs = ax.tricontourf(triang, field, levels=30, cmap="viridis")
+        plt.colorbar(cs, ax=ax, shrink=0.75)
+        if title:
+            ax.set_title(title)
+    except Exception as e:
+        print(f"Failed to plot tricontourf: {e}")
+        sc = ax.scatter(x, y, c=field, cmap="viridis", s=30, edgecolor="k", linewidth=0.3)
+        plt.colorbar(sc, ax=ax, shrink=0.75)
+        if title:
+            ax.set_title(title)
     ax.set_aspect("equal")
 
-def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0):
+def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0):
     mesh = load_mesh(mesh_file, bc_file)
 
-    phi_exact = u_exact_fn(mesh.cell_centers)
+    # Get the exact solution and ensure it has the right shape
+    phi_exact = u_exact_fn[component_idx](mesh.cell_centers)
+    if np.isscalar(phi_exact) or phi_exact.size == 1:
+        # If it's a scalar value, broadcast to all cells
+        phi_exact = np.full(mesh.cell_centers.shape[0], float(phi_exact))
+    phi_exact = np.atleast_1d(np.asarray(phi_exact).ravel())
     phi_exact = np.ascontiguousarray(phi_exact)
+    
     u_field = u_field_fn(mesh.cell_centers)
     u_field = np.ascontiguousarray(u_field)
-    grad_phi = compute_cell_gradients(mesh, phi_exact)
+    #grad_phi_num = compute_cell_gradients(mesh, phi_exact)
+    grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
 
 
     row, col, data, b_correction = assemble_diffusion_convection_matrix(
@@ -45,21 +62,35 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, mu, rho, ta
     )
 
     A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
-    print(f"MMS rhs = {np.sum(rhs_fn(mesh.cell_centers) * mesh.cell_volumes)}")
     rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
-    
-    print(f" sum(b_correction) = {np.sum(b_correction)}")
 
     phi_numeric = spsolve(A, rhs)
 
+    # Compute the residual A·phi_exact - rhs_fn(mesh.cell_centers)*vol - b_correction
+    assert np.all(np.isfinite(phi_exact))
+    assert np.all(np.isfinite(u_field))
+    assert np.all(np.isfinite(grad_phi))
+    assert np.all(np.isfinite(A.data))
+    assert np.all(np.isfinite(rhs))
+    
+    # Make sure phi_exact matches the shape expected by A (same as the RHS)
+    if phi_exact.shape != rhs.shape:
+        phi_exact = phi_exact.reshape(rhs.shape)
+        
+    Aphi_exact = A.dot(phi_exact)
+    residual = Aphi_exact - rhs_fn(mesh.cell_centers) * mesh.cell_volumes - b_correction
+    flux_imbalance = np.sum(residual)
+
     err = np.abs(phi_numeric - phi_exact)
     max_err, l2_err = np.max(err), np.sqrt(np.mean(err ** 2))
-    print(f"[{tag_prefix}] Max error: {max_err:.2e}, L2 error: {l2_err:.2e}")
+    print(f"[{tag_prefix}] Max error: {max_err:.2e}, L2 error: {l2_err:.2e}, Flux inbalance: {flux_imbalance:.2e}")
 
-    fig, axs = plt.subplots(1, 3, figsize=(15, 4))
-    plot_field(mesh, phi_numeric, ax=axs[0], title="Numerical")
-    plot_field(mesh, phi_exact, ax=axs[1], title="Exact")
-    plot_field(mesh, err, ax=axs[2], title="Error")
+    fig, axs = plt.subplots(2, 2, figsize=(11, 10))
+    fig.suptitle(f"MMS Solution Fields - {tag_prefix}", fontsize=20)
+    plot_field(mesh, phi_numeric, ax=axs[0, 0], title=r"$\phi_{\mathrm{num}}$")
+    plot_field(mesh, phi_exact, ax=axs[0, 1], title=r"$\phi_{\mathrm{exact}}$") 
+    plot_field(mesh, err, ax=axs[1, 0], title=r"$|\phi_{\mathrm{num}} - \phi_{\mathrm{exact}}|$")
+    plot_field(mesh, residual, ax=axs[1, 1], title=r"$\mathbf{A}\phi_{\mathrm{exact}} - \mathbf{rhs_{\mathrm{MMS}}} - \mathbf{b}_{\mathrm{corr}}$")
     plt.tight_layout()
     outdir = Path("tests/test_output/MMS_solutions")
     outdir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +101,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, mu, rho, ta
 # The following test follows the Method of Manufactured Solutions (MMS) approach
 # to verify spatial convergence of the numerical scheme by comparing numerical
 # and exact solutions on a sequence of refined meshes.
-def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0, ax=None):
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0, ax=None):
     hs = []
     errors = []
 
@@ -79,9 +110,13 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, m
         h = np.sqrt(np.mean(mesh.cell_volumes))
         hs.append(h)
 
-
-        phi_exact = u_exact_fn(mesh.cell_centers)
+        phi_exact = u_exact_fn[component_idx](mesh.cell_centers)
+        if np.isscalar(phi_exact) or phi_exact.size == 1:
+            # If it's a scalar value, broadcast to all cells
+            phi_exact = np.full(mesh.cell_centers.shape[0], float(phi_exact))
+        phi_exact = np.atleast_1d(np.asarray(phi_exact).ravel())
         phi_exact = np.ascontiguousarray(phi_exact)
+        
         u_field = u_field_fn(mesh.cell_centers)
         u_field = np.ascontiguousarray(u_field)
         grad_phi = compute_cell_gradients(mesh, phi_exact)
@@ -95,69 +130,80 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, m
 
 
         A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
+        diag = A.diagonal()
         rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
 
         phi_numeric = spsolve(A, rhs)
+        
+        # Make sure phi_exact matches the shape expected by A (same as the RHS)
+        if phi_exact.shape != rhs.shape:
+            phi_exact = phi_exact.reshape(rhs.shape)
+            
+        residual = A.dot(phi_exact) - rhs_fn(mesh.cell_centers) * mesh.cell_volumes - b_correction
+        flux_imbalance = np.sum(residual)
 
         err = np.abs(phi_numeric - phi_exact)
         l2_err = np.sqrt(np.mean(err**2))
         errors.append(l2_err)
 
-        print(f"[{tag_prefix}] h = {h:.4f}, L2 error = {l2_err:.3e}")
+        print(f"[{tag_prefix}] h = {h:.4f}, L2 error = {l2_err:.3e}, Flux imbalance = {flux_imbalance:.3e}")
 
     hs = np.array(hs)
     errors = np.array(errors)
-    rate = np.log(errors[:-1] / errors[1:]) / np.log(hs[:-1] / hs[1:])
-    print("\nObserved convergence rates:")
-    # The slope of the error vs. grid size in log-log scale approximates the observed order of convergence.
-    for i, r in enumerate(rate):
-        print(f"{tag_prefix}: from h={hs[i]:.4f} to h={hs[i+1]:.4f} --> rate ≈ {r:.2f}")
+    from numpy.linalg import lstsq
+    X = np.log(hs).reshape(-1, 1)
+    X = np.hstack([X, np.ones_like(X)])
+    y = np.log(errors)
+    (p, _), *_ = lstsq(X, y, rcond=None)
+
+    print(f"\nObserved convergence rate (global fit): {tag_prefix} --> p ≈ {p:.2f}")
 
     if ax is not None:
-        ax.loglog(hs, errors, label=tag_prefix)
+        ax.loglog(hs, errors, label=rf"{tag_prefix} (p $\approx$ {p:.2f})")
 
 
 # === MMS Functions ===
 # The exact solution u_sin is chosen to be smooth and not exactly representable by the discrete scheme,
 # to validate the convergence behavior of the numerical method.
-def generate_mms_functions(expr_str, velocity=("0.0", "0.0"), mu=1.0, rho=1.0):
+def generate_mms_functions(expr_str, mu, rho):
     x, y = sp.symbols("x y")
-    expr = sp.sympify(expr_str)
-    u_x_expr = sp.sympify(velocity[0])
-    u_y_expr = sp.sympify(velocity[1])
+    u_x_expr = sp.sympify(expr_str[0])
+    u_y_expr = sp.sympify(expr_str[1])
+    phi_expr = u_x_expr  # or u_y_expr depending on which component you're testing
 
-    grad = [sp.diff(expr, var) for var in (x, y)]
-    laplacian = sum(sp.diff(expr, var, 2) for var in (x, y))
+    grad_exprs = [sp.diff(phi_expr, var) for var in (x, y)]
+    laplacian_expr = sum(sp.diff(phi_expr, var, 2) for var in (x, y))
+    conv_term_expr = rho * (u_x_expr * grad_exprs[0] + u_y_expr * grad_exprs[1])
+    diff_term_expr = mu * laplacian_expr
+    rhs_expr = conv_term_expr - diff_term_expr
 
-    conv_term = rho * (u_x_expr * grad[0] + u_y_expr * grad[1])
-    diff_term = mu * laplacian
-    total_rhs = conv_term - diff_term
+    # Vectorized lambdify with explicit numpy module
+    u_x_func = lambdify((x, y), u_x_expr, modules="numpy")
+    u_y_func = lambdify((x, y), u_y_expr, modules="numpy")
+    grad_func = lambdify((x, y), grad_exprs, modules="numpy")
+    rhs_func = lambdify((x, y), rhs_expr, modules="numpy")
 
-    u_func = lambdify((x, y), expr, modules="numpy")
-    grad_func = lambdify((x, y), grad, modules="numpy")
-    rhs_func = lambdify((x, y), total_rhs, modules="numpy")
-
-    def u(xy): return u_func(xy[:, 0], xy[:, 1])
-    def u_field(xy): 
-        return np.column_stack([
-            np.full(xy.shape[0], float(u_x_expr)),
-            np.full(xy.shape[0], float(u_y_expr))
+    def eval_at(f):
+        return lambda xy: np.column_stack([
+            np.broadcast_to(g, (xy.shape[0],)) if np.isscalar(g) or np.ndim(g) == 0 else g
+            for g in f(xy[:, 0], xy[:, 1])
         ])
-    def rhs(xy): return rhs_func(xy[:, 0], xy[:, 1])
+
+    def u_field(xy):
+        ux = u_x_func(xy[:, 0], xy[:, 1])
+        uy = u_y_func(xy[:, 0], xy[:, 1])
+        ux = np.broadcast_to(ux, (xy.shape[0],)) if np.isscalar(ux) or np.ndim(ux) == 0 else ux
+        uy = np.broadcast_to(uy, (xy.shape[0],)) if np.isscalar(uy) or np.ndim(uy) == 0 else uy
+        return np.column_stack([ux, uy])
+    u_x = lambda xy: u_x_func(xy[:, 0], xy[:, 1])
+    u_y = lambda xy: u_y_func(xy[:, 0], xy[:, 1])
     def grad(xy):
-        grad_vals = grad_func(xy[:, 0], xy[:, 1])
-        return np.column_stack(grad_vals)
+        vals = grad_func(xy[:, 0], xy[:, 1])
+        vals = [np.full((xy.shape[0],), v) if np.isscalar(v) or np.ndim(v) == 0 else np.asarray(v).ravel() for v in vals]
+        return np.column_stack(vals)
+    rhs = lambda xy: rhs_func(xy[:, 0], xy[:, 1])
 
-    return u, u_field, grad, rhs
-
-
-
-def u_mms(mesh):
-    x = mesh.cell_centers[:, 0]
-    y = mesh.cell_centers[:, 1]
-    u_x = -np.cos(np.pi * x) * np.sin(np.pi * y)
-    u_y =  np.sin(np.pi * x) * np.cos(np.pi * y)
-    return np.column_stack([u_x, u_y])
+    return [u_x, u_y], u_field, grad, rhs
 
 
 
@@ -177,14 +223,20 @@ if __name__ == "__main__":
 
     # === Additional MMS Cases ===
     mms_cases = {
-        "sinusoidal": "sin(pi*x)*sin(pi*y)",
-        "quadratic": "x**2 + y**2 + x*y",
-        "anisotropic": "sin(2*pi*x) + 0.5*cos(3*pi*y)"
+        "Sinusoidal": ("-cos(pi*x)*sin(pi*y)", "sin(pi*x)*cos(pi*y)"),
+        "Quadratic": ("x**2 + y**2", "x*y"),
+        #"Anisotropic": ("2*pi*cos(2*pi*x)", "-1.5*pi*sin(3*pi*y)"),
+        #"Backwards": ("-1.0 + x*0.0", "0.0 + y*0.0"),
+        #"Uniform": ("1.0 + x*0.0", "0.0 + y*0.0"),
+        #"Linear": ("x", "y")
     }
     BC_files = {
-        "sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckDiffusionSIN.yaml",
-        "quadratic": "shared_configs/domain/sanityChecks/sanityCheckDiffusionQUADD.yaml",
-        "anisotropic": "shared_configs/domain/sanityChecks/sanityCheckDiffusionANS.yaml"
+        "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
+        "Quadratic": "shared_configs/domain/sanityChecks/sanityCheckQUAD.yaml",
+        #"Anisotropic": "shared_configs/domain/sanityChecks/sanityCheckANS.yaml",
+        #"Backwards": "shared_configs/domain/sanityChecks/sanityCheckBackwards.yaml",
+        #"Uniform": "shared_configs/domain/sanityChecks/sanityCheckUniformFlow.yaml",
+        #"Linear": "shared_configs/domain/sanityChecks/sanityCheckLinear.yaml"
     }
 
     fig, ax = plt.subplots(figsize=(10, 7))
@@ -194,30 +246,31 @@ if __name__ == "__main__":
         mu = 0.01
         rho = 1.0
         beta = 1.0
-        u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, velocity=("1.0", "0.0"), mu=mu, rho=rho)
+        u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
         bc_file = BC_files[tag]
         """
         run_mms_test(
-            structured_uniform["medium"],
+            structured_uniform["fine"],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, mu, rho,
-            tag_prefix=f"{tag}_structured",
+            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag} structured",
             beta=beta
         )
         run_mms_test(
-            unstructured["medium"],
+            unstructured["fine"],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, mu, rho,
-            tag_prefix=f"{tag}_unstructured",
+            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag} unstructured",
             beta=beta   
         )
         """
 
+        
         # Uncomment to run convergence studies
         run_convergence_study(
             [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, mu, rho,
+            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_structured",
             beta=beta,
             ax=ax
@@ -225,7 +278,7 @@ if __name__ == "__main__":
         run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, mu, rho,
+            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
             beta=beta,
             ax=ax

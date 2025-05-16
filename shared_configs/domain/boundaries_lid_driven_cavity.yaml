@@ -1,0 +1,33 @@
+boundaries:
+  top:
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]     # moving lid
+    pressure:
+      bc: neumann
+      gradient: 0.0         # ∂p/∂n = 0
+
+  bottom:
+    velocity:
+      bc: dirichlet
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  left:
+    velocity:
+      bc: dirichlet
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  right:
+    velocity:
+      bc: dirichlet
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+

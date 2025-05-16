@@ -50,7 +50,7 @@ def assemble_diffusion_convection_matrix(mesh, grad_phi, u_field,
         # ---------------- convection term (unchanged) ----------------------
         if rho != 0.0:
             a_P, a_N, b_corr = compute_convective_stencil_upwind(
-                f, mesh, rho, u_field, grad_phi, component_idx, phi=phi, beta=beta)
+                f, mesh, rho,mu, u_field, grad_phi, component_idx, phi=phi, beta=beta)
             row.extend([P, P, N, N])
             col.extend([P, N, N, P])
             data.extend([a_P, -a_P, a_N, -a_N])

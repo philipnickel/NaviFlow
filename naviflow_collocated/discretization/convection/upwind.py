@@ -10,50 +10,56 @@ BC_WALL = 0
 
 @njit(inline="always")
 def compute_convective_stencil_upwind(
-    f, mesh, rho, u_field, grad_phi, component_idx,
-    phi, beta=1.0, scheme="quick"
+    f, mesh, rho,mu,  u_field, grad_phi, component_idx,
+    phi, beta=1.0, HO_scheme="SOU"
 ):
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
 
     g_f = mesh.face_interp_factors[f]
     Sf = np.ascontiguousarray(mesh.vector_S_f[f])
-    d_CE = mesh.vector_d_CE[f]
+    eF = np.ascontiguousarray(mesh.vector_E_f[f])
+    d_CE = np.ascontiguousarray(mesh.vector_d_CE[f])
 
     u_face = (1 - g_f) * u_field[P] + g_f * u_field[N]
     mdot = rho * np.dot(u_face, Sf)
 
     phi_P = phi[P]
     phi_N = phi[N]
-    phi_f_U = phi_P if mdot >= 0 else phi_N
 
-    if scheme == "powerlaw":
-        # Compute diffusive conductance D_f
-        d_PN = np.linalg.norm(d_CE)
-        mu = 1.0  # Assume unit viscosity; can generalize later
-        D_f = mu * np.linalg.norm(Sf) / (d_PN + 1e-14)
-        Pe_f = mdot / (D_f + 1e-14)
-        f_Pe = max(0.0, (1.0 - 0.1 * abs(Pe_f)) ** 5)
-        phi_f_PL = phi_P + f_Pe * (phi_N - phi_P)
-        F_low = mdot * phi_f_PL
-    else:
-        # Standard upwind
-        F_low = mdot * phi_f_U
+    # Define gradient coefficient dictionary based on HO_scheme
+    grad_coeffs = {
+        "upwind": np.array([1.0, 0.0]),
+        "central_difference": np.array([0.5, 0.5]),
+        "SOU": np.array([1.5, -0.5]),
+        "FROMM": np.array([0.75, 0.25]),
+        "QUICK": np.array([0.75, 0.25]),
+        "downwind": np.array([0.0, 1.0]),
+    }
 
-    # Deferred correction using QUICK
-    phiC = phi[P]
-    gradC = grad_phi[P]
-    gradN = grad_phi[N]
-    gf = mesh.face_interp_factors[f]
-    grad_f = gf * gradN + (1 - gf) * gradC
-    d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
-    grad_f_mark = grad_f + np.dot(grad_f, d_skew)
-    phi_HO = phiC + 0.5 * np.dot(gradC + grad_f_mark, d_CE)
-    F_high = mdot * phi_HO
+    coeffs = grad_coeffs.get(HO_scheme.lower(), grad_coeffs["upwind"])
 
-    # Matrix coefficients (still from upwind splitting)
     aP = -max(0, mdot)
     aN = -max(0, -mdot)
+
+    F_low = mdot * (phi_P if mdot >= 0 else phi_N)
+
+    if beta > 0:
+        phi_vals = np.array([phi_P, phi_N])
+        phi_f = np.dot(coeffs, phi_vals)
+
+        gradC = grad_phi[P]
+        gradN = grad_phi[N]
+        grad_f = g_f * gradN + (1 - g_f) * gradC
+        d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+        grad_f_mark = grad_f + np.dot(grad_f, d_skew)
+
+        # Apply gradient coefficients properly in the calculation of phi_HO
+        phi_HO = phi_f + 0.5 * np.dot(gradC * coeffs[0] + grad_f_mark * coeffs[1], d_CE)
+        F_high = mdot * phi_HO
+    else:
+        F_high = F_low
+
     b_corr = -beta * (F_high - F_low)
 
     return aP, aN, b_corr
@@ -66,15 +72,9 @@ def compute_boundary_convective_flux(f, mesh, rho, u_field, bc_type, bc_value, c
     """
     P = mesh.owner_cells[f]
     Sf = np.ascontiguousarray(mesh.vector_S_f[f])
-    e_hat = np.ascontiguousarray(mesh.unit_vector_e[f])
 
-    # Interpolate velocity component at the face
-    if bc_type == BC_DIRICHLET:
-        phi_f = mesh.boundary_values[f, component_idx]
-    else:
-        phi_f = u_field[P, component_idx]
 
-    mdot = rho * np.dot(Sf, u_field[P])
+    mdot = rho * np.dot(np.ascontiguousarray(Sf), u_field[P])
 
     # Inflow — depends on boundary type
     if bc_type == BC_DIRICHLET:

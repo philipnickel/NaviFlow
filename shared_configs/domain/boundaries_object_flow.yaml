@@ -1,0 +1,40 @@
+boundaries:
+  left:                      # inlet
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  right:                     # outlet
+    velocity:
+      bc: convective
+      U_conv: 1.0            # convective velocity matches U∞
+    pressure:
+      bc: dirichlet
+      value: 0.0             # gauge pressure
+
+  top:
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  bottom:
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  object:                    # cylinder surface
+    velocity:
+      bc: dirichlet
+      value: [0.0, 0.0]      # no‑slip
+    pressure:
+      bc: neumann
+      gradient: 0.0

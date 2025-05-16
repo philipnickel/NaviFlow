@@ -1,0 +1,13 @@
+boundaries:
+  left:
+    velocity: {bc: dirichlet, value: ["x[0]", "x[1]"]}
+    pressure: {bc: neumann, gradient: 0.0}
+  right:
+    velocity: {bc: dirichlet, value: ["x[0]", "x[1]"]}
+    pressure: {bc: neumann, gradient: 0.0}
+  bottom:
+    velocity: {bc: dirichlet, value: ["x[0]", "x[1]"]}
+    pressure: {bc: dirichlet, value: 0.0}  # phi = 0
+  top:
+    velocity: {bc: dirichlet, value: ["x[0]", "x[1]"]}
+    pressure: {bc: dirichlet, value: 1.0}  # phi = 1

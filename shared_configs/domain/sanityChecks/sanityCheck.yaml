@@ -1,0 +1,40 @@
+boundaries:
+  left:
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  right:
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  top:
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  bottom:
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  object:
+    velocity:
+      bc: dirichlet
+      value: [1.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0

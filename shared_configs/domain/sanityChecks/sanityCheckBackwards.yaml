@@ -1,0 +1,13 @@
+boundaries:
+  left:
+    velocity: {bc: dirichlet, value: ["-1.0", "0.0"]}
+    pressure: {bc: dirichlet, value: 1.0}  # phi = 1 at outlet
+  right:
+    velocity: {bc: dirichlet, value: ["-1.0", "0.0"]}
+    pressure: {bc: dirichlet, value: 0.0}  # phi = 0 at inlet
+  top:
+    velocity: {bc: dirichlet, value: ["-1.0", "0.0"]}
+    pressure: {bc: zerogradient}
+  bottom:
+    velocity: {bc: dirichlet, value: ["-1.0", "0.0"]}
+    pressure: {bc: zerogradient}
