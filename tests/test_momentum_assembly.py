@@ -101,7 +101,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
 # The following test follows the Method of Manufactured Solutions (MMS) approach
 # to verify spatial convergence of the numerical scheme by comparing numerical
 # and exact solutions on a sequence of refined meshes.
-def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0, ax=None):
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0, ax=None, marker=None):
     hs = []
     errors = []
 
@@ -159,7 +159,8 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
     print(f"\nObserved convergence rate (global fit): {tag_prefix} --> p ≈ {p:.2f}")
 
     if ax is not None:
-        ax.loglog(hs, errors, label=rf"{tag_prefix} (p $\approx$ {p:.2f})")
+        ax.loglog(hs, errors, label=rf"{tag_prefix} (p $\approx$ {p:.2f})", marker=marker)
+    return errors
 
 
 # === MMS Functions ===
@@ -225,7 +226,6 @@ if __name__ == "__main__":
     mms_cases = {
         "Sinusoidal": ("-cos(pi*x)*sin(pi*y)", "sin(pi*x)*cos(pi*y)"),
         "Quadratic": ("x**2 + y**2", "x*y"),
-        #"Anisotropic": ("2*pi*cos(2*pi*x)", "-1.5*pi*sin(3*pi*y)"),
         #"Backwards": ("-1.0 + x*0.0", "0.0 + y*0.0"),
         #"Uniform": ("1.0 + x*0.0", "0.0 + y*0.0"),
         #"Linear": ("x", "y")
@@ -233,13 +233,13 @@ if __name__ == "__main__":
     BC_files = {
         "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
         "Quadratic": "shared_configs/domain/sanityChecks/sanityCheckQUAD.yaml",
-        #"Anisotropic": "shared_configs/domain/sanityChecks/sanityCheckANS.yaml",
         #"Backwards": "shared_configs/domain/sanityChecks/sanityCheckBackwards.yaml",
         #"Uniform": "shared_configs/domain/sanityChecks/sanityCheckUniformFlow.yaml",
         #"Linear": "shared_configs/domain/sanityChecks/sanityCheckLinear.yaml"
     }
 
     fig, ax = plt.subplots(figsize=(10, 7))
+    marker_cycle = iter(['o', 's', '^', 'D', 'v', 'p', '*', 'x'])
     time_start = time.time()
 
     for tag, expr in mms_cases.items():
@@ -249,39 +249,41 @@ if __name__ == "__main__":
         u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
         bc_file = BC_files[tag]
         """
+
         run_mms_test(
             structured_uniform["fine"],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} structured",
-            beta=beta
+            beta=beta,
         )
         run_mms_test(
             unstructured["fine"],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} unstructured",
-            beta=beta   
+            beta=beta,
         )
-        """
 
-        
+        """ 
         # Uncomment to run convergence studies
-        run_convergence_study(
+        errors = run_convergence_study(
             [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_structured",
             beta=beta,
-            ax=ax
+            ax=ax,
+            marker=next(marker_cycle)
         )
-        run_convergence_study(
+        errors = run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
             beta=beta,
-            ax=ax
+            ax=ax,
+            marker=next(marker_cycle)
         )
 
     hs = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
@@ -289,13 +291,14 @@ if __name__ == "__main__":
         structured_uniform["medium"],
         structured_uniform["fine"]
     ]])
-    ref_slope = (0.001 * (hs / hs[0])**2)  # Normalize ref slope
-    ax.loglog(hs, ref_slope, 'k--', label='Second-order (ref)')
+    ref_slope = np.min(errors)*15 * (hs / hs[0])#**2  # Normalize ref slope to first error value
+
+    ax.loglog(hs, ref_slope, 'k--', label='First-order (ref)')
 
     ax.grid(True, which="both")
-    ax.set_xlabel("Grid size h")
-    ax.set_ylabel("L2 Error")
-    ax.set_title("Order of accuracy")
+    ax.set_xlabel(r"Grid size $h$")
+    ax.set_ylabel(r"L2 Error")
+    ax.set_title("Order of Accuracy", fontsize=14)
     ax.legend(loc="lower right")
     Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
     plt.savefig("tests/test_output/MMS_convergence/convergence_plot_combined.pdf", dpi=300)

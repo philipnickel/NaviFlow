@@ -25,8 +25,8 @@ def test_momentum_solver_lid_driven(mesh, u_field, mu=0.01, rho=1.0):
         grad_phi = compute_cell_gradients(mesh, u_field[:, comp_idx])
 
         row, col, data, b_correction = assemble_diffusion_convection_matrix(
-            mesh, phi, grad_phi, u_field,
-            rho, mu, comp_idx
+            mesh,  grad_phi, u_field,
+            rho, mu, comp_idx, phi, beta=1.0
         ) 
 
         A = coo_matrix((data, (row, col)), shape=(n_cells, n_cells)).tocsr()
@@ -117,16 +117,16 @@ def lid_top_wall_flow(mesh):
 
 
 if __name__ == "__main__":
-    Re = 1000
+    Re = 400
     mu = 1.0 / Re
-    rho = 1
+    rho = 1.0
     mesh = load_mesh("meshing/experiments/lidDrivenCavity/structuredUniform/fine/lidDrivenCavity_uniform_fine.msh", "shared_configs/domain/boundaries_lid_driven_cavity.yaml")
     #mesh = load_mesh("meshing/experiments/lidDrivenCavity/unstructured/fine/lidDrivenCavity_unstructured_fine.msh", "shared_configs/domain/boundaries_lid_driven_cavity.yaml")
 
     n_cells = mesh.cell_centers.shape[0]
     u_field_dummy = np.zeros((n_cells, 2))  
     u_field_dummy[:, 0] = 1.0
-    u_field_dummy[:, 1] = 0.0
+    u_field_dummy[0, 1] = 0.0
 
 
     #test_momentum_solver_lid_driven(mesh_file, bc_file, mu, rho)

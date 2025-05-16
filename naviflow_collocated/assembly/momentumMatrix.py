@@ -19,7 +19,7 @@ EPS = 1.0e-14
 
 @njit
 def assemble_diffusion_convection_matrix(mesh, grad_phi, u_field, 
-    rho, mu, component_idx, phi=None, beta=0.0):
+    rho, mu, component_idx, phi, beta):
 
 
 
@@ -33,11 +33,39 @@ def assemble_diffusion_convection_matrix(mesh, grad_phi, u_field,
     n_internal = len(mesh.internal_faces)
     for i in range(n_internal):
         f = mesh.internal_faces[i]
+        P = mesh.owner_cells[f]
+        N = mesh.neighbor_cells[f]
+
+        # ---------------- convection term (unchanged) ----------------------
+        if rho != 0.0:
+            a_P, a_N, b_corr = compute_convective_stencil_upwind(
+                f, mesh, rho, u_field, grad_phi, component_idx, phi, beta)
+            row.extend([P, P, N, N])
+            col.extend([P, N, N, P])
+            data.extend([a_P, -a_P, a_N, -a_N])
+
+            b[P] -= b_corr
+            b[N] += b_corr
+        
         # -------- orthogonal (over‑relaxed) Laplacian ----------------------
         P, N, D_f = compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu)
+        """
+        # Compute Peclet number
+        Peclet_term = 0.1 * np.abs(a_P/D_f) 
+        base = np.maximum(0, 1 - Peclet_term)
+        result = np.where(np.abs(a_P) > 1e-10, base**5, 0.0)
+        result = np.nan_to_num(result, nan=0.0)
+
+        power_law = False
+        if power_law: 
+            diff = D_f * result
+        else:
+        """
+        diff = D_f
+
         row.extend([P, P, N, N])
         col.extend([P, N, N, P])
-        data.extend([ D_f, -D_f, D_f, -D_f ])
+        data.extend([ diff, -diff, diff, -diff ])
 
 
         # -------- cross‑diffusion (non‑orth) ------------------------------
@@ -45,18 +73,6 @@ def assemble_diffusion_convection_matrix(mesh, grad_phi, u_field,
         _, _, bcorr = compute_diffusive_correction(f, grad_phi, mesh, mu)
         b[P] -=   bcorr
         b[N] +=   bcorr
-
-
-        # ---------------- convection term (unchanged) ----------------------
-        if rho != 0.0:
-            a_P, a_N, b_corr = compute_convective_stencil_upwind(
-                f, mesh, rho,mu, u_field, grad_phi, component_idx, phi=phi, beta=beta)
-            row.extend([P, P, N, N])
-            col.extend([P, N, N, P])
-            data.extend([a_P, -a_P, a_N, -a_N])
-
-            b[P] -= b_corr
-            b[N] += b_corr
 
 
     n_boundary = len(mesh.boundary_faces)
