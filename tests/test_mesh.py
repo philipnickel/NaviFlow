@@ -120,8 +120,8 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
     # --- Uniform scaling for vector field visualization ---
     vector_scale = 0.2
 
-    os.makedirs("tests/test_output", exist_ok=True)
-    path = f"tests/test_output/mesh_diagnostics_{mesh_label}.pdf"
+    os.makedirs("tests/test_output/mesh_test", exist_ok=True)
+    path = f"tests/test_output/mesh_test/mesh_diagnostics_{mesh_label}.pdf"
 
     fig, ax = plt.subplots(figsize=(11, 11))
     ax.set_aspect("equal")
@@ -205,7 +205,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
             label_pos = mid + mesh.vector_T_f[internal_mask][i] / np.linalg.norm(mesh.vector_T_f[internal_mask][i]) * 0.1
             ax.annotate(r"$\vec{n}$", xy=fc_internal[i], xytext=(label_pos[0], label_pos[1]),
                         fontsize=6, color=colors[0])
-
+        """
         # 4. unit_vector_e (Internal, normalized, at owner cell center, no scaling)
         ax.quiver(cc_owner_internal[:, 0], cc_owner_internal[:, 1],
                   mesh.unit_vector_e[internal_mask, 0] * vector_scale*2,
@@ -220,6 +220,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
             label_pos = mid + e_orth * 0.2
             ax.annotate(r"$\vec{e}$", xy=cc_owner_internal[i], xytext=(label_pos[0], label_pos[1]),
                         fontsize=6, color=colors[0])
+        """
 
         # 5. vector_E_f (Internal, scaled, at face centers)
         ax.quiver(fc_internal[:, 0], fc_internal[:, 1],
@@ -290,17 +291,21 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
 
         # 1. vector_S_f (Boundary, scaled, at face centers)
         ax.quiver(fc_boundary[:, 0], fc_boundary[:, 1],
-                  mesh.vector_S_f[boundary_mask, 0] * vector_scale*0.4,
-                  mesh.vector_S_f[boundary_mask, 1] * vector_scale*0.4,
+                  mesh.vector_S_f[boundary_mask, 0] * vector_scale,
+                  mesh.vector_S_f[boundary_mask, 1] * vector_scale,
                   angles="xy", scale_units="xy", scale=1, color=colors[0],
                   width=0.001, alpha=0.7)
-        # Annotate boundary vector_S_f near tip
+        # Annotate boundary vector_S_f using triangle center logic (same as internal faces)
         for i in range(fc_boundary.shape[0]):
-            Sf_orth = np.array([-mesh.vector_S_f[boundary_mask][i][1], mesh.vector_S_f[boundary_mask][i][0]])
-            Sf_mid = fc_boundary[i] + mesh.vector_S_f[boundary_mask][i] * vector_scale*0.2
-            Sf_tip = Sf_mid + Sf_orth*vector_scale*0.2
-            ax.annotate(r"$\vec{S}_f$", xy=fc_boundary[i],
-                        xytext=(Sf_tip[0] + 0.01, Sf_tip[1] + 0.01),
+            S_vec = mesh.vector_S_f[boundary_mask][i] * vector_scale
+            T_vec =  mesh.vector_T_f[boundary_mask][i] * vector_scale
+            O_S = fc_boundary[i]
+            O_T = O_S + mesh.vector_E_f[boundary_mask][i] * vector_scale
+            mid_S = O_S + 0.5 * S_vec
+            mid_T = O_T + 0.5 * T_vec
+            triangle_center = O_S + 0.5 * (mid_T - O_S)
+            label_pos_S = mid_S + T_vec / (np.linalg.norm(T_vec) + 1e-12) * 0.2
+            ax.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
                         fontsize=5, color=colors[0])
 
         # 2. Vector from Owner Cell Center to Boundary Face Center (P->f), scaled
@@ -319,7 +324,56 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
                     xytext=(Pf_tip[0] + 0.01, Pf_tip[1] + 0.01),
                     fontsize=5, color=colors[0])
 
-  
+        # --- Additional: Plot vector_E_f, vector_T_f, vector_skewness for boundary faces ---
+        # 3. vector_E_f (Boundary, scaled, at face centers)
+        ax.quiver(fc_boundary[:, 0], fc_boundary[:, 1],
+                  mesh.vector_E_f[boundary_mask, 0] * vector_scale,
+                  mesh.vector_E_f[boundary_mask, 1] * vector_scale,
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+        # Annotate vector_E_f at midpoint, offset perpendicular to T_f
+        for i in range(fc_boundary.shape[0]):
+            E_vec = mesh.vector_E_f[boundary_mask][i] * vector_scale
+            mid = fc_boundary[i] + 0.5 * E_vec
+            T_vec = mesh.vector_T_f[boundary_mask][i]
+            T_hat = T_vec / (np.linalg.norm(T_vec) + 1e-12)
+            label_pos = mid - T_hat/(np.linalg.norm(T_hat) + 1e-12) * 0.2
+            ax.annotate(r"$\vec{E}_f$", xy=fc_boundary[i], xytext=(label_pos[0], label_pos[1]),
+                        fontsize=5, color=colors[0])
+
+        # 4. vector_T_f (Boundary, scaled, at tf_origin_boundary)
+        tf_origin_boundary = fc_boundary + mesh.vector_E_f[boundary_mask] * vector_scale
+        ax.quiver(tf_origin_boundary[:, 0], tf_origin_boundary[:, 1],
+                  mesh.vector_T_f[boundary_mask, 0] * vector_scale,
+                  mesh.vector_T_f[boundary_mask, 1] * vector_scale,
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+        # Annotate vector_T_f near its midpoint
+        for i in range(fc_boundary.shape[0]):
+            T_vec = mesh.vector_T_f[boundary_mask][i] * vector_scale
+            O_T = tf_origin_boundary[i]
+            mid_T = O_T + 0.5 * T_vec
+            dir_T = T_vec / (np.linalg.norm(T_vec) + 1e-12)
+            label_pos = mid_T + dir_T * 0.3
+            ax.annotate(r"$\vec{T}_f$", xy=O_T, xytext=(label_pos[0], label_pos[1]),
+                        fontsize=5, color=colors[0])
+
+        # 5. vector_skewness (Boundary, at face centers)
+        ax.quiver(fc_boundary[:, 0] - mesh.vector_skewness[boundary_mask, 0],
+                  fc_boundary[:, 1] - mesh.vector_skewness[boundary_mask, 1],
+                  mesh.vector_skewness[boundary_mask, 0],
+                  mesh.vector_skewness[boundary_mask, 1],
+                  angles="xy", scale_units="xy", scale=1, color=colors[0],
+                  width=0.001, alpha=0.7)
+        # Annotate vector_skewness at midpoint between shifted origin and tip
+        for i in range(fc_boundary.shape[0]):
+            v = mesh.vector_skewness[boundary_mask][i]
+            base = fc_boundary[i] - v
+            mid = base + 0.5 * v
+            n_hat = mesh.unit_vector_n[boundary_mask][i]
+            label_pos = mid - n_hat * vector_scale * 0.75
+            ax.annotate(r"$\vec{d}_{f'f}$", xy=fc_boundary[i], xytext=(label_pos[0], label_pos[1]),
+                        fontsize=4, color=colors[0])
     # Remove legend, use inline annotations instead
     plt.tight_layout()
 

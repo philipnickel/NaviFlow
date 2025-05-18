@@ -3,25 +3,25 @@ sanityCheck:
   uniform:
     description: Uniform mesh for sanity check
     resolutions:
-      coarse: {L: 15.0, nx: 5, ny: 5}
+      coarse: {L: 15.0, nx: 3, ny: 3}
   unstructured:
     description: Unstructured mesh for sanity check
     resolutions:
       coarse:
         Lx: 15.0
         Ly: 15.0
-        n_cells: 5
+        n_cells: 3
         refinement_factors:
           boundaries:
-            left: [1.0, 0.5]
-            right: [1.0, 0.5]
-            top: [1.0, 0.5]
-            bottom: [1.0, 0.5]
+            left: [1.0, 0]
+            right: [1.0, 0]
+            top: [1.0, 0]
+            bottom: [1.0, 0]
           corners:
-            top_left: [1.0, 0.5]
-            top_right: [1.0, 0.5]
-            bottom_left: [1.0, 0.5]
-            bottom_right: [1.0, 0.5]
+            top_left: [1.0, 0]
+            top_right: [1.0, 0]
+            bottom_left: [1.0, 0]
+            bottom_right: [1.0, 0]
 
 lidDrivenCavity:
   description: Classic lid-driven cavity problem with moving top wall
@@ -40,15 +40,15 @@ lidDrivenCavity:
         n_cells: 10000
         refinement_factors:
           boundaries:
-            left: [1, 1] # 10x refinement, 10% towards center
-            right: [1, 1]
-            top: [1, 1]
-            bottom: [1, 1]
+            left: [2, 1] # 10x refinement, 10% towards center
+            right: [2, 1]
+            top: [2, 1]
+            bottom: [2, 1]
           corners:
-            top_left: [1, 1] # 10x refinement, 75% towards center
-            top_right: [1, 1]
-            bottom_left: [1, 1]
-            bottom_right: [1, 1]
+            top_left: [2, 1] # 10x refinement, 75% towards center
+            top_right: [2, 1]
+            bottom_left: [2, 1]
+            bottom_right: [2, 1]
 
       medium:
         Lx: 1.0
@@ -56,30 +56,30 @@ lidDrivenCavity:
         n_cells: 40000
         refinement_factors:
           boundaries:
-            left: [1, 1]
-            right: [1, 1]
-            top: [1, 1]
-            bottom: [1, 1]
+            left: [2, 1]
+            right: [2, 1]
+            top: [2, 1]
+            bottom: [2, 1]
           corners:
-            top_left: [1, 1]
-            top_right: [1, 1]
-            bottom_left: [1, 1]
-            bottom_right: [1, 1]
+            top_left: [2, 1]
+            top_right: [2, 1]
+            bottom_left: [2, 1]
+            bottom_right: [2, 1]
       fine:
         Lx: 1.0
         Ly: 1.0
         n_cells: 160000
         refinement_factors:
           boundaries:
-            left: [1, 1]
-            right: [1, 1]
-            top: [1, 1]
-            bottom: [1, 1]
+            left: [2, 1]
+            right: [2, 1]
+            top: [2, 1]
+            bottom: [2, 1]
           corners:
-            top_left: [1, 1]
-            top_right: [1, 1]
-            bottom_left: [1, 1]
-            bottom_right: [1, 1]
+            top_left: [2, 1]
+            top_right: [2, 1]
+            bottom_left: [2, 1]
+            bottom_right: [2, 1]
 
 cylinderFlow:
   description: Flow around a circular cylinder in a rectangular domain

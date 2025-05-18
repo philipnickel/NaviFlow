@@ -1,75 +1,75 @@
 import numpy as np
+from numba import njit
 
-from numba import njit, prange
-
-
-@njit(parallel=True)
+@njit(cache=True, fastmath=True)
 def compute_cell_gradients(mesh, u):
     """
-    Compute the cell-centered gradient of a scalar field using weighted least squares,
-    consistent with Moukalled et al.
+    Weighted-least-squares ∇u (serial, optimised).
 
-    Parameters:
-    - mesh: MeshData2D
-    - u: scalar field (cell-centered, shape = (n_cells,))
-
-    Returns:
-    - grad_u: cell-centered gradient of u (shape = (n_cells, 2)); suitable for use in deferred correction (vector form)
+    Assumes mesh.cell_faces uses -1 as end-of-row sentinel.
     """
     n_cells = mesh.cell_centers.shape[0]
-    grad_u = np.zeros((n_cells, 2))
+    grad = np.empty((n_cells, 2), dtype=np.float64)
 
-    for c in prange(n_cells):
-        A = np.zeros((2, 2))
-        b = np.zeros(2)
+    # local views – cheaper than attribute lookups in the loop
+    cell_faces     = mesh.cell_faces
+    owner_cells    = mesh.owner_cells
+    neighbor_cells = mesh.neighbor_cells
+    cc             = mesh.cell_centers
+    fc             = mesh.face_centers
+    b_types        = mesh.boundary_types
+    b_vals         = mesh.boundary_values
+    u_arr          = u
 
-        for j in range(mesh.cell_faces.shape[1]):
-            f = mesh.cell_faces[c, j]
-            if f < 0:
-                continue
+    for c in range(n_cells):
+        A00 = A01 = A11 = 0.0   # A10 == A01
+        b0  = b1  = 0.0
 
-            P = mesh.owner_cells[f]
-            N = mesh.neighbor_cells[f]
+        u_c  = u_arr[c]
+        x_Px = cc[c, 0]
+        x_Py = cc[c, 1]
 
-            x_P = mesh.cell_centers[c]
+        # --- iterate faces of cell c --------------------------------------
+        for f in cell_faces[c]:
+            if f < 0:          # sentinel reached
+                break
 
-            if N >= 0:
-                if c == P:
-                    x_other = mesh.cell_centers[N]
-                    u_other = u[N]
-                elif c == N:
-                    x_other = mesh.cell_centers[P]
-                    u_other = u[P]
-                else:
-                    continue
-                vec = x_other - x_P
-                du = u_other - u[c]
-            else:
-                if mesh.boundary_types[f, 0] < 0:
-                    continue
-                x_B = mesh.face_centers[f]
-                u_B = mesh.boundary_values[f, 0]
-                u_P = u[c]
-                vec = x_B - x_P
-                du = u_B - u_P
+            P = owner_cells[f]
+            N = neighbor_cells[f]
 
-            r2 = vec[0] * vec[0] + vec[1] * vec[1] + 1e-14
-            w = 1.0 / r2
+            # -- decide “other” cell/BC once, branchless ----------
+            if N >= 0:                           # internal face
+                other = N if c == P else P
+                vec0  = cc[other, 0] - x_Px
+                vec1  = cc[other, 1] - x_Py
+                du    = u_arr[other] - u_c
+            else:                                # boundary face
+                if b_types[f, 0] < 0:
+                    continue                     # unused slot
+                vec0 = fc[f, 0] - x_Px
+                vec1 = fc[f, 1] - x_Py
+                du   = b_vals[f, 0] - u_c
 
-            A[0, 0] += w * vec[0] * vec[0]
-            A[0, 1] += w * vec[0] * vec[1]
-            A[1, 0] += w * vec[1] * vec[0]
-            A[1, 1] += w * vec[1] * vec[1]
+            r2 = vec0*vec0 + vec1*vec1 + 1e-14
+            w  = 1.0 / r2
 
-            b[0] += w * vec[0] * du
-            b[1] += w * vec[1] * du
+            # accumulate symmetric A in 3 scalars
+            A00 += w * vec0 * vec0
+            A01 += w * vec0 * vec1      # = A10
+            A11 += w * vec1 * vec1
 
-        det = A[0, 0] * A[1, 1] - A[0, 1] * A[1, 0]
+            b0  += w * vec0 * du
+            b1  += w * vec1 * du
+
+        # --- solve 2×2 ------------------------------------------
+        det = A00*A11 - A01*A01       # since A10=A01
         if np.abs(det) > 1e-14:
-            A_inv = np.array([[A[1, 1], -A[0, 1]], [-A[1, 0], A[0, 0]]]) / det
-            grad_u[c] = A_inv @ b
+            inv00 =  A11 / det
+            inv01 = -A01 / det
+            inv11 =  A00 / det
+            grad[c, 0] = inv00*b0 + inv01*b1
+            grad[c, 1] = inv01*b0 + inv11*b1
         else:
-            grad_u[c] = 0.0
+            grad[c, 0] = grad[c, 1] = 0.0
 
-    # Returned gradients are accurate vector fields, suitable for use in ∇φ ⋅ (t_f + d_f) deferred correction terms
-    return np.ascontiguousarray(grad_u)
+    return grad

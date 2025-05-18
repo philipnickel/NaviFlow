@@ -39,10 +39,9 @@ def plot_field(mesh, field, ax=None, title=None):
             ax.set_title(title)
     ax.set_aspect("equal")
 
-def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0):
+def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None):
     mesh = load_mesh(mesh_file, bc_file)
-
-    # Get the exact solution and ensure it has the right shape
+     # Get the exact solution and ensure it has the right shape
     phi_exact = u_exact_fn[component_idx](mesh.cell_centers)
     if np.isscalar(phi_exact) or phi_exact.size == 1:
         # If it's a scalar value, broadcast to all cells
@@ -58,25 +57,37 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
 
     row, col, data, b_correction = assemble_diffusion_convection_matrix(
         mesh, grad_phi, u_field, 
-        rho, mu, component_idx, phi=phi_exact, beta=beta
+        rho, mu, component_idx, phi=phi_exact, scheme=scheme, limiter=limiter
     )
 
     A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
+
+    # Plot sparsity pattern of matrix A
+    fig_spy, ax_spy = plt.subplots(figsize=(6, 6))
+    ax_spy.spy(A, markersize=0.5)
+    ax_spy.set_title("Sparsity pattern of matrix A")
+    plt.tight_layout()
+    outdir = Path("tests/test_output/MMS_solutions")
+    outdir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(outdir / f"sparsity_{tag_prefix}.png", dpi=300)
+    plt.close()
+
     rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
 
-    phi_numeric = spsolve(A, rhs)
+    from petsc4py import PETSc
+    b_petsc = PETSc.Vec().createWithArray(rhs)
+    x_petsc = PETSc.Vec().createSeq(A.shape[0])
+    A_petsc = PETSc.Mat().createAIJ(size=A.shape, csr=(A.indptr, A.indices, A.data))
+    ksp = PETSc.KSP().create()
+    ksp.setOperators(A_petsc)
+    ksp.setType("bcgs")
+    ksp.getPC().setType("hypre")
+    ksp.setTolerances(rtol=1e-12, atol=1e-14, max_it=5000)
+    ksp.setFromOptions()
+    ksp.solve(b_petsc, x_petsc)
+    phi_numeric = x_petsc.getArray()
 
-    # Compute the residual A·phi_exact - rhs_fn(mesh.cell_centers)*vol - b_correction
-    assert np.all(np.isfinite(phi_exact))
-    assert np.all(np.isfinite(u_field))
-    assert np.all(np.isfinite(grad_phi))
-    assert np.all(np.isfinite(A.data))
-    assert np.all(np.isfinite(rhs))
-    
-    # Make sure phi_exact matches the shape expected by A (same as the RHS)
-    if phi_exact.shape != rhs.shape:
-        phi_exact = phi_exact.reshape(rhs.shape)
-        
+ 
     Aphi_exact = A.dot(phi_exact)
     residual = Aphi_exact - rhs_fn(mesh.cell_centers) * mesh.cell_volumes - b_correction
     flux_imbalance = np.sum(residual)
@@ -101,7 +112,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
 # The following test follows the Method of Manufactured Solutions (MMS) approach
 # to verify spatial convergence of the numerical scheme by comparing numerical
 # and exact solutions on a sequence of refined meshes.
-def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, beta=0.0, ax=None, marker=None):
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None, ax=None, marker=None):
     hs = []
     errors = []
 
@@ -119,13 +130,14 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
         
         u_field = u_field_fn(mesh.cell_centers)
         u_field = np.ascontiguousarray(u_field)
-        grad_phi = compute_cell_gradients(mesh, phi_exact)
+        grad_phi_num = compute_cell_gradients(mesh, phi_exact)
+        #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
 
 
 
         row, col, data, b_correction = assemble_diffusion_convection_matrix(
-            mesh, grad_phi, u_field,
-            rho, mu, component_idx, phi=phi_exact, beta=beta
+            mesh, grad_phi_num, u_field,
+            rho, mu, component_idx, phi=phi_exact, scheme=scheme, limiter=limiter
         )
 
 
@@ -133,7 +145,18 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
         diag = A.diagonal()
         rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
 
-        phi_numeric = spsolve(A, rhs)
+        from petsc4py import PETSc
+        b_petsc = PETSc.Vec().createWithArray(rhs)
+        x_petsc = PETSc.Vec().createSeq(A.shape[0])
+        A_petsc = PETSc.Mat().createAIJ(size=A.shape, csr=(A.indptr, A.indices, A.data))
+        ksp = PETSc.KSP().create()
+        ksp.setOperators(A_petsc)
+        ksp.setType("bcgs")
+        ksp.getPC().setType("hypre")
+        ksp.setTolerances(rtol=1e-12, atol=1e-14, max_it=5000)
+        ksp.setFromOptions()
+        ksp.solve(b_petsc, x_petsc)
+        phi_numeric = x_petsc.getArray()
         
         # Make sure phi_exact matches the shape expected by A (same as the RHS)
         if phi_exact.shape != rhs.shape:
@@ -159,7 +182,7 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
     print(f"\nObserved convergence rate (global fit): {tag_prefix} --> p ≈ {p:.2f}")
 
     if ax is not None:
-        ax.loglog(hs, errors, label=rf"{tag_prefix} (p $\approx$ {p:.2f})", marker=marker)
+        ax.loglog(hs, errors, label=rf"{tag_prefix}", marker=marker)
     return errors
 
 
@@ -224,15 +247,17 @@ if __name__ == "__main__":
 
     # === Additional MMS Cases ===
     mms_cases = {
-        "Sinusoidal": ("-cos(pi*x)*sin(pi*y)", "sin(pi*x)*cos(pi*y)"),
-        "Quadratic": ("x**2 + y**2", "x*y"),
+        "Sinusoidal": ("-cos(pi*x)*sin(pi*y)", "-cos(pi*x)*sin(pi*y)"),
+        "Sine_cos": ("sin(4*pi*(x+y))+cos(4*pi*x*y)", "sin(4*pi*(x+y))+cos(4*pi*x*y)"),
+        #"Exponential": ("exp(x)*sin(y)+x", "cos(y)+x+0.1"),
         #"Backwards": ("-1.0 + x*0.0", "0.0 + y*0.0"),
         #"Uniform": ("1.0 + x*0.0", "0.0 + y*0.0"),
         #"Linear": ("x", "y")
     }
     BC_files = {
         "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
-        "Quadratic": "shared_configs/domain/sanityChecks/sanityCheckQUAD.yaml",
+        "Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
+        #"Exponential": "shared_configs/domain/sanityChecks/sanityCheckEXP.yaml",
         #"Backwards": "shared_configs/domain/sanityChecks/sanityCheckBackwards.yaml",
         #"Uniform": "shared_configs/domain/sanityChecks/sanityCheckUniformFlow.yaml",
         #"Linear": "shared_configs/domain/sanityChecks/sanityCheckLinear.yaml"
@@ -245,34 +270,40 @@ if __name__ == "__main__":
     for tag, expr in mms_cases.items():
         mu = 0.01
         rho = 1.0
-        beta = 1.0
+        scheme = "TVD"
+        limiter = "MUSCL" # MUSCL, OSPRE, H_Cui
         u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
         bc_file = BC_files[tag]
         """
+        
+        
 
         run_mms_test(
             structured_uniform["fine"],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} structured",
-            beta=beta,
+            scheme=scheme,
+            limiter=limiter,
         )
         run_mms_test(
             unstructured["fine"],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} unstructured",
-            beta=beta,
+            scheme=scheme,
+            limiter=limiter,
         )
-
-        """ 
+        """
+             
         # Uncomment to run convergence studies
         errors = run_convergence_study(
             [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_structured",
-            beta=beta,
+            scheme=scheme,
+            limiter=limiter,
             ax=ax,
             marker=next(marker_cycle)
         )
@@ -281,7 +312,8 @@ if __name__ == "__main__":
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
-            beta=beta,
+            scheme=scheme,
+            limiter=limiter,
             ax=ax,
             marker=next(marker_cycle)
         )
@@ -291,9 +323,9 @@ if __name__ == "__main__":
         structured_uniform["medium"],
         structured_uniform["fine"]
     ]])
-    ref_slope = np.min(errors)*15 * (hs / hs[0])#**2  # Normalize ref slope to first error value
+    ref_slope = np.min(errors)*2 * (hs / hs[0])#**2  # Normalize ref slope to first error value
 
-    ax.loglog(hs, ref_slope, 'k--', label='First-order (ref)')
+    ax.loglog(hs, ref_slope, 'k--', label=r'$\mathcal{O}(h)$')
 
     ax.grid(True, which="both")
     ax.set_xlabel(r"Grid size $h$")

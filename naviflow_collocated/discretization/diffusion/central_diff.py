@@ -39,7 +39,7 @@ def compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu):
     N   = mesh.neighbor_cells[f]
     mu_f = mu 
 
-    E_f  = mesh.vector_E_f[f]          # over‑relaxed projection along d_CE
+    E_f  = mesh.vector_E_f[f]          # orthogonal implicit conductance
     d_CE = mesh.vector_d_CE[f]
 
     E_mag = np.linalg.norm(E_f) + EPS
@@ -100,7 +100,7 @@ def compute_boundary_diffusive_correction(
     if bc_type == BC_DIRICHLET:
         E_mag = np.linalg.norm(E_f) + EPS
         a_P = muF * E_mag / (d_PB + EPS)
-        b_P = -a_P * bc_val  # implicit orthogonal part
+        b_P = -a_P * bc_val  # explicit orthogonal part
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
@@ -108,10 +108,11 @@ def compute_boundary_diffusive_correction(
         grad_P_mark = grad_P + np.dot(grad_P, d_skew)
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
         b_P += fluxVb 
+   
         
     elif bc_type == BC_NEUMANN:
-        pass
-        # TODO: Neumann boundary condition
+        E_mag = np.linalg.norm(E_f) + EPS
+        b_P = -muF * bc_val * E_mag
        
     
     elif bc_type == BC_ZEROGRADIENT:
