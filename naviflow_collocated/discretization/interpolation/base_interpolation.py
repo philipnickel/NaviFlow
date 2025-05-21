@@ -1,1 +1,0 @@
-# Placeholder for base interpolation scheme class

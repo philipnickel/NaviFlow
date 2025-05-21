@@ -92,7 +92,7 @@ def compute_convective_stencil(
     return aP, aN, -b_corr
 
 @njit(inline="always")
-def compute_boundary_convective_flux(f, mesh, rho, u_field, bc_type, bc_value, component_idx):
+def compute_boundary_convective_flux(f, mesh, rho, u_field, phi, bc_type, bc_value, component_idx):
     """
     First-order upwind boundary convection flux for a specific velocity component.
     Skewness correction is ignored at boundaries.
@@ -101,17 +101,22 @@ def compute_boundary_convective_flux(f, mesh, rho, u_field, bc_type, bc_value, c
     Sf = np.ascontiguousarray(mesh.vector_S_f[f])
     u_boundary = np.ascontiguousarray(mesh.boundary_values[f, :2])
     u_P= np.ascontiguousarray(u_field[P])
+    phi_P = np.ascontiguousarray(phi[P])
 
 
     mdot_boundary = rho * np.dot(u_boundary, np.ascontiguousarray(Sf))
+    mdot_boundary = -max(0.0, -mdot_boundary)
     mdot_P = rho * np.dot(u_P, np.ascontiguousarray(Sf))
     mdot_P = -max(0.0, -mdot_P)
 
     if bc_type == BC_DIRICHLET:
+        return mdot_boundary, -mdot_boundary * (2*phi_P[component_idx] - bc_value)
+        """
         if mdot_boundary > 0:  # outflow (confirmed)
-            return mdot_P, 0.0#-mdot_P* bc_value #mdot, -mdot * bc_value   # outflow 
+            return 0.0, 0.0#mdot_boundary* bc_value #mdot, -mdot * bc_value   # outflow 
         else: # inflow
             return mdot_P, -mdot_boundary * bc_value #mdot, -mdot * bc_value   # outflow 
+        """
     elif bc_type == BC_ZEROGRADIENT:
         return 0.0, 0.0
     elif bc_type == BC_NEUMANN:

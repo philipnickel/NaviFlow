@@ -1,12 +1,4 @@
 import os
-os.environ["NUMBA_NUM_THREADS"] = "4"
-os.environ["OMP_NUM_THREADS"] = "4"
-os.environ["OMP_MAX_ACTIVE_LEVELS"] = "4"
-
-
-
-
-
 import sympy as sp
 from sympy.utilities.lambdify import lambdify
 import numpy as np
@@ -16,8 +8,9 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.linalg import spsolve
 import time
 from naviflow_collocated.mesh.mesh_loader import load_mesh
-from naviflow_collocated.assembly.momentumMatrix import assemble_diffusion_convection_matrix
+from naviflow_collocated.assembly.convection_diffusion_matrix import assemble_diffusion_convection_matrix
 from naviflow_collocated.discretization.gradient.leastSquares import compute_cell_gradients
+from petsc4py import PETSc
 
 def plot_field(mesh, field, ax=None, title=None):
     if ax is None:
@@ -74,7 +67,6 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
 
     rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
 
-    from petsc4py import PETSc
     b_petsc = PETSc.Vec().createWithArray(rhs)
     x_petsc = PETSc.Vec().createSeq(A.shape[0])
     A_petsc = PETSc.Mat().createAIJ(size=A.shape, csr=(A.indptr, A.indices, A.data))
@@ -169,7 +161,7 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
         l2_err = np.sqrt(np.mean(err**2))
         errors.append(l2_err)
 
-        print(f"[{tag_prefix}] h = {h:.4f}, L2 error = {l2_err:.3e}, Flux imbalance = {flux_imbalance:.3e}")
+        print(f"[{tag_prefix} - {scheme}] h = {h:.4f}, L2 error = {l2_err:.3e}, Flux imbalance = {flux_imbalance:.3e}")
 
     hs = np.array(hs)
     errors = np.array(errors)
@@ -182,7 +174,7 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
     print(f"\nObserved convergence rate (global fit): {tag_prefix} --> p ≈ {p:.2f}")
 
     if ax is not None:
-        ax.loglog(hs, errors, label=rf"{tag_prefix}", marker=marker)
+        ax.loglog(hs, errors, label=rf"{tag_prefix} - {scheme}", marker=marker)
     return errors
 
 
@@ -248,7 +240,7 @@ if __name__ == "__main__":
     # === Additional MMS Cases ===
     mms_cases = {
         "Sinusoidal": ("-cos(pi*x)*sin(pi*y)", "-cos(pi*x)*sin(pi*y)"),
-        "Sine_cos": ("sin(4*pi*(x+y))+cos(4*pi*x*y)", "sin(4*pi*(x+y))+cos(4*pi*x*y)"),
+        #"Sine_cos": ("sin(4*pi*(x+y))+cos(4*pi*x*y)", "sin(4*pi*(x+y))+cos(4*pi*x*y)"),
         #"Exponential": ("exp(x)*sin(y)+x", "cos(y)+x+0.1"),
         #"Backwards": ("-1.0 + x*0.0", "0.0 + y*0.0"),
         #"Uniform": ("1.0 + x*0.0", "0.0 + y*0.0"),
@@ -256,7 +248,7 @@ if __name__ == "__main__":
     }
     BC_files = {
         "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
-        "Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
+        #"Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
         #"Exponential": "shared_configs/domain/sanityChecks/sanityCheckEXP.yaml",
         #"Backwards": "shared_configs/domain/sanityChecks/sanityCheckBackwards.yaml",
         #"Uniform": "shared_configs/domain/sanityChecks/sanityCheckUniformFlow.yaml",
@@ -264,20 +256,24 @@ if __name__ == "__main__":
     }
 
     fig, ax = plt.subplots(figsize=(10, 7))
-    marker_cycle = iter(['o', 's', '^', 'D', 'v', 'p', '*', 'x'])
+    marker_cycle = iter(['o', 's', '^', 'D', 'v', 'p', '*', 'x', 'P', 'H', 'X', 'D', 'p', 'P', 'H', 'X'])
+
     time_start = time.time()
 
     for tag, expr in mms_cases.items():
-        mu = 0.01
+        mu = 0.1
         rho = 1.0
-        scheme = "TVD"
+        scheme1 = "SOU"
+        scheme2 = "QUICK"
+        scheme3 = "TVD"
+        #scheme4 = "Upwind"
         limiter = "MUSCL" # MUSCL, OSPRE, H_Cui
         u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
         bc_file = BC_files[tag]
+        
+        
+        
         """
-        
-        
-
         run_mms_test(
             structured_uniform["fine"],
             bc_file,
@@ -302,7 +298,7 @@ if __name__ == "__main__":
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_structured",
-            scheme=scheme,
+            scheme=scheme1,
             limiter=limiter,
             ax=ax,
             marker=next(marker_cycle)
@@ -312,20 +308,61 @@ if __name__ == "__main__":
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
-            scheme=scheme,
+            scheme=scheme1,
             limiter=limiter,
             ax=ax,
             marker=next(marker_cycle)
         )
+        errors = run_convergence_study(
+                    [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+                    bc_file,
+                    u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+                    tag_prefix=f"{tag}_structured",
+                    scheme=scheme2,
+                    limiter=limiter,
+                    ax=ax,
+                    marker=next(marker_cycle)
+                )
+        errors = run_convergence_study(
+            [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+            bc_file,
+            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_unstructured",
+            scheme=scheme2,
+            limiter=limiter,
+            ax=ax,
+            marker=next(marker_cycle)
+        )
+        errors = run_convergence_study(
+                    [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+                    bc_file,
+                    u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+                    tag_prefix=f"{tag}_structured",
+                    scheme=scheme3,
+                    limiter=limiter,
+                    ax=ax,
+                    marker=next(marker_cycle)
+                )
+        errors = run_convergence_study(
+            [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+            bc_file,
+            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_unstructured",
+            scheme=scheme3,
+            limiter=limiter,
+            ax=ax,
+            marker=next(marker_cycle)
+        )
+
 
     hs = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
         structured_uniform["coarse"],
         structured_uniform["medium"],
         structured_uniform["fine"]
     ]])
-    ref_slope = np.min(errors)*2 * (hs / hs[0])#**2  # Normalize ref slope to first error value
+    ref_slope = np.min(errors)*2 * (hs / hs[0])**2  # Normalize ref slope to first error value
 
-    ax.loglog(hs, ref_slope, 'k--', label=r'$\mathcal{O}(h)$')
+    ax.loglog(hs, ref_slope, 'k--', label=r'$\mathcal{O}(h^2)$')
 
     ax.grid(True, which="both")
     ax.set_xlabel(r"Grid size $h$")
@@ -335,4 +372,5 @@ if __name__ == "__main__":
     Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
     plt.savefig("tests/test_output/MMS_convergence/convergence_plot_combined.pdf", dpi=300)
     plt.close()
+    
     print(f"Time taken: {time.time() - time_start:.2f} seconds")

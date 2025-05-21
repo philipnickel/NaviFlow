@@ -4,7 +4,7 @@ from scipy.sparse.linalg import spsolve
 from petsc4py import PETSc
 import matplotlib.pyplot as plt
 from naviflow_collocated.mesh.mesh_loader import load_mesh
-from naviflow_collocated.assembly.momentumMatrix import assemble_diffusion_convection_matrix
+from naviflow_collocated.assembly.convection_diffusion_matrix import assemble_diffusion_convection_matrix
 from naviflow_collocated.discretization.gradient.leastSquares import compute_cell_gradients
 import os
 
@@ -27,7 +27,7 @@ def test_momentum_solver_lid_driven(mesh, u_field, mu=0.01, rho=1.0):
 
         row, col, data, b_correction = assemble_diffusion_convection_matrix(
             mesh, grad_phi, u_field,
-            rho, mu, comp_idx, phi, beta=1.0
+            rho, mu, comp_idx, phi, scheme="TVD", limiter="MUSCL"
         )
 
         A = coo_matrix((data, (row, col)), shape=(n_cells, n_cells)).tocsr()
