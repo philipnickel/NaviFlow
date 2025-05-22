@@ -80,5 +80,6 @@ def pytest_generate_tests(metafunc):
                 "unstructured_refined",
                 "sanity_check_uniform",
                 "sanity_check_unstructured",
-            ],  # , "cylinder_flow"],
+                "cylinder_flow",
+            ],
         )

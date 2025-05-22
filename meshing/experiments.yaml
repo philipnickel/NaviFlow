@@ -28,7 +28,7 @@ lidDrivenCavity:
   uniform:
     description: Uniform structured mesh for lid-driven cavity at multiple resolutions
     resolutions:
-      coarse: {L: 1.0, nx: 100, ny: 100}
+      coarse: {L: 1.0, nx: 50, ny: 50}
       medium: {L: 1.0, nx: 200, ny: 200}
       fine: {L: 1.0, nx: 400, ny: 400}
   unstructured:
@@ -87,13 +87,13 @@ cylinderFlow:
     description: Unstructured mesh for flow around a cylinder at multiple resolutions
     resolutions:
       coarse:
-        Lx: 2.2
-        Ly: 0.41
-        n_cells: 500
+        Lx: 20
+        Ly: 10
+        n_cells: 200
         obstacle:
           type: circle
-          center: [0.2, 0.205]
-          radius: 0.05
+          center: [5, 5]
+          radius: 2.5
         refinement_factors:
           boundaries:
             left: [1.0, 0.1]

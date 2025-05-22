@@ -21,19 +21,17 @@ from .helpers.mesh_loader_helpers import (
 # These should be used consistently across the codebase
 BC_WALL = 0
 BC_DIRICHLET = 1
-BC_NEUMANN = 2
-BC_ZEROGRADIENT = 3
-BC_CONVECTIVE = 4
-BC_SYMMETRY = 5
+BC_INLET = 2
+BC_OUTLET = 3
+BC_NEUMANN = 4
 
 # Map from string names to type constants
 BC_TYPE_MAP = {
     "wall": BC_WALL,
     "dirichlet": BC_DIRICHLET,
+    "inlet": BC_INLET,
+    "outlet": BC_OUTLET,
     "neumann": BC_NEUMANN,
-    "zerogradient": BC_ZEROGRADIENT,
-    "convective": BC_CONVECTIVE,
-    "symmetry": BC_SYMMETRY,
 }
 def ensure_contiguous(*arrays):
     return [np.ascontiguousarray(a) for a in arrays]
@@ -318,12 +316,12 @@ def _build_meshdata2d(
         x_f_coords = face_centers[face_id]
 
         vel_bc_spec = bc_config_for_patch.get("velocity", {})
-        vel_type = BC_TYPE_MAP.get(vel_bc_spec.get("bc", "zerogradient").lower(), BC_ZEROGRADIENT)
+        vel_type = BC_TYPE_MAP.get(vel_bc_spec.get("bc", "neumann").lower(), BC_NEUMANN)
         vel_val_raw = vel_bc_spec.get("value", [0.0, 0.0])
         eval_vel = _evaluate_bc_value_at_face(vel_val_raw, x_f_coords, "velocity", patch_name)
 
         p_bc_spec = bc_config_for_patch.get("pressure", {})
-        p_type = BC_TYPE_MAP.get(p_bc_spec.get("bc", "zerogradient").lower(), BC_ZEROGRADIENT)
+        p_type = BC_TYPE_MAP.get(p_bc_spec.get("bc", "dirichlet").lower(), BC_DIRICHLET)
         p_val_raw = p_bc_spec.get("value", 0.0)
         eval_p = _evaluate_bc_value_at_face(p_val_raw, x_f_coords, "pressure", patch_name)
 

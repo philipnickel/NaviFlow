@@ -3,10 +3,12 @@ from numba import njit
 
 EPS = 1.0e-14
 
-BC_DIRICHLET    = 1
-BC_NEUMANN      = 2
-BC_ZEROGRADIENT = 3
-BC_CONVECTIVE   = 4
+BC_WALL = 0
+BC_DIRICHLET = 1
+BC_INLET = 2
+BC_OUTLET = 3
+BC_NEUMANN = 4
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Internal faces
 # ──────────────────────────────────────────────────────────────────────────────
@@ -113,16 +115,12 @@ def compute_boundary_diffusive_correction(
     elif bc_type == BC_NEUMANN:
         E_mag = np.linalg.norm(E_f) + EPS
         b_P = -muF * bc_val * E_mag
-       
-    
-    elif bc_type == BC_ZEROGRADIENT:
-        # Zero gradient (Neumann with zero flux): no contribution to matrix or RHS
-        a_P = 0.0
+    elif bc_type == BC_WALL:
         b_P = 0.0
-    
-    # Default fallback for any other boundary condition
-    else:
-        a_P = 0.0
+    elif bc_type == BC_INLET:
         b_P = 0.0
+    elif bc_type == BC_OUTLET:
+        b_P = 0.0
+
 
     return P, a_P, b_P

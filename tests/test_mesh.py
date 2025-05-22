@@ -5,7 +5,6 @@ from naviflow_collocated.mesh.mesh_data import MeshData2D
 from utils.plot_style import plt
 from matplotlib import rcParams
 import pytest
-from naviflow_collocated.mesh.mesh_loader import load_mesh, BC_WALL, BC_DIRICHLET, BC_NEUMANN, BC_ZEROGRADIENT
 
 # --- Matplotlib colors for diagnostic plotting ---
 colors = rcParams["axes.prop_cycle"].by_key()["color"]
@@ -114,7 +113,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
     only plots for small meshes
     """
     mesh = mesh_instance
-    if mesh.cell_volumes.shape[0] > 200:
+    if mesh.cell_volumes.shape[0] > 400:
         return
 
     # --- Uniform scaling for vector field visualization ---
@@ -295,6 +294,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
                   mesh.vector_S_f[boundary_mask, 1] * vector_scale,
                   angles="xy", scale_units="xy", scale=1, color=colors[0],
                   width=0.001, alpha=0.7)
+        """
         # Annotate boundary vector_S_f using triangle center logic (same as internal faces)
         for i in range(fc_boundary.shape[0]):
             S_vec = mesh.vector_S_f[boundary_mask][i] * vector_scale
@@ -307,6 +307,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
             label_pos_S = mid_S + T_vec / (np.linalg.norm(T_vec) + 1e-12) * 0.2
             ax.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
                         fontsize=5, color=colors[0])
+        """
 
         # 2. Vector from Owner Cell Center to Boundary Face Center (P->f), scaled
         vec_Pf_boundary = fc_boundary - cc_owner_boundary
@@ -316,6 +317,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
                   angles="xy", scale_units="xy", scale=1, color=colors[0],
                   width=0.001, alpha=0.2)
         # Annotate boundary d_Pf near tip
+        """
         for i in range(cc_owner_boundary.shape[0]):
             Pf_orth = np.array([-vec_Pf_boundary[i][1], vec_Pf_boundary[i][0]])
             Pf_mid = cc_owner_boundary[i] + vec_Pf_boundary[i] * 0.5
@@ -323,6 +325,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
             ax.annotate(r"$\vec{d}_{Pf}$", xy=cc_owner_boundary[i],
                     xytext=(Pf_tip[0] + 0.01, Pf_tip[1] + 0.01),
                     fontsize=5, color=colors[0])
+        """
 
         # --- Additional: Plot vector_E_f, vector_T_f, vector_skewness for boundary faces ---
         # 3. vector_E_f (Boundary, scaled, at face centers)
@@ -332,6 +335,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
                   angles="xy", scale_units="xy", scale=1, color=colors[0],
                   width=0.001, alpha=0.7)
         # Annotate vector_E_f at midpoint, offset perpendicular to T_f
+        """
         for i in range(fc_boundary.shape[0]):
             E_vec = mesh.vector_E_f[boundary_mask][i] * vector_scale
             mid = fc_boundary[i] + 0.5 * E_vec
@@ -340,6 +344,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
             label_pos = mid - T_hat/(np.linalg.norm(T_hat) + 1e-12) * 0.2
             ax.annotate(r"$\vec{E}_f$", xy=fc_boundary[i], xytext=(label_pos[0], label_pos[1]),
                         fontsize=5, color=colors[0])
+        """
 
         # 4. vector_T_f (Boundary, scaled, at tf_origin_boundary)
         tf_origin_boundary = fc_boundary + mesh.vector_E_f[boundary_mask] * vector_scale
@@ -349,6 +354,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
                   angles="xy", scale_units="xy", scale=1, color=colors[0],
                   width=0.001, alpha=0.7)
         # Annotate vector_T_f near its midpoint
+        """
         for i in range(fc_boundary.shape[0]):
             T_vec = mesh.vector_T_f[boundary_mask][i] * vector_scale
             O_T = tf_origin_boundary[i]
@@ -357,6 +363,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
             label_pos = mid_T + dir_T * 0.3
             ax.annotate(r"$\vec{T}_f$", xy=O_T, xytext=(label_pos[0], label_pos[1]),
                         fontsize=5, color=colors[0])
+        """
 
         # 5. vector_skewness (Boundary, at face centers)
         ax.quiver(fc_boundary[:, 0] - mesh.vector_skewness[boundary_mask, 0],
@@ -366,6 +373,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
                   angles="xy", scale_units="xy", scale=1, color=colors[0],
                   width=0.001, alpha=0.7)
         # Annotate vector_skewness at midpoint between shifted origin and tip
+        """
         for i in range(fc_boundary.shape[0]):
             v = mesh.vector_skewness[boundary_mask][i]
             base = fc_boundary[i] - v
@@ -374,6 +382,7 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
             label_pos = mid - n_hat * vector_scale * 0.75
             ax.annotate(r"$\vec{d}_{f'f}$", xy=fc_boundary[i], xytext=(label_pos[0], label_pos[1]),
                         fontsize=4, color=colors[0])
+        """
     # Remove legend, use inline annotations instead
     plt.tight_layout()
 

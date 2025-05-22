@@ -11,6 +11,7 @@ from naviflow_collocated.mesh.mesh_loader import load_mesh
 from naviflow_collocated.assembly.convection_diffusion_matrix import assemble_diffusion_convection_matrix
 from naviflow_collocated.discretization.gradient.leastSquares import compute_cell_gradients
 from petsc4py import PETSc
+from naviflow_collocated.assembly.rhie_chow import compute_face_fluxes, compute_face_velocities
 
 def plot_field(mesh, field, ax=None, title=None):
     if ax is None:
@@ -44,13 +45,18 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
     
     u_field = u_field_fn(mesh.cell_centers)
     u_field = np.ascontiguousarray(u_field)
-    #grad_phi_num = compute_cell_gradients(mesh, phi_exact)
-    grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
+    grad_phi = compute_cell_gradients(mesh, phi_exact)
+    #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
+    face_velocities = compute_face_velocities(mesh, u_field[:, 0], u_field[:, 1])
+    mdot = compute_face_fluxes(mesh, face_velocities, rho)
+    dummy_pressure = np.zeros(mesh.cell_centers.shape[0])
+    dummy_grad_p = compute_cell_gradients(mesh, dummy_pressure)
 
 
     row, col, data, b_correction = assemble_diffusion_convection_matrix(
-        mesh, grad_phi, u_field, 
-        rho, mu, component_idx, phi=phi_exact, scheme=scheme, limiter=limiter
+        mesh, mdot, grad_phi, u_field, 
+        rho, mu, component_idx, phi_exact, scheme, limiter,
+        dummy_pressure, dummy_grad_p
     )
 
     A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
@@ -124,12 +130,15 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
         u_field = np.ascontiguousarray(u_field)
         grad_phi_num = compute_cell_gradients(mesh, phi_exact)
         #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
-
-
+        face_velocities = compute_face_velocities(mesh, u_field[:, 0], u_field[:, 1])
+        mdot = compute_face_fluxes(mesh, face_velocities, rho)
+        dummy_pressure = np.zeros(mesh.cell_centers.shape[0])
+        dummy_grad_p = compute_cell_gradients(mesh, dummy_pressure)
 
         row, col, data, b_correction = assemble_diffusion_convection_matrix(
-            mesh, grad_phi_num, u_field,
-            rho, mu, component_idx, phi=phi_exact, scheme=scheme, limiter=limiter
+            mesh, mdot, grad_phi_num, u_field,
+            rho, mu, component_idx, phi_exact, scheme, limiter,
+            dummy_pressure, dummy_grad_p
         )
 
 
@@ -240,7 +249,7 @@ if __name__ == "__main__":
     # === Additional MMS Cases ===
     mms_cases = {
         "Sinusoidal": ("-cos(pi*x)*sin(pi*y)", "-cos(pi*x)*sin(pi*y)"),
-        #"Sine_cos": ("sin(4*pi*(x+y))+cos(4*pi*x*y)", "sin(4*pi*(x+y))+cos(4*pi*x*y)"),
+        "Sine_cos": ("sin(4*pi*(x+y))+cos(4*pi*x*y)", "sin(4*pi*(x+y))+cos(4*pi*x*y)"),
         #"Exponential": ("exp(x)*sin(y)+x", "cos(y)+x+0.1"),
         #"Backwards": ("-1.0 + x*0.0", "0.0 + y*0.0"),
         #"Uniform": ("1.0 + x*0.0", "0.0 + y*0.0"),
@@ -248,7 +257,7 @@ if __name__ == "__main__":
     }
     BC_files = {
         "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
-        #"Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
+        "Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
         #"Exponential": "shared_configs/domain/sanityChecks/sanityCheckEXP.yaml",
         #"Backwards": "shared_configs/domain/sanityChecks/sanityCheckBackwards.yaml",
         #"Uniform": "shared_configs/domain/sanityChecks/sanityCheckUniformFlow.yaml",
@@ -263,23 +272,21 @@ if __name__ == "__main__":
     for tag, expr in mms_cases.items():
         mu = 0.1
         rho = 1.0
-        scheme1 = "SOU"
-        scheme2 = "QUICK"
-        scheme3 = "TVD"
-        #scheme4 = "Upwind"
+        scheme4 = "SOU"
+        scheme1 = "QUICK"
+        scheme2 = "TVD"
+        scheme3 = "Upwind"
         limiter = "MUSCL" # MUSCL, OSPRE, H_Cui
         u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
         bc_file = BC_files[tag]
         
-        
-        
-        """
+        """ 
         run_mms_test(
             structured_uniform["fine"],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} structured",
-            scheme=scheme,
+            scheme=scheme2,
             limiter=limiter,
         )
         run_mms_test(
@@ -287,7 +294,7 @@ if __name__ == "__main__":
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} unstructured",
-            scheme=scheme,
+            scheme=scheme2,
             limiter=limiter,
         )
         """
@@ -372,5 +379,6 @@ if __name__ == "__main__":
     Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
     plt.savefig("tests/test_output/MMS_convergence/convergence_plot_combined.pdf", dpi=300)
     plt.close()
+    
     
     print(f"Time taken: {time.time() - time_start:.2f} seconds")

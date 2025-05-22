@@ -1,12 +1,11 @@
 import numpy as np
 from numba import njit
 
-# Boundary condition identifiers
-BC_DIRICHLET = 1
-BC_NEUMANN = 2
-BC_CONVECTIVE = 4
-BC_ZEROGRADIENT = 3
 BC_WALL = 0
+BC_DIRICHLET = 1
+BC_INLET = 2
+BC_OUTLET = 3
+BC_NEUMANN = 4
 
 @njit(inline="always")
 def MUSCL(r):
@@ -22,21 +21,21 @@ def H_Cui(r):
 
 @njit(inline="always")
 def compute_convective_stencil(
-    f, mesh, rho,u_field, grad_phi, component_idx,
+    f, mesh, rho, mdot, u_field, grad_phi, component_idx,
     phi, scheme="Upwind", limiter="MUSCL"
 ):
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
 
     g_f = mesh.face_interp_factors[f]
-    Sf = np.ascontiguousarray(mesh.vector_S_f[f])
-    Ef = np.ascontiguousarray(mesh.vector_E_f[f])
+    #Sf = np.ascontiguousarray(mesh.vector_S_f[f])
+    #Ef = np.ascontiguousarray(mesh.vector_E_f[f])
     d_CE = np.ascontiguousarray(mesh.vector_d_CE[f])
     d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
 
-    u_face = (1 - g_f) * u_field[P] + g_f * u_field[N]
-    mdot = rho * np.dot(u_face, Sf)
-    
+    #u_face = (1 - g_f) * u_field[P] + g_f * u_field[N]
+    #mdot = rho * np.dot(u_face, Sf)
+  
 
 
     aP = -max(0, mdot)
@@ -92,7 +91,7 @@ def compute_convective_stencil(
     return aP, aN, -b_corr
 
 @njit(inline="always")
-def compute_boundary_convective_flux(f, mesh, rho, u_field, phi, bc_type, bc_value, component_idx):
+def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, bc_type, bc_value, component_idx):
     """
     First-order upwind boundary convection flux for a specific velocity component.
     Skewness correction is ignored at boundaries.
@@ -100,14 +99,11 @@ def compute_boundary_convective_flux(f, mesh, rho, u_field, phi, bc_type, bc_val
     P = mesh.owner_cells[f]
     Sf = np.ascontiguousarray(mesh.vector_S_f[f])
     u_boundary = np.ascontiguousarray(mesh.boundary_values[f, :2])
-    u_P= np.ascontiguousarray(u_field[P])
     phi_P = np.ascontiguousarray(phi[P])
 
 
     mdot_boundary = rho * np.dot(u_boundary, np.ascontiguousarray(Sf))
     mdot_boundary = -max(0.0, -mdot_boundary)
-    mdot_P = rho * np.dot(u_P, np.ascontiguousarray(Sf))
-    mdot_P = -max(0.0, -mdot_P)
 
     if bc_type == BC_DIRICHLET:
         return mdot_boundary, -mdot_boundary * (2*phi_P[component_idx] - bc_value)
@@ -117,11 +113,11 @@ def compute_boundary_convective_flux(f, mesh, rho, u_field, phi, bc_type, bc_val
         else: # inflow
             return mdot_P, -mdot_boundary * bc_value #mdot, -mdot * bc_value   # outflow 
         """
-    elif bc_type == BC_ZEROGRADIENT:
-        return 0.0, 0.0
     elif bc_type == BC_NEUMANN:
         return 0.0, 0.0
-    elif bc_type == BC_CONVECTIVE:
-        return 0.0, mdot_boundary * bc_value
-    else:
+    elif bc_type == BC_INLET:
+        return mdot_boundary, -mdot_boundary * (2*phi_P[component_idx] - bc_value)
+    elif bc_type == BC_OUTLET:
+        return 0.0, 0.0
+    elif bc_type == BC_WALL:
         return 0.0, 0.0

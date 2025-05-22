@@ -1,7 +1,7 @@
 boundaries:
   top:
     velocity:
-      bc: dirichlet
+      bc: dirichlet #wall 
       value: [1.0, 0.0]     # moving lid
     pressure:
       bc: neumann
@@ -9,7 +9,7 @@ boundaries:
 
   bottom:
     velocity:
-      bc: dirichlet
+      bc: dirichlet #wall 
       value: [0.0, 0.0]
     pressure:
       bc: neumann
@@ -17,7 +17,7 @@ boundaries:
 
   left:
     velocity:
-      bc: dirichlet
+      bc: dirichlet #wall 
       value: [0.0, 0.0]
     pressure:
       bc: neumann
@@ -25,7 +25,7 @@ boundaries:
 
   right:
     velocity:
-      bc: dirichlet
+      bc: dirichlet #wall 
       value: [0.0, 0.0]
     pressure:
       bc: neumann

@@ -1,32 +1,24 @@
 from numba import njit
 import numpy as np
 
-
 @njit
 def compute_divergence_from_face_fluxes(mesh, face_fluxes):
     """
-    Compute cell-centered divergence from face-normal mass fluxes.
-
-    Parameters
-    ----------
-    mesh : MeshData2D
-        Mesh structure containing cell-face connectivity.
-    face_fluxes : ndarray
-        Mass flux at each face.
-
-    Returns
-    -------
-    divergence : ndarray
-        Cell-centered divergence of mass fluxes.
+    Compute divergence (mass imbalance) per cell from face mass fluxes.
+    
+    Each face flux is assumed to be rho * u_f ⋅ S_f, pointing from owner to neighbor.
     """
-    divergence = np.zeros(mesh.cell_volumes.shape[0])
+    n_cells = mesh.cell_volumes.shape[0]
+    divergence = np.zeros(n_cells)
 
     for f in range(len(face_fluxes)):
         C = mesh.owner_cells[f]
         F = mesh.neighbor_cells[f]
 
-        divergence[C] -= face_fluxes[f] # Måske fortegnsfejl
+        flux = face_fluxes[f]
+
+        divergence[C] += flux  # flux leaving C (owner)
         if F >= 0:
-            divergence[F] += face_fluxes[f]
+            divergence[F] -= flux  # flux entering F (neighbor)
 
     return divergence
