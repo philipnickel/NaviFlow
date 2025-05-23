@@ -48,7 +48,7 @@ def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None):
         ksp = PETSc.KSP().create()
         ksp.setOperators(A_petsc)
         ksp.setType("bcgs")
-        ksp.setTolerances(atol=1e-5, max_it=10000)
+        ksp.setTolerances(atol=1e-10, rtol=1e-6, max_it=10000)
         pc = ksp.getPC()
         pc.setType("hypre")
         ksp.setFromOptions()

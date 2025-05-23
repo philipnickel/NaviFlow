@@ -119,28 +119,50 @@ def assemble_diffusion_convection_matrix(
         bc_val   = mesh.boundary_values[f, component_idx]
         P = mesh.owner_cells[f]
         S_b = np.ascontiguousarray(mesh.vector_S_f[f])
+        E_f = np.ascontiguousarray(mesh.vector_E_f[f])
+        T_f = np.ascontiguousarray(mesh.vector_T_f[f])
         mag_S_b = np.linalg.norm(S_b)
         d_Cb = mesh.d_Cb[f]
         n = S_b / mag_S_b
         vec_Cb = d_Cb * n
         uv_b = mesh.boundary_values[f]
         grad_p = np.ascontiguousarray(grad_pressure_field[P])
-        p_b = pressure_field[P] + np.dot(grad_p, S_b)
-        
+        p_b = pressure_field[P] + np.dot(grad_p, vec_Cb)
+   
+      
+
         if bc_type == BC_WALL:
+            A_c = 0
+            B_c = 0
+            E_mag = np.linalg.norm(E_f) + EPS
+            a_P = mu * E_mag / (d_Cb + EPS)
+            b_P = -a_P * bc_val  # explicit orthogonal part
+
+            # --- explicit non-orthogonal correction (FluxV_b) ---
+            grad_P = grad_phi[P]
+            d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+            grad_P_mark = grad_P + np.dot(grad_P, d_skew)
+            fluxVb = -mu * np.dot(grad_P_mark, T_f)
+            b_P += fluxVb 
+            row[idx] = P; col[idx] = P; data[idx] = a_P; idx += 1
+            b[P] = -b_P
+
+            """
             # no slip wall moukalled 15.125
             d_orth = np.dot(vec_Cb, n)
 
             frac =  (mu * mag_S_b) / (d_orth + EPS)
             term = (1 - n[component_idx]**2)
 
-            A_C =  frac * term
+            A_C =   frac * term
             B_C =  frac * (uv_b[component_idx] * term + (u_field[f, component_idx] - uv_b[component_idx]*n[1]*n[0])) - S_b[component_idx] * p_b
 
             row[idx] = P; col[idx] = P; data[idx] = A_C; idx += 1
-            b[P] += B_C
+            b[P] = B_C
+            """
         
 
+        """
         elif bc_type == BC_INLET:
             aP_cnv, b_cnv = compute_boundary_convective_flux(
                 f, mesh, rho, mdot, u_field, phi, bc_type, bc_val, component_idx
@@ -156,18 +178,21 @@ def assemble_diffusion_convection_matrix(
         if bc_type == BC_OUTLET:
             continue
         else: 
-            P, a_P, b_P = compute_boundary_diffusive_correction(
-                f, grad_phi, mesh, mu, bc_type, bc_val
-            )
+        P, a_P, b_P = compute_boundary_diffusive_correction(
+            f, grad_phi, mesh, mu, bc_type, bc_val
+        )
 
-        # —— boundary convection (e.g. outlet) ——
-            aP_cnv, b_cnv = compute_boundary_convective_flux(
-                f, mesh, rho, mdot, u_field, phi, bc_type, bc_val, component_idx
-            )
+    # —— boundary convection (e.g. outlet) ——
+        aP_cnv, b_cnv = compute_boundary_convective_flux(
+            f, mesh, rho, mdot, u_field, phi, bc_type, bc_val, component_idx
+        )
+        aP_cnv = 0
+        b_cnv = 0
+        row[idx] = P; col[idx] = P; data[idx] = aP_cnv + a_P; idx += 1
 
-            row[idx] = P; col[idx] = P; data[idx] = aP_cnv + a_P; idx += 1
+        b[P] -= b_cnv + b_P
 
-            b[P] -= b_cnv + b_P
+        """
 
     # ––– trim overallocation –––––––––––––––––––––––––––––––––––––––––––––––
     return row[:idx], col[:idx], data[:idx], b

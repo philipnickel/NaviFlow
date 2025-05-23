@@ -12,8 +12,8 @@ def velocity_correction(mesh, grad_p_prime_cell, Ap_u_cell, Ap_v_cell):
     _SMALL = 1.0e-12
 
     for i in prange(n_cells):
-        D_u = mesh.cell_volumes[i] / (Ap_u_cell[i] + _SMALL)
-        D_v = mesh.cell_volumes[i] / (Ap_v_cell[i] + _SMALL)
+        D_u = mesh.cell_volumes[i] / (Ap_u_cell[i] )
+        D_v = mesh.cell_volumes[i] / (Ap_v_cell[i] )
 
         uv_field_corr[i, 0] = -D_u * grad_p_prime_cell[i, 0]
         uv_field_corr[i, 1] = -D_v * grad_p_prime_cell[i, 1]

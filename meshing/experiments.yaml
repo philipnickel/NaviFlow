@@ -29,7 +29,7 @@ lidDrivenCavity:
     description: Uniform structured mesh for lid-driven cavity at multiple resolutions
     resolutions:
       coarse: {L: 1.0, nx: 50, ny: 50}
-      medium: {L: 1.0, nx: 200, ny: 200}
+      medium: {L: 1.0, nx: 130, ny: 130}
       fine: {L: 1.0, nx: 400, ny: 400}
   unstructured:
     description: Unstructured mesh with boundary refinement at multiple resolutions
@@ -37,7 +37,7 @@ lidDrivenCavity:
       coarse:
         Lx: 1.0
         Ly: 1.0
-        n_cells: 10000
+        n_cells: 5000
         refinement_factors:
           boundaries:
             left: [2, 1] # 10x refinement, 10% towards center

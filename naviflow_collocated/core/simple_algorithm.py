@@ -32,7 +32,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
     n_boundary = mesh.boundary_faces.shape[0]
     mdot = np.zeros(n_internal + n_boundary)
     u_field = np.zeros((n_cells, 2))
-    u_field = enforce_boundary_conditions(mesh, u_field)
+    #u_field = enforce_boundary_conditions(mesh, u_field)
     u = u_field[:, 0]
     v = u_field[:, 1]
     p = np.zeros(n_cells)
@@ -40,12 +40,22 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
     u_prime = np.zeros(n_cells)
     v_prime = np.zeros(n_cells)
 
+    # Initialize residual tracking lists
+    u_residuals = []
+    v_residuals = []
+    continuity_residuals = []
+
     # calculate rho and mu from Reynolds number
     rho = 1.0
     mu = rho * 1.0 / reynolds_number
     mom_solver_u = None
     mom_solver_v = None
     pres_solver = None
+
+    # Initialize max residuals for normalization
+    max_res_u = 1.0
+    max_res_v = 1.0
+    max_res_cont = 1.0
 
     for i in range(max_iter):
         #=============================================================================
@@ -63,12 +73,13 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
             mesh,mdot,  grad_phi_u, u_field, rho, mu, 0, phi=u, scheme=convection_scheme, limiter=limiter, pressure_field=p, grad_pressure_field=grad_p
         )
         A_u = coo_matrix((data, (row, col)), shape=(n_cells, n_cells)).tocsr()
-        A_u_for_residual = A_u.copy()
+        A_u_physical = A_u.copy()
         
         rhs_u = b_u - grad_p[:, 0] * mesh.cell_volumes
-        rhs_for_residual = rhs_u
+
+        rhs_u_physical = rhs_u.copy()
         
-        diag_u = A_u.diagonal()
+        diag_u = A_u.diagonal().copy()
         if alpha_uv < 1.0:
             A_u.setdiag(A_u.diagonal() * (1.0 / alpha_uv))
             rhs_u += (1.0 - alpha_uv) / alpha_uv * diag_u * u
@@ -76,28 +87,33 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
         Ap_u_cell = A_u.diagonal().copy()
         # solve
         u_star, res_u, _= petsc_solver(A_u, rhs_u)
-        res_u_for_residual = rhs_for_residual - A_u_for_residual @ u_star
-        l2_norm_u = np.linalg.norm(res_u_for_residual)
+        res_u_physical = rhs_u_physical - A_u_physical @ u_star
+        l2_norm_u = np.linalg.norm(res_u_physical) / np.linalg.norm(rhs_u_physical) + 1e-14
+        max_res_u = max(max_res_u, l2_norm_u)
+        l2_norm_u = l2_norm_u / max_res_u
         # v-momentum
         grad_phi_v = compute_cell_gradients(mesh, v)
         row, col, data, b_v = assemble_diffusion_convection_matrix(
             mesh,mdot, grad_phi_v, u_field, rho, mu, 1, phi=v, scheme=convection_scheme, limiter=limiter, pressure_field=p, grad_pressure_field=grad_p
         )
         A_v = coo_matrix((data, (row, col)), shape=(n_cells, n_cells)).tocsr()
-        A_v_for_residual = A_v.copy()
+        A_v_physical = A_v.copy()
         
 
         rhs_v = b_v - grad_p[:, 1] * mesh.cell_volumes
-        rhs_for_residual = rhs_v
-        diag_v = A_v.diagonal()
+        rhs_v_physical = rhs_v.copy()
+        diag_v = A_v.diagonal().copy()
         if alpha_uv < 1.0:
             A_v.setdiag(A_v.diagonal() * (1.0 / alpha_uv))
             rhs_v += (1.0 - alpha_uv) / alpha_uv * diag_v * v
         Ap_v_cell = A_v.diagonal().copy()
 
         v_star, res_v, _= petsc_solver(A_v, rhs_v)
-        res_v_for_residual = rhs_for_residual - A_v_for_residual @ v_star
-        l2_norm_v = np.linalg.norm(res_v_for_residual)
+        res_v_physical = rhs_v_physical - A_v_physical @ v_star
+        l2_norm_v = np.linalg.norm(res_v_physical) if np.linalg.norm(rhs_v_physical) > 1e-20 else 0.0
+        l2_norm_v = l2_norm_v / np.linalg.norm(rhs_v_physical) + 1e-14 if np.linalg.norm(rhs_v_physical) > 1e-20 else 0.0
+        max_res_v = max(max_res_v, l2_norm_v)
+        l2_norm_v = l2_norm_v / max_res_v
 
         # gather u_star and v_star
         u_field[:, 0] = u_star
@@ -113,7 +129,10 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
         #=============================================================================
         rhs_p = compute_divergence_from_face_fluxes(mesh, mdot_star) 
 
-        cont_error = np.sum(rhs_p)
+        cont_error = np.linalg.norm(rhs_p)
+        max_res_cont = max(max_res_cont, cont_error)
+        cont_error = cont_error / max_res_cont
+
         # pin one pressure node
         rhs_p[0] = 0.0
         row_p, col_p, data_p, bcorr = assemble_pressure_correction_matrix(mesh, rho)
@@ -127,8 +146,9 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
         #=============================================================================
         grad_p_prime= compute_cell_gradients(mesh, p_prime)
 
-        uv_field_2star =u_field + velocity_correction(mesh, grad_p_prime,Ap_u_cell, Ap_v_cell)
-        mdot_2star = mdot_star + mdot_correction(mesh, rho, Ap_u_cell, Ap_v_cell, grad_p_prime)
+        uv_field_2star =u_field + velocity_correction(mesh, grad_p_prime, Ap_u_cell, Ap_v_cell)
+        mdot_corr = mdot_correction(mesh, rho, Ap_u_cell, Ap_v_cell, grad_p_prime)
+        mdot_2star = mdot_star + mdot_corr
 
         p += alpha_p * p_prime
         grad_p = compute_cell_gradients(mesh, p)
@@ -136,17 +156,16 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
 
 
         mdot = mdot_2star
-        u_field = uv_field_2star
-        u = u_field[:, 0].copy()
-        v = u_field[:, 1].copy()
+        
         # Compute continuity error
         div_u = compute_divergence_from_face_fluxes(mesh, mdot_2star)
         """
+        
         x = mesh.cell_centers[:, 0]
         y = mesh.cell_centers[:, 1]
         
-        # Create figure with 2x2 subplots
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 10))
+        # Create figure with 3x2 subplots
+        fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(12, 15))
         
         # Plot div_u
         sc1 = ax1.scatter(x, y, c=div_u, cmap="viridis", s=8)
@@ -168,9 +187,22 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
         
         # plot mdot_2star
         sc4 = ax4.scatter(mesh.face_centers[:, 0], mesh.face_centers[:, 1], c=mdot_2star, cmap="viridis", s=8)
-        ax4.set_title("Mdot 2 Star")
+        ax4.set_title("Mdot 2 Star") 
         plt.colorbar(sc4, ax=ax4)
         ax4.set_aspect('equal')
+
+        # plot mdot correction
+        sc5 = ax5.scatter(mesh.face_centers[:, 0], mesh.face_centers[:, 1], c=mdot_corr, cmap="viridis", s=8)
+        ax5.set_title("Mdot Correction")
+        plt.colorbar(sc5, ax=ax5)
+        ax5.set_aspect('equal')
+
+        # plot velocity correction magnitude
+        vel_corr = velocity_correction(mesh, grad_p_prime, Ap_u_cell, Ap_v_cell)
+        sc6 = ax6.scatter(x, y, c=vel_corr[:,0], cmap="viridis", s=8)
+        ax6.set_title("Velocity Correction Magnitude")
+        plt.colorbar(sc6, ax=ax6)
+        ax6.set_aspect('equal')
 
         plt.tight_layout()
         os.makedirs("plots", exist_ok=True)
@@ -182,9 +214,19 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tol, co
         #=============================================================================
         # CONVERGENCE CHECK
         #=============================================================================
+        sol_change = np.linalg.norm(uv_field_2star - u_field)
+        u_field = uv_field_2star
+        u = u_field[:, 0].copy()
+        v = u_field[:, 1].copy()
         # print residual
-        print(f"Iteration {i}: Residuals: u = {l2_norm_u:.3e}, v = {l2_norm_v:.3e}, continuity = {cont_error:.3e}")
-        if l2_norm_u + l2_norm_v + cont_error < tol:
+        print(f"Iteration {i}: Normalized Residuals: u = {l2_norm_u:.3e}, v = {l2_norm_v:.3e}, continuity = {cont_error:.3e}")
+        
+        # Store residuals
+        u_residuals.append(l2_norm_u)
+        v_residuals.append(l2_norm_v)
+        continuity_residuals.append(cont_error)
+        
+        if l2_norm_u < tol and l2_norm_v < tol and cont_error < tol:
             break
 
-    return u_field, p
+    return u_field, p, rhs_p, res_v_physical, res_u_physical, u_residuals, v_residuals, continuity_residuals
