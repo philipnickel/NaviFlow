@@ -335,6 +335,8 @@ def _build_meshdata2d(
             boundary_values[face_id, 0] = eval_vel
         if isinstance(eval_p, (int, float, np.number)):
             boundary_values[face_id, 2] = eval_p
+        #if boundary_values[face_id,:].shape[0] == 3:
+            #print(boundary_values[face_id,:])
     # boundary_values = boundary_values * -1  # Remove this commented-out debug line; do not flip sign
 
     boundary_faces = np.array(sorted(list(set(boundary_faces_list))), dtype=np.int64)

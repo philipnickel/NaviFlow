@@ -28,19 +28,14 @@ def compute_convective_stencil(
     N = mesh.neighbor_cells[f]
 
     g_f = mesh.face_interp_factors[f]
-    #Sf = np.ascontiguousarray(mesh.vector_S_f[f])
-    #Ef = np.ascontiguousarray(mesh.vector_E_f[f])
     d_CE = np.ascontiguousarray(mesh.vector_d_CE[f])
     d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
-
-    #u_face = (1 - g_f) * u_field[P] + g_f * u_field[N]
-    #mdot = rho * np.dot(u_face, Sf)
-  
 
 
     aP = -max(0, mdot)
     aN = -max(0, -mdot)
     b_corr = 0.0
+
 
     # stuff for TVD and other HO schemes
     phi_P = phi[P]
@@ -56,8 +51,10 @@ def compute_convective_stencil(
 
     if scheme == "TVD":  
         # Compute the limiter
+        #phi_W = 2 * phi_N - phi_P
         phi_W = 2 * phi_P - phi_N
-        r = (phi_N - phi_P) / (phi_P - phi_W + 1e-12)
+        #r = (phi_N - phi_W )/(phi_N - phi_P + 1e-12) 
+        r = (phi_N - phi_P )/(phi_N - phi_W + 1e-12) 
         if limiter == "MUSCL":
             psi = MUSCL(r)
         elif limiter == "OSPRE":
@@ -107,17 +104,11 @@ def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, bc_type, 
 
     if bc_type == BC_DIRICHLET:
         return mdot_boundary, -mdot_boundary * (2*phi_P[component_idx] - bc_value)
-        """
-        if mdot_boundary > 0:  # outflow (confirmed)
-            return 0.0, 0.0#mdot_boundary* bc_value #mdot, -mdot * bc_value   # outflow 
-        else: # inflow
-            return mdot_P, -mdot_boundary * bc_value #mdot, -mdot * bc_value   # outflow 
-        """
     elif bc_type == BC_NEUMANN:
         return 0.0, 0.0
     elif bc_type == BC_INLET:
-        return mdot_boundary, -mdot_boundary * (2*phi_P[component_idx] - bc_value)
+        return -mdot[f], 0.0#mdot_boundary, 0.0#bc_value#-mdot_boundary * (2*phi_P[component_idx] - bc_value)
     elif bc_type == BC_OUTLET:
-        return 0.0, 0.0
+        return -mdot[f], mdot[f] #*  (2*phi_P[component_idx] - bc_value)#mdot_boundary, -mdot_boundary * (2*phi_P[component_idx] - bc_value)
     elif bc_type == BC_WALL:
         return 0.0, 0.0

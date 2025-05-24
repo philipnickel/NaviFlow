@@ -87,13 +87,13 @@ cylinderFlow:
     description: Unstructured mesh for flow around a cylinder at multiple resolutions
     resolutions:
       coarse:
-        Lx: 20
-        Ly: 10
-        n_cells: 200
+        Lx: 2.2
+        Ly: 0.41
+        n_cells: 5000
         obstacle:
           type: circle
-          center: [5, 5]
-          radius: 2.5
+          center: [0.2, 0.205]
+          radius: 0.05
         refinement_factors:
           boundaries:
             left: [1.0, 0.1]
@@ -109,23 +109,23 @@ cylinderFlow:
       medium:
         Lx: 2.2
         Ly: 0.41
-        n_cells: 10000
+        n_cells: 20000
         obstacle:
           type: circle
           center: [0.2, 0.205]
           radius: 0.05
         refinement_factors:
           boundaries:
-            left: [1.0, 0.1]
-            right: [1.0, 0.1]
-            top: [1.0, 0.01]
-            bottom: [1.0, 0.01]
+            left: [2.0, 1]
+            right: [2.0, 1]
+            top: [2.0, 1]
+            bottom: [2.0, 1]
           corners:
-            top_left: [1.0, 1]
-            top_right: [1.0, 1]
-            bottom_left: [1.0, 1]
-            bottom_right: [1.0, 1]
-          obstacle: [3.0, 0.2]
+            top_left: [2.0, 1]
+            top_right: [2.0, 1]
+            bottom_left: [2.0, 1]
+            bottom_right: [2.0, 1]
+          obstacle: [2.0, 0.2]
       fine:
         Lx: 2.2
         Ly: 0.41
@@ -136,16 +136,16 @@ cylinderFlow:
           radius: 0.05
         refinement_factors:
           boundaries:
-            left: [1.0, 0.1]
-            right: [1.0, 0.1]
-            top: [1.0, 0.01]
-            bottom: [1.0, 0.01]
+            left: [2.0, 0.0]
+            right: [2.0, 0.0]
+            top: [2.0, 0.0]
+            bottom: [1.0, 0.0]
           corners:
-            top_left: [1.0, 1]
-            top_right: [1.0, 1]
-            bottom_left: [1.0, 1]
-            bottom_right: [1.0, 1]
-          obstacle: [3.0, 0.2]
+            top_left: [1.0, 0.0]
+            top_right: [1.0, 0.0]
+            bottom_left: [1.0, 0.0]
+            bottom_right: [1.0, 0.0]
+          obstacle: [1.0, 0.0]
 
 nacaFlow:
   description: Flow around a NACA0012 airfoil in a rectangular domain

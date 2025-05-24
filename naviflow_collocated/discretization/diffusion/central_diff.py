@@ -110,17 +110,43 @@ def compute_boundary_diffusive_correction(
         grad_P_mark = grad_P + np.dot(grad_P, d_skew)
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
         b_P += fluxVb 
-   
-        
     elif bc_type == BC_NEUMANN:
         E_mag = np.linalg.norm(E_f) + EPS
         b_P = -muF * bc_val * E_mag
     elif bc_type == BC_WALL:
-        b_P = 0.0
+        E_mag = np.linalg.norm(E_f) + EPS
+        a_P = muF * E_mag / (d_PB + EPS)
+        b_P = -a_P * bc_val  # explicit orthogonal part
+
+        # --- explicit non-orthogonal correction (FluxV_b) ---
+        #grad_P = grad_phi[P]
+        #d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+        #grad_P_mark = grad_P + np.dot(grad_P, d_skew)
+        #fluxVb = -muF * np.dot(grad_P_mark, T_f)
+        #b_P += fluxVb 
     elif bc_type == BC_INLET:
-        b_P = 0.0
+        E_mag = np.linalg.norm(E_f) + EPS
+        a_P = muF * E_mag / (d_PB + EPS)
+        b_P = -a_P * bc_val  # explicit orthogonal part
+
+        # --- explicit non-orthogonal correction (FluxV_b) ---
+        grad_P = grad_phi[P]
+        d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+        grad_P_mark = grad_P + np.dot(grad_P, d_skew)
+        fluxVb = -muF * np.dot(grad_P_mark, T_f)
+        b_P += fluxVb 
     elif bc_type == BC_OUTLET:
-        b_P = 0.0
+        E_mag = np.linalg.norm(E_f) + EPS
+        a_P = 0.0#muF * E_mag / (d_PB + EPS)
+        b_P = 0.0#-a_P * bc_val  # explicit orthogonal part
+
+        # --- explicit non-orthogonal correction (FluxV_b) ---
+        grad_P = grad_phi[P]
+        d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+        grad_P_mark = grad_P + np.dot(grad_P, d_skew)
+        fluxVb = -muF * np.dot(grad_P_mark, T_f)
+        b_P += 0.0#fluxVb 
+
 
 
     return P, a_P, b_P

@@ -263,6 +263,8 @@ def generate(
     gmsh.option.setNumber("Mesh.SaveGroupsOfElements", 1)
 
     print("[Gmsh] Finalizing and generating mesh with applied refinement fields...")
+    gmsh.model.occ.synchronize()
+
     gmsh.model.mesh.generate(2)
 
 
