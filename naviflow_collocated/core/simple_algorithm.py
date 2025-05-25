@@ -231,15 +231,19 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         rhs_p[0] = 0.0
         row_p, col_p, data_p = assemble_pressure_correction_matrix(mesh, rho)
         A_p = coo_matrix((data_p, (row_p, col_p)), shape=(n_cells, n_cells)).tocsr()
+        # Fix pressure at bottom-left (i=0, j=0)
+        pin_index = 0
+        A_p[pin_index, :] = 0
+        A_p[pin_index, pin_index] = 1
 
         # First solution of pressure correction equation (orthogonal)
         p_prime, res_p, ksp_1= petsc_solver(A_p, -rhs_p)
         grad_p_prime= compute_cell_gradients(mesh, p_prime)
         grad_p_prime_face = interpolate_to_face(mesh, grad_p_prime)
         # Second solution of pressure correction equation (non-orthogonal correction)
-        rhs_p_2 = pressure_correction_loop_term(mesh, rho, grad_p_prime_face)
-        p_prime2, res_p_2, _= petsc_solver(A_p, -(rhs_p_2), ksp=ksp_1)
-        p_prime = p_prime + p_prime2
+        #rhs_p_2 = pressure_correction_loop_term(mesh, rho, grad_p_prime_face)
+        #p_prime2, res_p_2, _= petsc_solver(A_p, -(rhs_p_2), ksp=ksp_1)
+        #p_prime = p_prime + p_prime2
 
         #=============================================================================
         # CORRECT PRESSURE, VELOCITIES and MASS FLUXES

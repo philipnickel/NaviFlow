@@ -32,11 +32,12 @@ def assemble_pressure_correction_matrix(mesh, rho):
         row[idx] = N; col[idx] = N; data[idx] =  coeff; idx += 1
         row[idx] = N; col[idx] = P; data[idx] = -coeff; idx += 1
 
-    # Pin pressure at one cell
-    
+    # Pin pressure at o
+    # ne cell
+    """
     pin = 0
     row[idx] = pin; col[idx] = pin; data[idx] = 1.0; idx += 1
-
+    """
     
     
     return row[:idx], col[:idx], data[:idx]
