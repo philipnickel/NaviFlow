@@ -1,118 +1,204 @@
-import numpy as np
 import os
+import argparse
+import yaml
+import numpy as np
+from numba import config as numba_config
+import time
+from datetime import datetime
+import signal
 from naviflow_collocated.mesh.mesh_loader import load_mesh  
 from naviflow_collocated.core.simple_algorithm import simple_algorithm  
-from matplotlib.backends.backend_pdf import PdfPages
-from utils.plot_style import plt
+from naviflow_collocated.utils.logger import ResidualLogger
+from naviflow_collocated.utils.metadata import collect_metadata
 
-# Configure mesh and SIMPLE parameters
-mesh_file = "meshing/experiments/lidDrivenCavity/unstructured/coarse/lidDrivenCavity_unstructured_coarse.msh" 
-#mesh_file = "meshing/experiments/lidDrivenCavity/structuredUniform/coarse/lidDrivenCavity_uniform_coarse.msh" 
-bc_file = "shared_configs/domain/boundaries_lid_driven_cavity.yaml" 
+interrupted = False
+
+def handle_sigterm(signum, frame):
+    global interrupted
+    print(f"\nReceived termination signal ({signum}). Preparing graceful shutdown...")
+    interrupted = True
+
+# Register the handler
+signal.signal(signal.SIGTERM, handle_sigterm)  # for `bkill`
+signal.signal(signal.SIGINT, handle_sigterm)   # for Ctrl+C, dev use
+
+start_time = time.time()
+start_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ----------------------------
+# CLI argument parsing
+# ----------------------------
+parser = argparse.ArgumentParser()
+parser.add_argument("--experiment", required=True)
+parser.add_argument("--max_iterations", type=int)
+parser.add_argument("--reynolds_number", type=float)
+parser.add_argument("--velocity_relaxation", type=float)
+parser.add_argument("--pressure_relaxation", type=float)
+parser.add_argument("--tolerance_exponent", type=int, help="Convergence tolerance as 10^-x (e.g., 4 for 1e-4)")
+parser.add_argument("--print_interval", type=int, default=100, help="Print residuals every N iterations")
+args = parser.parse_args()
+
+# ----------------------------
+# Resolve experiment path and config
+# ----------------------------
+experiment_path = os.path.join("experiments", args.experiment)
+config_path = os.path.join(experiment_path, "config.yaml")
+
+if not os.path.exists(config_path):
+    raise FileNotFoundError(f"Config file not found: {config_path}")
+
+with open(config_path, "r") as f:
+    config = yaml.safe_load(f)
+
+# ----------------------------
+# Apply CLI overrides to config
+# ----------------------------
+if args.max_iterations is not None:
+    config["algorithm"]["max_iterations"] = args.max_iterations
+if args.reynolds_number is not None:
+    config["physical_properties"]["reynolds_number"] = args.reynolds_number
+if args.velocity_relaxation is not None:
+    config["algorithm"]["relaxation_factors"]["velocity"] = args.velocity_relaxation
+if args.pressure_relaxation is not None:
+    config["algorithm"]["relaxation_factors"]["pressure"] = args.pressure_relaxation
+if args.tolerance_exponent is not None:
+    config["algorithm"]["convergence_criteria"]["residual"] = 10 ** -args.tolerance_exponent
+
+# ----------------------------
+# Load mesh and BCs
+# ----------------------------
+experiment_id = config["tags"][0]
+mesh_type, resolution = config["domain"]["mesh"]
+
+mesh_file = os.path.join(
+    "meshing", "experiments", experiment_id,
+    "structuredUniform" if "uniform" in mesh_type else "unstructured",
+    resolution,
+    f"{experiment_id}_{mesh_type}_{resolution}.msh"
+)
+
+bc_file = config["domain"]["boundary_conditions"]
+
+print(f"Loading mesh: {mesh_file}")
 mesh = load_mesh(mesh_file, bc_file)
 
-# Determine mesh type from file path
-mesh_type = "structured" if "structured" in mesh_file else "unstructured"
+# ----------------------------
+# Set up result output directory
+# ----------------------------
+results_dir = os.path.join(experiment_path, "results")
+os.makedirs(results_dir, exist_ok=True)
+print(f"Results will be saved to: {results_dir}")
 
-alpha_uv = 0.6
-alpha_p = 0.4 
-reynolds_number = 100
-max_iter =10000
-tolerance = 1e-4
-scheme = "TVD"
-limiter = "MUSCL"
+# ----------------------------
+# Physical properties
+# ----------------------------
+rho = config["physical_properties"]["rho"]
+U = config["physical_properties"].get("characteristic_velocity", 1.0)
+D = config["physical_properties"].get("characteristic_length", 1.0)
+Re = config["physical_properties"]["reynolds_number"]
+mu = (rho * U * D) / Re
 
+# ----------------------------
+# Solver config
+# ----------------------------
+alpha_uv = config["algorithm"]["relaxation_factors"]["velocity"]
+alpha_p  = config["algorithm"]["relaxation_factors"]["pressure"]
+max_iter = config["algorithm"]["max_iterations"]
+tolerance = config["algorithm"]["convergence_criteria"]["residual"]
+scheme = config["algorithm"]["convection_discretization"]
+limiter = config["algorithm"].get("limiter", None)
+algorithm = config["algorithm"]["type"]
+
+# Get linear solver settings from config
+linear_solver_settings = {
+    'momentum': {
+        'type': config.get('linear_solvers', {}).get('momentum', {}).get('type', 'bcgs'),
+        'preconditioner': config.get('linear_solvers', {}).get('momentum', {}).get('preconditioner', 'hypre'),
+        'tolerance': config.get('linear_solvers', {}).get('momentum', {}).get('tolerance', 1e-6),
+        'max_iterations': config.get('linear_solvers', {}).get('momentum', {}).get('max_iterations', 1000)
+    },
+    'pressure': {
+        'type': config.get('linear_solvers', {}).get('pressure', {}).get('type', 'bcgs'),
+        'preconditioner': config.get('linear_solvers', {}).get('pressure', {}).get('preconditioner', 'hypre'),
+        'tolerance': config.get('linear_solvers', {}).get('pressure', {}).get('tolerance', 1e-6),
+        'max_iterations': config.get('linear_solvers', {}).get('pressure', {}).get('max_iterations', 1000)
+    }
+}
+
+# ----------------------------
+# Set Numba thread count
+# ----------------------------
+numba_cores = config["numba_cores"]
+if numba_cores != "default":
+    os.environ["NUMBA_NUM_THREADS"] = str(numba_cores)
+
+print(f"Using {numba_cores} threads")
+
+# ----------------------------
 # Run SIMPLE
+# ----------------------------
+logger = ResidualLogger(
+    results_dir,
+    divergence_factor=10000.0,
+    allow_unsteady=False,
+    convergence_tolerance=tolerance,
+    print_every=args.print_interval
+)
+
+if algorithm == "PISO":
+    print("Running PISO solver...")
+    PISO = True
+    PISO_corrections = config.get("algorithm", {}).get("PISO_corrections", 3)
+else:
+    PISO = False
+
 print("Running SIMPLE solver...")
-u_field, p , continuity_field, res_v, res_u, u_residuals, v_residuals, continuity_residuals = simple_algorithm(mesh, alpha_uv, alpha_p, reynolds_number, max_iter, tolerance, scheme, limiter)
-print("SIMPLE solver completed.")
+U, p, continuity_field, u_l2norm, v_l2norm, continuity_l2norm, u_residual, v_residual, mdot_star = simple_algorithm(
+    mesh,
+    alpha_uv, alpha_p,
+    rho, mu,
+    max_iter, tolerance,
+    scheme, limiter,
+    PISO=PISO,
+    progress_callback=logger.update,
+    interruption_flag=lambda: interrupted,
+    linear_solver_settings=linear_solver_settings
+)
+logger.close()
+status = logger.status()
 
-# Plotting
-x = mesh.cell_centers[:, 0]
-y = mesh.cell_centers[:, 1]
-# Compute velocity magnitude
-velocity_magnitude = np.sqrt(u_field[:, 0]**2 + u_field[:, 1]**2)
+if status["diverging"]:
+    print("TERMINATING run: residual divergence detected.")
 
-# Get number of cells
-n_cells = len(mesh.cell_centers)
+if status["stalled"]:
+    print("Residuals stalled — notify or flag post-analysis.")
 
-# Prepare PDF file name
-pdf_filename = f"plots/LDC_Re{reynolds_number}_ncells{n_cells}_{scheme}_{mesh_type}.pdf"
-os.makedirs("plots", exist_ok=True)
 
-with PdfPages(pdf_filename) as pdf:
-    # --- Page 1: Flow Field Visualization ---
-    fig1 = plt.figure(figsize=(15, 10))
-    fig1.suptitle(f"Lid-Driven Cavity Flow Analysis\nRe = {reynolds_number}, Number of Cells = {n_cells}, Scheme = {scheme}, {mesh_type.capitalize()} Mesh", fontsize=16, y=0.98)
-    gs = plt.GridSpec(2, 2, height_ratios=[1, 1])
-    ax1 = fig1.add_subplot(gs[0, 0])
-    ax2 = fig1.add_subplot(gs[0, 1])
-    ax3 = fig1.add_subplot(gs[1, 0])
-    ax4 = fig1.add_subplot(gs[1, 1])
-    # U velocity
-    cf1 = ax1.tricontourf(x, y, u_field[:, 0], levels=50, cmap="coolwarm")
-    fig1.colorbar(cf1, ax=ax1)
-    ax1.set_title("U Velocity")
-    ax1.set_aspect('equal', 'box')
-    # V velocity
-    cf2 = ax2.tricontourf(x, y, u_field[:, 1], levels=50, cmap="coolwarm")
-    fig1.colorbar(cf2, ax=ax2)
-    ax2.set_title("V Velocity")
-    ax2.set_aspect('equal', 'box')
-    # Velocity magnitude
-    cf3 = ax3.tricontourf(x, y, velocity_magnitude, levels=50, cmap="coolwarm")
-    fig1.colorbar(cf3, ax=ax3)
-    ax3.set_title("Velocity Magnitude")
-    ax3.set_aspect('equal', 'box')
-    # Pressure (no streamlines)
-    cf4 = ax4.tricontourf(x, y, p, levels=50, cmap="coolwarm")
-    fig1.colorbar(cf4, ax=ax4)
-    ax4.set_title("Pressure")
-    ax4.set_aspect('equal', 'box')
-    fig1.tight_layout(rect=[0, 0, 1, 0.96])
-    pdf.savefig(fig1)
-    plt.close(fig1)
 
-    # --- Page 2: Residual History ---
-    fig2 = plt.figure(figsize=(10, 6))
-    fig2.suptitle(f"Residual History\nRe = {reynolds_number}, Number of Cells = {n_cells}, Scheme = {scheme}, {mesh_type.capitalize()} Mesh", fontsize=14)
-    ax_hist = fig2.add_subplot(1,1,1)
-    iterations = range(len(u_residuals))
-    ax_hist.semilogy(iterations, u_residuals, 'b-', label='$u$-velocity')
-    ax_hist.semilogy(iterations, v_residuals, 'r-', label='$v$-velocity') 
-    ax_hist.semilogy(iterations, continuity_residuals, 'g-', label='Continuity')
-    ax_hist.grid(True)
-    ax_hist.set_xlabel('Iteration')
-    ax_hist.set_ylabel('Residual')
-    ax_hist.set_title('Residual History')
-    ax_hist.legend()
-    fig2.tight_layout(rect=[0, 0, 1, 0.95])
-    pdf.savefig(fig2)
-    plt.close(fig2)
+end_time = time.time()
+wall_time_sec = end_time - start_time
+print(f"SIMPLE solver completed in {wall_time_sec:.2f} seconds.")
 
-    # --- Page 3: Residual Fields ---
-    fig3 = plt.figure(figsize=(15, 5))
-    fig3.suptitle(f"Residual Fields\nRe = {reynolds_number}, Number of Cells = {n_cells}, Scheme = {scheme}, {mesh_type.capitalize()} Mesh", fontsize=14)
-    gs2 = plt.GridSpec(1, 3)
-    ax5 = fig3.add_subplot(gs2[0, 0])
-    ax6 = fig3.add_subplot(gs2[0, 1])
-    ax7 = fig3.add_subplot(gs2[0, 2])
-    # U-velocity residual field
-    cf5 = ax5.tricontourf(x, y, np.abs(res_u), levels=50, cmap="viridis")
-    fig3.colorbar(cf5, ax=ax5)
-    ax5.set_title("U-Velocity Residual")
-    ax5.set_aspect('equal', 'box')
-    # V-velocity residual field
-    cf6 = ax6.tricontourf(x, y, np.abs(res_v), levels=50, cmap="viridis")
-    fig3.colorbar(cf6, ax=ax6)
-    ax6.set_title("V-Velocity Residual")
-    ax6.set_aspect('equal', 'box')
-    # Continuity residual field
-    cf7 = ax7.tricontourf(x, y, np.abs(continuity_field), levels=50, cmap="viridis")
-    fig3.colorbar(cf7, ax=ax7)
-    ax7.set_title("Mass Flux Imbalance")
-    ax7.set_aspect('equal', 'box')
-    fig3.tight_layout(rect=[0, 0, 1, 0.95])
-    pdf.savefig(fig3)
-    plt.close(fig3)
+print("Saving final state...")
 
+# metadata
+metadata = collect_metadata(args, config, mesh, mesh_file,bc_file, results_dir, Re, rho, mu, u_l2norm=u_l2norm, v_l2norm=v_l2norm, continuity_l2norm=continuity_l2norm, start_time=start_time, end_time=end_time)
+
+np.save(os.path.join(results_dir, "U_final.npy"), U)
+np.save(os.path.join(results_dir, "p_final.npy"), p)
+np.savez(os.path.join(results_dir, "residuals.npz"),
+         u=u_l2norm, v=v_l2norm, cont=continuity_l2norm)
+np.savez(os.path.join(results_dir, "cell_centers.npz"),
+         x=mesh.cell_centers[:, 0],
+         y=mesh.cell_centers[:, 1])
+with open(os.path.join(results_dir, "metadata.yaml"), "w") as f:
+    yaml.dump(metadata, f, sort_keys=False)
+
+np.save(os.path.join(results_dir, "u_residual.npy"), u_residual)
+np.save(os.path.join(results_dir, "v_residual.npy"), v_residual)
+np.save(os.path.join(results_dir, "continuity_field.npy"), continuity_field)
+
+
+
+print("State saved. Exiting.")

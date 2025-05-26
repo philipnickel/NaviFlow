@@ -44,14 +44,16 @@ def compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu):
     E_f  = mesh.vector_E_f[f]          # orthogonal implicit conductance
     d_CE = mesh.vector_d_CE[f]
 
-    E_mag = np.linalg.norm(E_f) + EPS
-    d_mag = np.linalg.norm(d_CE) + EPS
+    E_mag = np.linalg.norm(E_f) 
+    d_mag = np.linalg.norm(d_CE) 
 
     # ---- over‑relaxed orthogonal conductance (Eq 8.58) --------------------
     # |E_f|  = projection length of S_f on d_CE after over‑relaxed scaling
-    D_f = mu_f * E_mag / d_mag
+    geoDiff = E_mag / d_mag
+    Flux_P_f = mu_f * geoDiff
+    Flux_N_f = -mu_f * geoDiff
 
-    return P, N, D_f
+    return Flux_P_f, Flux_N_f
 
 
 @njit(inline="always")
@@ -66,18 +68,20 @@ def compute_diffusive_correction(f, grad_phi, mesh, mu):
     grad_N = grad_phi[N]
     g_f = mesh.face_interp_factors[f]
     grad_f = (1 - g_f) * grad_P + g_f * grad_N
-    d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
 
-    grad_f_mark = grad_f + np.dot(grad_f, d_skew)
-    b_corr = -muF * np.dot(grad_f_mark, T_f)
-    return P, N, b_corr
+    d_skew = np.ascontiguousarray(mesh.vector_skewness[f]) 
+    grad_f_mark = grad_f + np.dot(grad_f, d_skew) 
+
+    # Moukalled 15.72
+    diffDC = -muF * np.dot(grad_f_mark, T_f)
+    return diffDC
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Boundary faces
 # ──────────────────────────────────────────────────────────────────────────────
 @njit(inline="always")
 def compute_boundary_diffusive_correction(
-        f, grad_phi, mesh, mu, bc_type, bc_val):
+        f,U, grad_phi, mesh, mu, p_b, bc_type, bc_val, component_idx):
     """
     Return (P, a_P, b_P)  —  everything is written to the owner cell only.
 
@@ -91,8 +95,8 @@ def compute_boundary_diffusive_correction(
     """
     P = mesh.owner_cells[f]
     muF = mu 
-    a_P = 0.0
-    b_P = 0.0
+    diffFlux_P_b = 0.0
+    diffFlux_N_b = 0.0
 
     E_f = np.ascontiguousarray(mesh.vector_E_f[f])
     T_f = np.ascontiguousarray(mesh.vector_T_f[f])
@@ -100,53 +104,65 @@ def compute_boundary_diffusive_correction(
 
     
     if bc_type == BC_DIRICHLET:
-        E_mag = np.linalg.norm(E_f) + EPS
-        a_P = muF * E_mag / (d_PB + EPS)
-        b_P = -a_P * bc_val  # explicit orthogonal part
+        E_mag = np.linalg.norm(E_f)
+        diffFlux_P_b = muF * E_mag / (d_PB)
+        diffFlux_N_b = -diffFlux_P_b * bc_val  # explicit orthogonal part
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
-        d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
-        grad_P_mark = grad_P + np.dot(grad_P, d_skew)
-        fluxVb = -muF * np.dot(grad_P_mark, T_f)
-        b_P += fluxVb 
+        #d_skew = np.ascontiguousarray(mesh.vector_skewness[f]) ---- skewness correction omitted for now
+        #grad_P_mark = grad_P + np.dot(grad_P, d_skew) ---- skewness correction omitted for now
+        
+            
+        fluxVb = -muF * np.dot(grad_P, T_f)
+        diffFlux_N_b += fluxVb
     elif bc_type == BC_NEUMANN:
         E_mag = np.linalg.norm(E_f) + EPS
-        b_P = -muF * bc_val * E_mag
+        diffFlux_N_b = -muF * bc_val * E_mag
     elif bc_type == BC_WALL:
-        E_mag = np.linalg.norm(E_f) + EPS
-        a_P = muF * E_mag / (d_PB + EPS)
-        b_P = -a_P * bc_val  # explicit orthogonal part
+        P = mesh.owner_cells[f]
+        Sf = np.ascontiguousarray(mesh.vector_S_f[f])
+        n = Sf / np.linalg.norm(Sf)
+        E_f = np.ascontiguousarray(mesh.vector_E_f[f])
+        d_Cb = np.ascontiguousarray(mesh.d_Cb[f])
+        e = E_f / np.linalg.norm(E_f)
+        d_Cb_vec = d_Cb * e
+        U_b = np.ascontiguousarray(mesh.boundary_values[f, :2])
+        # no slip wall moukalled 15.125
+        d_orth = np.dot(d_Cb_vec, n)
+        id = component_idx
+        id_other = int(abs(1 - id))
 
-        # --- explicit non-orthogonal correction (FluxV_b) ---
-        #grad_P = grad_phi[P]
-        #d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
-        #grad_P_mark = grad_P + np.dot(grad_P, d_skew)
-        #fluxVb = -muF * np.dot(grad_P_mark, T_f)
-        #b_P += fluxVb 
+        frac =  (muF * np.linalg.norm(Sf)) / (d_orth + EPS)
+        term = (1 - n[id]**2)
+
+        diffFlux_P_b =   frac * term
+        diffFlux_N_b =  -(frac * (U_b[id] * term + (U[P][id_other] - U_b[id_other])*n[1]*n[0]) )#- Sf[id] * p_b)
+      
+
     elif bc_type == BC_INLET:
-        E_mag = np.linalg.norm(E_f) + EPS
-        a_P = muF * E_mag / (d_PB + EPS)
-        b_P = -a_P * bc_val  # explicit orthogonal part
+        E_mag = np.linalg.norm(E_f)
+        diffFlux_P_b = muF * E_mag / (d_PB)
+        diffFlux_N_b = diffFlux_P_b * bc_val  # explicit orthogonal part
 
-        # --- explicit non-orthogonal correction (FluxV_b) ---
+        # --- explicit non-orthogonal correction (FluxV_b) Moukalled 8.80 ---
         grad_P = grad_phi[P]
         d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
         grad_P_mark = grad_P + np.dot(grad_P, d_skew)
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
-        b_P += fluxVb 
+        diffFlux_N_b += fluxVb 
     elif bc_type == BC_OUTLET:
-        E_mag = np.linalg.norm(E_f) + EPS
-        a_P = 0.0#muF * E_mag / (d_PB + EPS)
-        b_P = 0.0#-a_P * bc_val  # explicit orthogonal part
+        E_mag = np.linalg.norm(E_f) 
+        diffFlux_P_b = muF * E_mag / (d_PB )
+        diffFlux_N_b = -diffFlux_P_b * bc_val  # explicit orthogonal part
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
         d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
         grad_P_mark = grad_P + np.dot(grad_P, d_skew)
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
-        b_P += 0.0#fluxVb 
+        diffFlux_N_b += fluxVb 
 
 
 
-    return P, a_P, b_P
+    return diffFlux_P_b, diffFlux_N_b

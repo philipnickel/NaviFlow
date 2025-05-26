@@ -1,9 +1,9 @@
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 EPS = 1e-14
 
-@njit
+@njit(parallel=True)
 def compute_cell_gradients(mesh, u):
     n_cells = mesh.cell_centers.shape[0]
     grad = np.zeros((n_cells, 2), dtype=np.float64)
@@ -14,7 +14,7 @@ def compute_cell_gradients(mesh, u):
     neighbor_cells = mesh.neighbor_cells
     cc             = mesh.cell_centers
 
-    for c in range(n_cells):
+    for c in prange(n_cells):
         A00 = A01 = A11 = 0.0
         b0  = b1  = 0.0
 
@@ -67,3 +67,5 @@ def compute_cell_gradients(mesh, u):
             grad[c, 0] = grad[c, 1] = 0.0
 
     return grad
+
+

@@ -30,7 +30,7 @@ lidDrivenCavity:
     resolutions:
       coarse: {L: 1.0, nx: 50, ny: 50}
       medium: {L: 1.0, nx: 130, ny: 130}
-      fine: {L: 1.0, nx: 400, ny: 400}
+      fine: {L: 1.0, nx: 220, ny: 220}
   unstructured:
     description: Unstructured mesh with boundary refinement at multiple resolutions
     resolutions:
@@ -89,27 +89,27 @@ cylinderFlow:
       coarse:
         Lx: 2.2
         Ly: 0.41
-        n_cells: 5000
+        n_cells: 8000
         obstacle:
           type: circle
           center: [0.2, 0.205]
           radius: 0.05
         refinement_factors:
           boundaries:
-            left: [1.0, 0.1]
-            right: [1.0, 0.1]
-            top: [1.0, 0.01]
-            bottom: [1.0, 0.01]
+            left: [1, 1]
+            right: [1, 1]
+            top: [1, 1]
+            bottom: [1, 1]
           corners:
-            top_left: [1.0, 1]
-            top_right: [1.0, 1]
-            bottom_left: [1.0, 1]
-            bottom_right: [1.0, 1]
-          obstacle: [3.0, 0.2] # 20x refinement, 75% of distance (equal to obstacle radius) outwards of obstacle 
+            top_left: [1, 1]
+            top_right: [1, 1]
+            bottom_left: [1, 1]
+            bottom_right: [1, 1]
+          obstacle: [1, 1] # 20x refinement, 75% of distance (equal to obstacle radius) outwards of obstacle 
       medium:
         Lx: 2.2
         Ly: 0.41
-        n_cells: 20000
+        n_cells: 15000
         obstacle:
           type: circle
           center: [0.2, 0.205]

@@ -35,20 +35,23 @@ from numba import njit, prange
 import numpy as np
 
 @njit(parallel=False)
-def compute_residual(data, indices, indptr, x, b):
+def compute_residual(data, indices, indptr, x, b, max_residual=None):
     """
     Compute residual field and relative L2 norm: r = b - A @ x.
+    If max_residual is provided, compute relative to that instead of ||b||.
 
     Parameters
     ----------
     data, indices, indptr : CSR matrix format (A)
     x : ndarray, solution vector
     b : ndarray, right-hand side vector
+    max_residual : float, optional
+        Maximum residual to use for relative calculation. If None, uses ||b||
 
     Returns
     -------
-    L2_norm : float
-        Relative L2 norm of the residual ||r|| / ||b||
+    rel_res : float
+        Relative L2 norm of the residual ||r|| / max_residual if provided, else ||r|| / ||b||
     r : ndarray
         Residual vector: r = b - A @ x
     """
@@ -69,10 +72,17 @@ def compute_residual(data, indices, indptr, x, b):
         b_sq += b[i] * b[i]
 
     L2_res = np.sqrt(res_sq)
+    L2_b = np.sqrt(b_sq)
+    
+    # Use max_residual if provided, otherwise use L2_b
+    denominator = max_residual if max_residual is not None else L2_b
+    
+    # Return 1.0 if denominator is zero, otherwise return relative residual
+    rel_res = 1.0 if denominator == 0.0 else L2_res / denominator
 
-    return L2_res, res_field
+    return rel_res, res_field
 
-@njit(parallel=False)
+@njit(parallel=True)
 def interpolate_to_face(mesh, quantity):
     """
     interpolate quantity to faces using face_interp_factors

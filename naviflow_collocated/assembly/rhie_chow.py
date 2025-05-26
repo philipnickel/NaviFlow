@@ -72,7 +72,7 @@ def compute_velocity_gradient_least_squares(mesh, U_star_rc, U_star, x_P, U_star
     return grad_v
 
 
-#@njit(parallel=False)
+@njit(parallel=False)
 def rhie_chow_velocity(mesh, U_star, U_star_bar, U_old_bar, U_old_rc, grad_p_bar, p, alpha_uv, bold_D_bar):
     """
     Returns rhie chow interpolated velocity vector at faces 
@@ -95,11 +95,10 @@ def rhie_chow_velocity(mesh, U_star, U_star_bar, U_old_bar, U_old_rc, grad_p_bar
         P = mesh.owner_cells[f]
         N = mesh.neighbor_cells[f]
 
-        gf = mesh.face_interp_factors[f]
         e_CF = np.ascontiguousarray(mesh.unit_vector_e[f])
         d_CF = mesh.vector_d_CE[f]
-        d_mag = np.linalg.norm(d_CF) + 1e-14
-        delta_p_f = (p[N] - p[P]) / (d_mag + 1e-14)
+        d_mag = np.linalg.norm(d_CF) 
+        delta_p_f = (p[N] - p[P]) / (d_mag)
         delta_p_f_bar = np.ascontiguousarray(grad_p_bar[f])
         rc_correction = (delta_p_f - np.dot(delta_p_f_bar, e_CF)) * e_CF
 
@@ -152,30 +151,29 @@ def mdot_calculation(mesh, rho, U_star_rc):
         f = mesh.internal_faces[i]
 
         mdot_faces[f] = rho * np.dot(np.ascontiguousarray(U_star_rc[f]), np.ascontiguousarray(mesh.vector_S_f[f]))
-
+    sum_mdot_in = 0.0
+    sum_mdot_out = 0.0
     for i in prange(n_boundary):
         f = mesh.boundary_faces[i]
         if mesh.boundary_types[f,0] == BC_WALL:
             mdot_faces[f] = 0.0 
-        elif mesh.boundary_types[f,0] == BC_INLET or mesh.boundary_types[f,0] == BC_OUTLET:
+        elif mesh.boundary_types[f,0] == BC_INLET:
             mdot_faces[f] = rho * np.dot(np.ascontiguousarray(U_star_rc[f]), np.ascontiguousarray(mesh.vector_S_f[f]))
-    """
-        
-    sum_mdot_in = 0.0
-    sum_mdot_out = 0.0
-    for i in range(n_boundary):
-        f = mesh.boundary_faces[i]
-        if mesh.boundary_types[f,0] == BC_INLET:
             sum_mdot_in += mdot_faces[f]
         elif mesh.boundary_types[f,0] == BC_OUTLET:
+            mdot_faces[f] = rho * np.dot(np.ascontiguousarray(U_star_rc[f]), np.ascontiguousarray(mesh.vector_S_f[f]))
             sum_mdot_out += mdot_faces[f]
-    if sum_mdot_out != 0.0:
-        scale = sum_mdot_in / sum_mdot_out
-    for i in range(n_boundary):
+    
+    for i in prange(n_boundary):
         f = mesh.boundary_faces[i]
-        #if mesh.boundary_types[f,0] == BC_OUTLET:
-            #mdot_faces[f] = mdot_faces[f] * scale
-    """
+        if mesh.boundary_types[f,0] == BC_OUTLET:
+            if sum_mdot_out != 0.0:
+                mdot_faces[f] = mdot_faces[f] * sum_mdot_in / sum_mdot_out 
+    
+
+    
+        
+    
 
 
     return mdot_faces

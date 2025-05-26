@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit
+from naviflow_collocated.assembly.rhie_chow import compute_velocity_gradient_least_squares
 
 BC_WALL = 0
 BC_DIRICHLET = 1
@@ -22,7 +23,7 @@ def H_Cui(r):
 @njit(inline="always")
 def compute_convective_stencil(
     f, mesh, rho, mdot, u_field, grad_phi, component_idx,
-    phi, scheme="Upwind", limiter="MUSCL"
+    phi, scheme="Upwind", limiter=None
 ):
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
@@ -30,17 +31,25 @@ def compute_convective_stencil(
     g_f = mesh.face_interp_factors[f]
     d_CE = np.ascontiguousarray(mesh.vector_d_CE[f])
     d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+    """
 
-
-    aP = -max(0, mdot)
-    aN = -max(0, -mdot)
+    if mdot[f] >= 0:
+        conv_a_P = mdot[f]
+        conv_a_N = 0
+    else:
+        conv_a_P = 0
+        conv_a_N = mdot[f]
     b_corr = 0.0
+    """
+    # Moukalled 15.72 (negative sign for neighbor handled in matrix assembly)
+    Flux_P_f = max(mdot[f], 0)
+    Flux_N_f = -max(-mdot[f],0) 
 
 
     # stuff for TVD and other HO schemes
     phi_P = phi[P]
     phi_N = phi[N]
-    F_low = mdot * (phi_P if mdot >= 0 else phi_N)
+    F_low = mdot[f] * (phi_P if mdot[f]  >= 0 else phi_N)
 
     gradC = grad_phi[P]
     gradN = grad_phi[N]
@@ -51,6 +60,8 @@ def compute_convective_stencil(
 
     if scheme == "TVD":  
         # Compute the limiter
+        if limiter is None:
+            psi = 1.0 # numba type safeguard
         #phi_W = 2 * phi_N - phi_P
         phi_W = 2 * phi_P - phi_N
         #r = (phi_N - phi_W )/(phi_N - phi_P + 1e-12) 
@@ -64,10 +75,10 @@ def compute_convective_stencil(
 
         # Apply the limiter
         phi_HO = phi_P + psi * np.dot(grad_f_mark , d_Cf)
-        F_high = mdot * phi_HO
-        b_corr = (F_high - F_low)
+        F_high = mdot[f] * phi_HO
+        convDC = (F_high - F_low)
     elif scheme == "Upwind": 
-        b_corr = 0.0 
+        convDC = 0.0 
     elif scheme != "Upwind":
         # set coefficients
         if scheme == "Central difference":
@@ -81,34 +92,49 @@ def compute_convective_stencil(
             b = 0.5
         # Compute the high order term
         phi_HO = phi_P +  np.dot(gradC * a + grad_f_mark * b, d_Cf)
-        F_high = mdot * phi_HO
-        b_corr = (F_high - F_low)
+        F_high = mdot[f] * phi_HO
+        convDC = +(F_high - F_low)
+    
 
 
-    return aP, aN, -b_corr
+    return Flux_P_f, Flux_N_f, convDC
 
 @njit(inline="always")
-def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, bc_type, bc_value, component_idx):
+def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, p_b, bc_type, bc_value, component_idx):
     """
     First-order upwind boundary convection flux for a specific velocity component.
     Skewness correction is ignored at boundaries.
     """
     P = mesh.owner_cells[f]
     Sf = np.ascontiguousarray(mesh.vector_S_f[f])
+    E_f = np.ascontiguousarray(mesh.vector_E_f[f])
+    d_Cb = np.ascontiguousarray(mesh.d_Cb[f])
+    e = E_f / np.linalg.norm(E_f)
+    d_Cb_vec = d_Cb * e
     u_boundary = np.ascontiguousarray(mesh.boundary_values[f, :2])
-    phi_P = np.ascontiguousarray(phi[P])
+    phi_P = phi[P]
 
 
     mdot_boundary = rho * np.dot(u_boundary, np.ascontiguousarray(Sf))
-    mdot_boundary = -max(0.0, -mdot_boundary)
+    mdot_boundary = max(0.0, -mdot_boundary)
+    flux = mdot[f]
+    phi_B = bc_value  # Dirichlet BC at the boundary
+
+    Flux_C_b = max(mdot[f], 0)
+    Flux_N_b = -max(-mdot[f],0) # ghost cell 
 
     if bc_type == BC_DIRICHLET:
-        return mdot_boundary, -mdot_boundary * (2*phi_P[component_idx] - bc_value)
+        return Flux_C_b, Flux_N_b *(2*phi_P-bc_value) #- 2*phi_P)
     elif bc_type == BC_NEUMANN:
         return 0.0, 0.0
     elif bc_type == BC_INLET:
-        return -mdot[f], 0.0#mdot_boundary, 0.0#bc_value#-mdot_boundary * (2*phi_P[component_idx] - bc_value)
+        return Flux_C_b, Flux_N_b *(2*phi_P-bc_value) #- 2*phi_P)
     elif bc_type == BC_OUTLET:
-        return -mdot[f], mdot[f] #*  (2*phi_P[component_idx] - bc_value)#mdot_boundary, -mdot_boundary * (2*phi_P[component_idx] - bc_value)
+        grad_v_b = compute_velocity_gradient_least_squares(mesh, u_field, u_field, mesh.face_centers[f], u_field[P], P, f)
+        v_b = u_field[P] + np.dot(grad_v_b, d_Cb_vec)
+        term1 = mdot[f] * (v_b - u_field[P])
+        term2 = mdot[f] * (2*phi_P - v_b[component_idx])
+        term3 = Sf * p_b 
+        return -mdot[f], term1[component_idx] + term2 - term3[component_idx]
     elif bc_type == BC_WALL:
         return 0.0, 0.0

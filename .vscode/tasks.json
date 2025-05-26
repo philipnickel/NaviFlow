@@ -1,0 +1,272 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "MAIN: Run main.py",
+        "type": "shell",
+        "command": "${command:python.interpreterPath}",
+        "args": [
+          "main.py",
+          "--experiment", "${input:experiment}",
+          "--max_iterations", "${input:max_iter}",
+          "--reynolds_number", "${input:reynolds_number}",
+          "--velocity_relaxation", "${input:velocity_relaxation}",
+          "--pressure_relaxation", "${input:pressure_relaxation}",
+          "--tolerance_exponent", "${input:tolerance_exponent}",
+          "--print_interval", "${input:print_interval}"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder}"
+        },
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "new",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      },
+      {
+        "label": "POSTPROCESS",
+        "type": "shell",
+        "command": "${command:python.interpreterPath}",
+        "args": [
+          "naviflow_collocated/utils/postprocess/postprocess.py",
+          "--experiment", "${input:experiment}",
+          "--all"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder}"
+        },
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "shared",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      },
+      {
+        "label": "Live Residual Plot",
+        "type": "shell",
+        "command": "${command:python.interpreterPath}",
+        "args": [
+          "naviflow_collocated/utils/live_residuals.py",
+          "--experiment", "${input:experiment}"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder}"
+        },
+        "isBackground": true,
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "dedicated",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      },
+      {
+        "label": "Kill Live Residual Plot",
+        "type": "shell",
+        "command": "pkill",
+        "args": ["-f", "live_plot_residuals.py"],
+        "presentation": {
+          "reveal": "never",
+          "closeOnExit": true
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Open Final PDF",
+        "type": "shell",
+        "command": "open",
+        "args": [
+          "${workspaceFolder}/experiments/${input:experiment}/results/residual_fields.pdf",
+          "${workspaceFolder}/experiments/${input:experiment}/results/flow_fields.pdf",
+          "${workspaceFolder}/experiments/${input:experiment}/results/residual_history.pdf",
+        ],
+        "presentation": {
+          "reveal": "silent",
+          "closeOnExit": true
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Open Results Folder",
+        "type": "shell",
+        "command": "open",
+        "args": [
+          "${workspaceFolder}/experiments/${input:experiment}/results"
+        ],
+        "presentation": {
+          "reveal": "silent",
+          "closeOnExit": true
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Full Workflow (Run + Postprocess + Plot + Open)",
+        "dependsOn": [
+          "MAIN: Run main.py",
+          "POSTPROCESS",
+          "Open Final PDF"
+        ],
+        "dependsOrder": "sequence",
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "new",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      },
+      {
+        "label": "Generate Mesh",
+        "type": "shell",
+        "command": "${command:python.interpreterPath}",
+        "args": [
+          "-m",
+          "meshing.generate_meshes",
+          "${input:experiment}",
+          "--resolution",
+          "${input:mesh_resolution}"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder}"
+        },
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "dedicated",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      },
+      {
+        "label": "Visualize Mesh",
+        "type": "shell",
+        "command": "/bin/zsh",
+        "args": [
+          "-c",
+          "source ~/.zshrc && run_with_paraview meshing/visualize_meshes.py ${workspaceFolder}/meshing/experiments/${input:experiment}/${input:mesh_type}/${input:mesh_resolution}"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder}"
+        },
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "dedicated",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      },
+      {
+        "label": "Mesh Workflow (Generate + Visualize)",
+        "dependsOn": [
+          "Generate Mesh",
+          "Visualize Mesh"
+        ],
+        "dependsOrder": "sequence",
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "dedicated",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      },
+      {
+        "label": "PROFILE: Run main.py with cProfile",
+        "type": "shell",
+        "command": "${command:python.interpreterPath}",
+        "args": [
+          "-m",
+          "cProfile",
+          "-o",
+          "${workspaceFolder}/experiments/${input:experiment}/profile_results.prof",
+          "main.py",
+          "--experiment", "${input:experiment}",
+          "--max_iterations", "${input:max_iter}",
+          "--reynolds_number", "100",
+          "--velocity_relaxation", "0.7",
+          "--pressure_relaxation", "0.3",
+          "--tolerance_exponent", "3",
+          "--print_interval", "10",
+        ],
+        "options": {
+          "cwd": "${workspaceFolder}"
+        },
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "new",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      }
+    ],
+    "inputs": [
+      {
+        "id": "experiment",
+        "type": "pickString",
+        "description": "Choose experiment to run:",
+        "options": [
+          "lidDrivenCavity",
+          "cylinderFlow"
+        ],
+        "default": "lidDrivenCavity"
+      },
+      {
+        "id": "max_iter",
+        "type": "promptString",
+        "description": "Max SIMPLE iterations",
+        "default": "10000"
+      },
+      {
+        "id": "reynolds_number",
+        "type": "promptString",
+        "description": "Reynolds number",
+        "default": "100"
+      },
+      {
+        "id": "velocity_relaxation",
+        "type": "promptString",
+        "description": "Velocity relaxation factor",
+        "default": "0.7"
+      },
+      {
+        "id": "pressure_relaxation",
+        "type": "promptString",
+        "description": "Pressure relaxation factor",
+        "default": "0.3"
+      },
+      {
+        "id": "tolerance_exponent",
+        "type": "promptString",
+        "description": "Convergence tolerance as 10^-x (e.g., 3 for 1e-3)",
+        "default": "4"
+      },
+      {
+        "id": "print_interval",
+        "type": "promptString",
+        "description": "Print residuals every N iterations",
+        "default": "10"
+      },
+      {
+        "id": "mesh_resolution",
+        "type": "pickString",
+        "description": "Choose mesh resolution:",
+        "options": [
+          "coarse",
+          "medium",
+          "fine"
+        ],
+        "default": "coarse"
+      },
+      {
+        "id": "mesh_type",
+        "type": "pickString",
+        "description": "Choose mesh type:",
+        "options": [
+          "unstructured",
+          "structuredUniform"
+        ],
+        "default": "structuredUniform"
+      }
+    ]
+  }
+  

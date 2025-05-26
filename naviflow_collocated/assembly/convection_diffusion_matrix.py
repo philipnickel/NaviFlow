@@ -34,8 +34,7 @@ def assemble_diffusion_convection_matrix(
     scheme="Upwind",
     limiter=None,
     pressure_field = None,
-    grad_pressure_field = None
-   
+    grad_pressure_field = None,
 ):
     """Assemble sparse matrix and RHS for a collocated FV discretisation.
 
@@ -77,7 +76,7 @@ def assemble_diffusion_convection_matrix(
     # ––– pessimistic non-zero count ––––––––––––––––––––––––––––––––––––––––
     # internal face: 4 (conv) + 4 (diff) ≤ 8
     # boundary face: ≤ 2 (diff + conv)
-    max_nnz = 8 * n_internal + 2 * n_boundary
+    max_nnz = 8 * n_internal + 3 * n_boundary
     row  = np.zeros(max_nnz, dtype=np.int64)
     col  = np.zeros(max_nnz, dtype=np.int64)
     data = np.zeros(max_nnz, dtype=np.float64)
@@ -87,6 +86,10 @@ def assemble_diffusion_convection_matrix(
     idx  = 0  # running write position
     b = np.zeros(n_cells, dtype=np.float64)
 
+    #===============================================
+    #========== 1. Face Fluxes ================
+    #===============================================
+
     # ––– internal faces ––––––––––––––––––––––––––––––––––––––––––––––––––––
     for i in range(n_internal):
         f = mesh.internal_faces[i]
@@ -94,23 +97,29 @@ def assemble_diffusion_convection_matrix(
         N = mesh.neighbor_cells[f]
 
     # —— convection term (upwind) ——
-        a_P, a_N, b_corr_conv = compute_convective_stencil(
-            f, mesh, rho, mdot[f], u_field, grad_phi, component_idx, phi, scheme=scheme, limiter=limiter
+        convFlux_P_f, convFlux_N_f, convDC= compute_convective_stencil(
+            f, mesh, rho, mdot, u_field, grad_phi, component_idx, phi, scheme=scheme, limiter=limiter
         )
 
         # —— orthogonal diffusion ——
-        _, _, D_f = compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu)
+        diffFlux_P_f, diffFlux_N_f = compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu)
         # —— non-orthogonal correction (explicit) ——
-        _, _, bcorr_diff = compute_diffusive_correction(f, grad_phi, mesh, mu)
+        diffDC = compute_diffusive_correction(f, grad_phi, mesh, mu) # -muF * np.dot(grad_f, T_f)
 
-        row[idx] = P; col[idx] = P; data[idx] =  a_P + D_f; idx += 1
-        row[idx] = P; col[idx] = N; data[idx] = -a_P - D_f; idx += 1
-        row[idx] = N; col[idx] = N; data[idx] =  a_N + D_f; idx += 1
-        row[idx] = N; col[idx] = P; data[idx] = -a_N - D_f; idx += 1
+        # —— face fluxes —— Moukalled 15.72 ——
+        Flux_P_f =  convFlux_P_f + diffFlux_P_f
+        Flux_N_f =  convFlux_N_f + diffFlux_N_f
+        Flux_V_f = convDC + diffDC 
 
-        b[P] -= b_corr_conv + bcorr_diff
-        b[N] += b_corr_conv + bcorr_diff
+     
 
+        row[idx] = P; col[idx] = P; data[idx] = Flux_P_f; idx += 1
+        row[idx] = P; col[idx] = N; data[idx] = Flux_N_f ; idx += 1
+        row[idx] = N; col[idx] = N; data[idx] = -Flux_N_f ; idx += 1
+        row[idx] = N; col[idx] = P; data[idx] = -Flux_P_f ; idx += 1
+
+        b[P] -= Flux_V_f #- Flux_T_f
+        b[N] += Flux_V_f #+ Flux_T_f
 
     # ––– boundary faces ––––––––––––––––––––––––––––––––––––––––––––––––––––
     for i in range(n_boundary):
@@ -131,20 +140,19 @@ def assemble_diffusion_convection_matrix(
         p_b = pressure_field[P] + np.dot(grad_p, vec_Cb)
  
         
-        P, a_P, b_P = compute_boundary_diffusive_correction(
-            f, grad_phi, mesh, mu, bc_type, bc_val
+        diffFlux_P_b, diffFlux_N_b = compute_boundary_diffusive_correction(
+            f, u_field, grad_phi, mesh, mu,  p_b,  bc_type, bc_val, component_idx
         )
 
-        aP_cnv, b_cnv = compute_boundary_convective_flux(
-            f, mesh, rho, mdot, u_field, phi, bc_type, bc_val, component_idx
+        convFlux_P_b, convFlux_N_b = compute_boundary_convective_flux(
+            f, mesh, rho, mdot, u_field, phi, p_b, bc_type, bc_val, component_idx
         )
-        #aP_cnv = 0
-        #b_cnv = 0
-        row[idx] = P; col[idx] = P; data[idx] = a_P + aP_cnv; idx += 1
-        if bc_type == BC_OUTLET:
-            b_P = -p_b * mag_S_b
+        
+        row[idx] = P; col[idx] = P; data[idx] = +diffFlux_P_b + convFlux_P_b ; idx += 1
+        #if bc_type == BC_OUTLET:
+        #    b_P = -p_b * mag_S_b
 
-        b[P] -= b_cnv + b_P
+        b[P] -= diffFlux_N_b + convFlux_N_b
         
         
 

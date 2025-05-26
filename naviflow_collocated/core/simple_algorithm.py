@@ -105,7 +105,17 @@ def is_diagonally_dominant(A):
     dominance = np.all(diagonal >= off_diagonal_sum)
     return dominance
 
-def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection_scheme="TVD", limiter="MUSCL", PISO=False, PISO_corrections=1):
+def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection_scheme="TVD", limiter="MUSCL", PISO=False, PISO_corrections=1, progress_callback=None, interruption_flag=lambda: False, linear_solver_settings=None):
+    # Convert tolerance from string to float if needed
+    tol = float(tol)
+
+    # Default linear solver settings if not provided
+    if linear_solver_settings is None:
+        linear_solver_settings = {
+            'momentum': {'type': 'bcgs', 'preconditioner': 'hypre', 'tolerance': 1e-6, 'max_iterations': 1000},
+            'pressure': {'type': 'bcgs', 'preconditioner': 'hypre', 'tolerance': 1e-6, 'max_iterations': 1000}
+        }
+
     time_start = time.time()
 
     # cells and faces
@@ -130,15 +140,17 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
     U_old_bar = np.zeros((n_faces, 2))
     U_star_rc = np.zeros((n_faces, 2))
 
-
     # Pressure field
     p = np.zeros(n_cells)
     p_prime = np.zeros(n_cells)
 
     # Initialize residual tracking lists
     u_l2norm = np.zeros(max_iter)
+    max_u_l2norm = 0.0
     v_l2norm = np.zeros(max_iter)
+    max_v_l2norm = 0.0 
     continuity_l2norm = np.zeros(max_iter)
+    max_continuity_l2norm = np.zeros(max_iter)
 
     # calculate rho and mu from Reynolds number
     rho = 1.0
@@ -148,7 +160,10 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
     pres_solver = None
 
     for i in range(max_iter):
-             #=============================================================================
+        if interruption_flag():
+            print(f"Interrupted at iteration {i}. Exiting solver loop.")
+            break
+        #=============================================================================
         # PRECOMPUTE QUANTITIES
         #=============================================================================
         grad_p = compute_cell_gradients(mesh, p)
@@ -156,7 +171,6 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         U_old_bar = interpolate_to_face(mesh, U)
         grad_u = compute_cell_gradients(mesh, U[:,0])
         grad_v = compute_cell_gradients(mesh, U[:,1])
-
 
         #=============================================================================
         # ASSEMBLE and solve U-MOMENTUM EQUATIONS
@@ -174,11 +188,16 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         A_u.setdiag(relaxed_A_u_diag)
 
         # solve
-        U_star[:,0], _, _= petsc_solver(A_u, rhs_u)
+        U_star[:,0], _, _= petsc_solver(A_u, rhs_u, 
+            tolerance=linear_solver_settings['momentum']['tolerance'],
+            max_iterations=linear_solver_settings['momentum']['max_iterations'],
+            solver_type=linear_solver_settings['momentum']['type'],
+            preconditioner=linear_solver_settings['momentum']['preconditioner'])
         A_u.setdiag(A_u_diag)
 
         # compute normalized residual
-        u_l2norm[i], u_residual= compute_residual(A_u.data, A_u.indices, A_u.indptr, U_star[:,0], rhs_u_unrelaxed)
+        u_l2norm[i], u_residual= compute_residual(A_u.data, A_u.indices, A_u.indptr, U_star[:,0], rhs_u_unrelaxed, max_residual=max_u_l2norm)
+        max_u_l2norm = max(max_u_l2norm, u_l2norm[i])
 
         #=============================================================================
         # ASSEMBLE and solve V-MOMENTUM EQUATIONS
@@ -197,13 +216,16 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         A_v.setdiag(relaxed_A_v_diag)
 
         # solve
-        U_star[:,1], _, _= petsc_solver(A_v, rhs_v)
+        U_star[:,1], _, _= petsc_solver(A_v, rhs_v,
+            tolerance=linear_solver_settings['momentum']['tolerance'],
+            max_iterations=linear_solver_settings['momentum']['max_iterations'],
+            solver_type=linear_solver_settings['momentum']['type'],
+            preconditioner=linear_solver_settings['momentum']['preconditioner'])
         A_v.setdiag(A_v_diag)
 
         # compute normalized residual
-        v_l2norm[i], v_residual = compute_residual(A_v.data, A_v.indices, A_v.indptr, U_star[:,1], rhs_v_unrelaxed)
-
-    
+        v_l2norm[i], v_residual = compute_residual(A_v.data, A_v.indices, A_v.indptr, U_star[:,1], rhs_v_unrelaxed, max_residual=max_v_l2norm)
+        max_v_l2norm = max(max_v_l2norm, v_l2norm[i])
 
         #=============================================================================
         # RHIE-CHOW VELOCITY
@@ -224,7 +246,6 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         #=============================================================================
         rhs_p = compute_divergence_from_face_fluxes(mesh, mdot_star) 
 
-
         continuity_l2norm[i] = np.linalg.norm(rhs_p)
 
         # pin one pressure node
@@ -233,13 +254,17 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         A_p = coo_matrix((data_p, (row_p, col_p)), shape=(n_cells, n_cells)).tocsr()
 
         # First solution of pressure correction equation (orthogonal)
-        p_prime, res_p, ksp_1= petsc_solver(A_p, -rhs_p)
+        p_prime, res_p, ksp_1= petsc_solver(A_p, -rhs_p,
+            tolerance=linear_solver_settings['pressure']['tolerance'],
+            max_iterations=linear_solver_settings['pressure']['max_iterations'],
+            solver_type=linear_solver_settings['pressure']['type'],
+            preconditioner=linear_solver_settings['pressure']['preconditioner'])
         grad_p_prime= compute_cell_gradients(mesh, p_prime)
         grad_p_prime_face = interpolate_to_face(mesh, grad_p_prime)
         # Second solution of pressure correction equation (non-orthogonal correction)
-        rhs_p_2 = pressure_correction_loop_term(mesh, rho, grad_p_prime_face)
-        p_prime2, res_p_2, _= petsc_solver(A_p, -(rhs_p_2), ksp=ksp_1)
-        p_prime = p_prime + p_prime2
+        #rhs_p_2 = pressure_correction_loop_term(mesh, rho, grad_p_prime_face)
+        #p_prime2, res_p_2, _= petsc_solver(A_p, -(rhs_p_2), ksp=ksp_1)
+        #p_prime = p_prime + p_prime2
 
         #=============================================================================
         # CORRECT PRESSURE, VELOCITIES and MASS FLUXES
@@ -263,73 +288,24 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
             mdot_prime = mdot_calculation(mesh, rho, U_prime_face)
             mdot_2star = mdot_star + mdot_prime
 
-
         # Update fields
         p += alpha_p * p_prime
         U = U_2star
         U_old = U_star
         mdot = mdot_2star
-        
-        """
-        
-        x = mesh.cell_centers[:, 0]
-        y = mesh.cell_centers[:, 1]
-        
-        # Create figure with 3x2 subplots
-        fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(12, 15))
-        
-        # Plot div_u
-        sc1 = ax1.scatter(x, y, c=rhs_p, cmap="viridis", s=8)
-        ax1.set_title("RHS of Pressure Equation")
-        plt.colorbar(sc1, ax=ax1)
-        ax1.set_aspect('equal')
-        
-        # Plot mdot_star 
-        sc2 = ax2.scatter(mesh.face_centers[:, 0], mesh.face_centers[:, 1], c=mdot_star, cmap="viridis", s=8)
-        ax2.set_title("Mdot Star")
-        plt.colorbar(sc2, ax=ax2)
-        ax2.set_aspect('equal')
-
-        # plot mdots correction
-        sc3 = ax3.scatter(mesh.face_centers[:, 0], mesh.face_centers[:, 1], c=mdot_prime, cmap="viridis", s=8)
-        ax3.set_title("Mdot Prime")
-        plt.colorbar(sc3, ax=ax3)
-        ax3.set_aspect('equal')
-        
-        # plot mdot_2star
-        sc4 = ax4.scatter(mesh.face_centers[:, 0], mesh.face_centers[:, 1], c=mdot_2star, cmap="viridis", s=8)
-        ax4.set_title("Mdot 2 Star") 
-        plt.colorbar(sc4, ax=ax4)
-        ax4.set_aspect('equal')
-
-        # plot u_prime
-        sc5 = ax5.scatter(x, y, c=U_prime[:,0], cmap="viridis", s=8)
-        ax5.set_title("U Prime (u-component)")
-        plt.colorbar(sc5, ax=ax5)
-        ax5.set_aspect('equal')
-
-        # plot u_2star
-        sc6 = ax6.scatter(x, y, c=U_2star[:,0], cmap="viridis", s=8)
-        ax6.set_title("U 2 Star (u-component)")
-        plt.colorbar(sc6, ax=ax6)
-        ax6.set_aspect('equal')
-
-        plt.tight_layout()
-        os.makedirs("plots", exist_ok=True)
-        plt.savefig(f"plots/DEBUG.png", dpi=300)
-        plt.close()
-        """
-        
 
         #=============================================================================
         # CONVERGENCE CHECK
         #=============================================================================
-        print(f"Iteration {i}: u_residuals = {u_l2norm[i]:.3e}, v_residuals = {v_l2norm[i]:.3e}, continuity_residuals = {continuity_l2norm[i]:.3e}")
-        if u_l2norm[i] < tol and v_l2norm[i] < tol:
-            print(f"Converged at iteration {i}")
-            break
+        if progress_callback is not None:
+            progress_callback(i, u_l2norm[i], v_l2norm[i], continuity_l2norm[i])
+            if getattr(progress_callback.__self__, "diverging", False):
+                print(f"Divergence detected at iteration {i}. Aborting SIMPLE loop.")
+                break
+            if getattr(progress_callback.__self__, "converged", False):
+                print(f"Converged at iteration {i}. Exiting solver loop.")
+                break
 
-        
     u_l2norm = u_l2norm[:i+1]
     v_l2norm = v_l2norm[:i+1]
     continuity_l2norm = continuity_l2norm[:i+1]
@@ -341,4 +317,4 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
     seconds = int(elapsed_time % 60)
     print(f"Elapsed time: {hours:02d}:{minutes:02d}:{seconds:02d}")
 
-    return U, p, rhs_p, u_l2norm, v_l2norm, continuity_l2norm, u_residual, v_residual
+    return U, p, rhs_p, u_l2norm, v_l2norm, continuity_l2norm, u_residual, v_residual, mdot_star

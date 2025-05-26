@@ -75,7 +75,7 @@ def test_gradient_mms(mesh_instance, mesh_label):
 
 
 mesh_file = "meshing/experiments/lidDrivenCavity/structuredUniform/coarse/lidDrivenCavity_uniform_coarse.msh" 
-bc_file = "shared_configs/domain/boundaries_lid_driven_cavity.yaml" 
+bc_file = "shared_configs/domain/boundaries_lidDrivenCavity.yaml" 
 mesh = load_mesh(mesh_file, bc_file)
 
 def test_gradient_mms(mesh):
@@ -88,10 +88,12 @@ def test_gradient_mms(mesh):
     x = mesh.cell_centers[:, 0]
     y = mesh.cell_centers[:, 1]
 
-    u = np.zeros(len(x))#np.sin(4*np.pi * (x + y)) + np.cos(4 * np.pi * x * y) 
+    #u = np.zeros(len(x))#np.sin(4*np.pi * (x + y)) + np.cos(4 * np.pi * x * y) 
+
+    u =np.sin(4*np.pi * (x + y)) + np.cos(4 * np.pi * x * y) 
     grad_u_exact = np.zeros((len(u), 2))
-    #grad_u_exact[:, 0] = 4 * np.pi * (-y * np.sin(np.pi * x * y) + np.cos (np.pi * (4*x + 4*y)))
-    #grad_u_exact[:, 1] = 4 * np.pi * (-x * np.sin(np.pi * x * y) + np.cos (np.pi * (4*x + 4*y)))
+    grad_u_exact[:, 0] = 4 * np.pi * (-y * np.sin(np.pi * x * y) + np.cos (np.pi * (4*x + 4*y)))
+    grad_u_exact[:, 1] = 4 * np.pi * (-x * np.sin(np.pi * x * y) + np.cos (np.pi * (4*x + 4*y)))
 
     grad_u_computed = compute_cell_gradients(mesh, u)
 
@@ -104,7 +106,7 @@ def test_gradient_mms(mesh):
     else:
         print("No None found in grad_u_computed")
 
-    err = grad_u_computed - grad_u_exact
+    err = abs(grad_u_computed - grad_u_exact)
     print(f"L2 of error: {np.linalg.norm(err)}")
     
     rel_err = np.linalg.norm(err) / (np.linalg.norm(grad_u_exact) + 1e-14)
@@ -135,9 +137,18 @@ def test_gradient_mms(mesh):
     axs[0].legend()
 
     err_mag = np.linalg.norm(err, axis=1)
+    max_err_idx = np.argmax(err_mag)
+    
+    # Plot error magnitude
     sc = axs[1].scatter(x, y, c=err_mag, cmap="viridis", s=8)
+    
+    # Highlight point with maximum error
+    axs[1].scatter(x[max_err_idx], y[max_err_idx], c='red', s=100, 
+                  marker='*', label=f'Max Error: {err_mag[max_err_idx]:.2e}')
+    
     axs[1].set_title(f"Gradient Error Magnitude")
     axs[1].set_aspect("equal")
+    axs[1].legend()
     plt.colorbar(sc, ax=axs[1])
 
     plt.tight_layout()

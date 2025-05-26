@@ -2,7 +2,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from petsc4py import PETSc
 
-def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None):
+def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None, tolerance=1e-6, max_iterations=1000, solver_type="bcgs", preconditioner="hypre"):
     """
     Solve A x = b using PETSc with optional KSP reuse.
 
@@ -14,6 +14,14 @@ def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None):
         Right-hand side vector.
     ksp : PETSc.KSP, optional
         Reusable KSP solver object. If None, a new KSP is created.
+    tolerance : float, optional
+        Convergence tolerance for the solver (default: 1e-6).
+    max_iterations : int, optional
+        Maximum number of iterations for the solver (default: 1000).
+    solver_type : str, optional
+        Type of PETSc solver to use (default: "bcgs").
+    preconditioner : str, optional
+        Type of PETSc preconditioner to use (default: "hypre").
 
     Returns
     -------
@@ -39,12 +47,11 @@ def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None):
     if ksp is None:
         ksp = PETSc.KSP().create()
         ksp.setOperators(A_petsc)
-        ksp.setType("bcgs")
-        ksp.setTolerances(atol=1e-5, rtol=1e-5, max_it=10000)
+        ksp.setType(solver_type)
+        ksp.setTolerances(atol=float(tolerance), max_it=max_iterations)
         pc = ksp.getPC()
-        pc.setType("hypre")
+        pc.setType(preconditioner)
         ksp.setFromOptions()
-
 
     # Solve
     ksp.solve(b_petsc, x_petsc)

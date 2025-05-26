@@ -45,7 +45,8 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
     
     u_field = u_field_fn(mesh.cell_centers)
     u_field = np.ascontiguousarray(u_field)
-    grad_phi = compute_cell_gradients(mesh, phi_exact)
+    grad_phi = np.ascontiguousarray(compute_cell_gradients(mesh, phi_exact), dtype=np.float64)
+    #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
     #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
     face_velocities = compute_face_velocities(mesh, u_field[:, 0], u_field[:, 1])
     mdot = compute_face_fluxes(mesh, face_velocities, rho)
@@ -60,6 +61,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
     )
 
     A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
+    """
 
     # Plot sparsity pattern of matrix A
     fig_spy, ax_spy = plt.subplots(figsize=(6, 6))
@@ -70,6 +72,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
     outdir.mkdir(parents=True, exist_ok=True)
     plt.savefig(outdir / f"sparsity_{tag_prefix}.png", dpi=300)
     plt.close()
+    """
 
     rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
 
@@ -250,6 +253,7 @@ if __name__ == "__main__":
     mms_cases = {
         "Sinusoidal": ("-cos(pi*x)*sin(pi*y)", "-cos(pi*x)*sin(pi*y)"),
         "Sine_cos": ("sin(4*pi*(x+y))+cos(4*pi*x*y)", "sin(4*pi*(x+y))+cos(4*pi*x*y)"),
+        #"SinSin": ("sin(pi*x)*sin(pi*y)", "sin(pi*x)*sin(pi*y)"),
         #"Exponential": ("exp(x)*sin(y)+x", "cos(y)+x+0.1"),
         #"Backwards": ("-1.0 + x*0.0", "0.0 + y*0.0"),
         #"Uniform": ("1.0 + x*0.0", "0.0 + y*0.0"),
@@ -258,6 +262,7 @@ if __name__ == "__main__":
     BC_files = {
         "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
         "Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
+        #"SinSin": "shared_configs/domain/sanityChecks/sanityCheckSinSin.yaml",
         #"Exponential": "shared_configs/domain/sanityChecks/sanityCheckEXP.yaml",
         #"Backwards": "shared_configs/domain/sanityChecks/sanityCheckBackwards.yaml",
         #"Uniform": "shared_configs/domain/sanityChecks/sanityCheckUniformFlow.yaml",
@@ -270,35 +275,42 @@ if __name__ == "__main__":
     time_start = time.time()
 
     for tag, expr in mms_cases.items():
-        mu = 0.1
+        mu = 0.00
         rho = 1.0
         scheme4 = "SOU"
         scheme1 = "QUICK"
         scheme2 = "TVD"
         scheme3 = "Upwind"
-        limiter = "MUSCL" # MUSCL, OSPRE, H_Cui
+        limiter = None # MUSCL, OSPRE, H_Cui
         u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
         bc_file = BC_files[tag]
         
-        """ 
         run_mms_test(
-            structured_uniform["fine"],
+            structured_uniform["coarse"],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} structured",
-            scheme=scheme2,
+            scheme=scheme3,
             limiter=limiter,
         )
+        
+        
+        
         run_mms_test(
-            unstructured["fine"],
+            unstructured["coarse"],
             bc_file,
             u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} unstructured",
-            scheme=scheme2,
+            scheme=scheme3,
             limiter=limiter,
         )
+        
+        
+       
+        
+        
+        
         """
-             
         # Uncomment to run convergence studies
         errors = run_convergence_study(
             [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
@@ -320,6 +332,8 @@ if __name__ == "__main__":
             ax=ax,
             marker=next(marker_cycle)
         )
+        
+        
         errors = run_convergence_study(
                     [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
                     bc_file,
@@ -379,6 +393,10 @@ if __name__ == "__main__":
     Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
     plt.savefig("tests/test_output/MMS_convergence/convergence_plot_combined.pdf", dpi=300)
     plt.close()
+    """
+    
+    
+    
     
     
     print(f"Time taken: {time.time() - time_start:.2f} seconds")
