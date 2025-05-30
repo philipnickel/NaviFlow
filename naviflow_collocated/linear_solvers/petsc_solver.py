@@ -2,7 +2,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from petsc4py import PETSc
 
-def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None, tolerance=1e-6, max_iterations=1000, solver_type="bcgs", preconditioner="hypre"):
+def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None, tolerance=1e-6, max_iterations=1000, solver_type="bcgs", preconditioner="hypre", remove_nullspace=False):
     """
     Solve A x = b using PETSc with optional KSP reuse.
 
@@ -22,6 +22,9 @@ def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None, tolerance=1e-6, 
         Type of PETSc solver to use (default: "bcgs").
     preconditioner : str, optional
         Type of PETSc preconditioner to use (default: "hypre").
+    remove_nullspace : bool, optional
+        Whether to handle the nullspace (default: False).
+        If True, creates a constant nullspace vector and removes it from the RHS.
 
     Returns
     -------
@@ -42,6 +45,20 @@ def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None, tolerance=1e-6, 
     # Create PETSc vectors
     b_petsc = PETSc.Vec().createWithArray(b_np)
     x_petsc = PETSc.Vec().createSeq(n)
+
+    # Handle nullspace if requested
+    if remove_nullspace:
+        # Create constant nullspace vector
+        nullvec = A_petsc.createVecLeft()
+        nullvec.set(1.0)
+        nullvec.normalize()
+        
+        # Create and set nullspace
+        nullspace = PETSc.NullSpace().create(vectors=[nullvec])
+        A_petsc.setNullSpace(nullspace)
+        
+        # Remove nullspace from RHS
+        nullspace.remove(b_petsc)
 
     # Create or reuse KSP solver
     if ksp is None:
@@ -73,5 +90,8 @@ def petsc_solver(A_csr: csr_matrix, b_np: np.ndarray, ksp=None, tolerance=1e-6, 
     b_petsc.destroy()
     r_petsc.destroy()
     x_petsc.destroy()
+    if remove_nullspace:
+        nullvec.destroy()
+        nullspace.destroy()
 
     return x_np, residual_norm, ksp

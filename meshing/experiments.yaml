@@ -28,58 +28,58 @@ lidDrivenCavity:
   uniform:
     description: Uniform structured mesh for lid-driven cavity at multiple resolutions
     resolutions:
-      coarse: {L: 1.0, nx: 50, ny: 50}
-      medium: {L: 1.0, nx: 130, ny: 130}
-      fine: {L: 1.0, nx: 220, ny: 220}
+      coarse: {L: 1.0, nx: 63, ny: 63}
+      medium: {L: 1.0, nx: 127, ny: 127}
+      fine: {L: 1.0, nx: 255, ny: 255}
   unstructured:
     description: Unstructured mesh with boundary refinement at multiple resolutions
     resolutions:
       coarse:
         Lx: 1.0
         Ly: 1.0
-        n_cells: 5000
+        n_cells: 7500
         refinement_factors:
           boundaries:
-            left: [2, 1] # 10x refinement, 10% towards center
-            right: [2, 1]
-            top: [2, 1]
-            bottom: [2, 1]
+            left: [1, 1] # 10x refinement, 10% towards center
+            right: [1, 1]
+            top: [1, 1]
+            bottom: [1, 1]
           corners:
-            top_left: [2, 1] # 10x refinement, 75% towards center
-            top_right: [2, 1]
-            bottom_left: [2, 1]
-            bottom_right: [2, 1]
+            top_left: [1, 1] # 10x refinement, 75% towards center
+            top_right: [1, 1]
+            bottom_left: [1, 1]
+            bottom_right: [1, 1]
 
       medium:
         Lx: 1.0
         Ly: 1.0
-        n_cells: 40000
+        n_cells: 30000
         refinement_factors:
           boundaries:
-            left: [2, 1]
-            right: [2, 1]
-            top: [2, 1]
-            bottom: [2, 1]
+            left: [1, 1]
+            right: [1, 1]
+            top: [1, 1]
+            bottom: [1, 1]
           corners:
-            top_left: [2, 1]
-            top_right: [2, 1]
-            bottom_left: [2, 1]
-            bottom_right: [2, 1]
+            top_left: [1, 1]
+            top_right: [1, 1]
+            bottom_left: [1, 1]
+            bottom_right: [1, 1]
       fine:
         Lx: 1.0
         Ly: 1.0
-        n_cells: 160000
+        n_cells: 100000
         refinement_factors:
           boundaries:
-            left: [2, 1]
-            right: [2, 1]
-            top: [2, 1]
-            bottom: [2, 1]
+            left: [1, 1]
+            right: [1, 1]
+            top: [1, 1]
+            bottom: [1, 1]
           corners:
-            top_left: [2, 1]
-            top_right: [2, 1]
-            bottom_left: [2, 1]
-            bottom_right: [2, 1]
+            top_left: [1, 1]
+            top_right: [1, 1]
+            bottom_left: [1, 1]
+            bottom_right: [1, 1]
 
 cylinderFlow:
   description: Flow around a circular cylinder in a rectangular domain
@@ -92,7 +92,7 @@ cylinderFlow:
         n_cells: 8000
         obstacle:
           type: circle
-          center: [0.2, 0.205]
+          center: [0.2, 0.2]
           radius: 0.05
         refinement_factors:
           boundaries:
@@ -105,47 +105,47 @@ cylinderFlow:
             top_right: [1, 1]
             bottom_left: [1, 1]
             bottom_right: [1, 1]
-          obstacle: [1, 1] # 20x refinement, 75% of distance (equal to obstacle radius) outwards of obstacle 
+          obstacle: [3, 0.5] # 20x refinement, 75% of distance (equal to obstacle radius) outwards of obstacle 
       medium:
         Lx: 2.2
         Ly: 0.41
         n_cells: 15000
         obstacle:
           type: circle
-          center: [0.2, 0.205]
+          center: [0.2, 0.2]
           radius: 0.05
         refinement_factors:
           boundaries:
-            left: [2.0, 1]
-            right: [2.0, 1]
-            top: [2.0, 1]
-            bottom: [2.0, 1]
+            left: [1.0, 1]
+            right: [1.0, 1]
+            top: [1.0, 1]
+            bottom: [1.0, 1]
           corners:
             top_left: [2.0, 1]
-            top_right: [2.0, 1]
-            bottom_left: [2.0, 1]
-            bottom_right: [2.0, 1]
-          obstacle: [2.0, 0.2]
+            top_right: [1.0, 1]
+            bottom_left: [1.0, 1]
+            bottom_right: [1.0, 1]
+          obstacle: [3.0, 0.5]
       fine:
         Lx: 2.2
         Ly: 0.41
         n_cells: 15000
         obstacle:
           type: circle
-          center: [0.2, 0.205]
+          center: [0.2, 0.2]
           radius: 0.05
         refinement_factors:
           boundaries:
-            left: [2.0, 0.0]
-            right: [2.0, 0.0]
-            top: [2.0, 0.0]
+            left: [1.0, 0.0]
+            right: [1.0, 0.0]
+            top: [1.0, 0.0]
             bottom: [1.0, 0.0]
           corners:
             top_left: [1.0, 0.0]
             top_right: [1.0, 0.0]
             bottom_left: [1.0, 0.0]
             bottom_right: [1.0, 0.0]
-          obstacle: [1.0, 0.0]
+          obstacle: [3.0, 1.0]
 
 nacaFlow:
   description: Flow around a NACA0012 airfoil in a rectangular domain

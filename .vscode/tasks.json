@@ -183,8 +183,8 @@
           "--experiment", "${input:experiment}",
           "--max_iterations", "${input:max_iter}",
           "--reynolds_number", "100",
-          "--velocity_relaxation", "0.7",
-          "--pressure_relaxation", "0.3",
+          "--velocity_relaxation", "0.6",
+          "--pressure_relaxation", "0.4",
           "--tolerance_exponent", "3",
           "--print_interval", "10",
         ],
@@ -226,13 +226,13 @@
         "id": "velocity_relaxation",
         "type": "promptString",
         "description": "Velocity relaxation factor",
-        "default": "0.7"
+        "default": "0.6"
       },
       {
         "id": "pressure_relaxation",
         "type": "promptString",
         "description": "Pressure relaxation factor",
-        "default": "0.3"
+        "default": "0.4"
       },
       {
         "id": "tolerance_exponent",

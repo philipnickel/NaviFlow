@@ -33,7 +33,7 @@ def plot_field(mesh, field, ax=None, title=None):
             ax.set_title(title)
     ax.set_aspect("equal")
 
-def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None):
+def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None):
     mesh = load_mesh(mesh_file, bc_file)
      # Get the exact solution and ensure it has the right shape
     phi_exact = u_exact_fn[component_idx](mesh.cell_centers)
@@ -43,10 +43,12 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
     phi_exact = np.atleast_1d(np.asarray(phi_exact).ravel())
     phi_exact = np.ascontiguousarray(phi_exact)
     
-    u_field = u_field_fn(mesh.cell_centers)
+    u_field_x = u_exact_fn[0](mesh.cell_centers)
+    u_field_y = u_exact_fn[1](mesh.cell_centers)
+    u_field = np.column_stack([u_field_x, u_field_y])
     u_field = np.ascontiguousarray(u_field)
-    grad_phi = np.ascontiguousarray(compute_cell_gradients(mesh, phi_exact), dtype=np.float64)
-    #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
+    #grad_phi = np.ascontiguousarray(compute_cell_gradients(mesh, phi_exact), dtype=np.float64)
+    grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
     #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
     face_velocities = compute_face_velocities(mesh, u_field[:, 0], u_field[:, 1])
     mdot = compute_face_fluxes(mesh, face_velocities, rho)
@@ -81,9 +83,9 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
     A_petsc = PETSc.Mat().createAIJ(size=A.shape, csr=(A.indptr, A.indices, A.data))
     ksp = PETSc.KSP().create()
     ksp.setOperators(A_petsc)
-    ksp.setType("bcgs")
+    ksp.setType("gmres")
     ksp.getPC().setType("hypre")
-    ksp.setTolerances(rtol=1e-12, atol=1e-14, max_it=5000)
+    ksp.setTolerances(rtol=1e-12, atol=1e-14, max_it=500000)
     ksp.setFromOptions()
     ksp.solve(b_petsc, x_petsc)
     phi_numeric = x_petsc.getArray()
@@ -113,7 +115,7 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu
 # The following test follows the Method of Manufactured Solutions (MMS) approach
 # to verify spatial convergence of the numerical scheme by comparing numerical
 # and exact solutions on a sequence of refined meshes.
-def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None, ax=None, marker=None):
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None, ax=None, marker=None):
     hs = []
     errors = []
 
@@ -129,17 +131,19 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
         phi_exact = np.atleast_1d(np.asarray(phi_exact).ravel())
         phi_exact = np.ascontiguousarray(phi_exact)
         
-        u_field = u_field_fn(mesh.cell_centers)
+        u_field_x = u_exact_fn[0](mesh.cell_centers)
+        u_field_y = u_exact_fn[1](mesh.cell_centers)
+        u_field = np.column_stack([u_field_x, u_field_y])
         u_field = np.ascontiguousarray(u_field)
-        grad_phi_num = compute_cell_gradients(mesh, phi_exact)
-        #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
+        #grad_phi_num = compute_cell_gradients(mesh, phi_exact)
+        grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
         face_velocities = compute_face_velocities(mesh, u_field[:, 0], u_field[:, 1])
         mdot = compute_face_fluxes(mesh, face_velocities, rho)
         dummy_pressure = np.zeros(mesh.cell_centers.shape[0])
         dummy_grad_p = compute_cell_gradients(mesh, dummy_pressure)
 
         row, col, data, b_correction = assemble_diffusion_convection_matrix(
-            mesh, mdot, grad_phi_num, u_field,
+            mesh, mdot, grad_phi, u_field,
             rho, mu, component_idx, phi_exact, scheme, limiter,
             dummy_pressure, dummy_grad_p
         )
@@ -156,7 +160,7 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, u_field_fn, rhs_fn, g
         ksp = PETSc.KSP().create()
         ksp.setOperators(A_petsc)
         ksp.setType("bcgs")
-        ksp.getPC().setType("hypre")
+        ksp.getPC().setType("gamg")
         ksp.setTolerances(rtol=1e-12, atol=1e-14, max_it=5000)
         ksp.setFromOptions()
         ksp.solve(b_petsc, x_petsc)
@@ -251,8 +255,8 @@ if __name__ == "__main__":
 
     # === Additional MMS Cases ===
     mms_cases = {
-        "Sinusoidal": ("-cos(pi*x)*sin(pi*y)", "-cos(pi*x)*sin(pi*y)"),
-        "Sine_cos": ("sin(4*pi*(x+y))+cos(4*pi*x*y)", "sin(4*pi*(x+y))+cos(4*pi*x*y)"),
+        "Sinusoidal": ("cos(pi*y)*sin(pi*x)", "-cos(pi*x)*sin(pi*y)"),
+        #"Sine_cos": ("sin(pi*(x+y))+cos(pi*x*y)", "sin(pi*(x+y))+cos(pi*x*y)"),
         #"SinSin": ("sin(pi*x)*sin(pi*y)", "sin(pi*x)*sin(pi*y)"),
         #"Exponential": ("exp(x)*sin(y)+x", "cos(y)+x+0.1"),
         #"Backwards": ("-1.0 + x*0.0", "0.0 + y*0.0"),
@@ -261,7 +265,7 @@ if __name__ == "__main__":
     }
     BC_files = {
         "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
-        "Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
+        #"Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
         #"SinSin": "shared_configs/domain/sanityChecks/sanityCheckSinSin.yaml",
         #"Exponential": "shared_configs/domain/sanityChecks/sanityCheckEXP.yaml",
         #"Backwards": "shared_configs/domain/sanityChecks/sanityCheckBackwards.yaml",
@@ -275,47 +279,42 @@ if __name__ == "__main__":
     time_start = time.time()
 
     for tag, expr in mms_cases.items():
-        mu = 0.00
+        mu = 0.1
         rho = 1.0
         scheme4 = "SOU"
         scheme1 = "QUICK"
         scheme2 = "TVD"
         scheme3 = "Upwind"
-        limiter = None # MUSCL, OSPRE, H_Cui
+        limiter = "MUSCL" # MUSCL, OSPRE, H_Cui
         u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
         bc_file = BC_files[tag]
         
         run_mms_test(
-            structured_uniform["coarse"],
+            structured_uniform["medium"],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} structured",
             scheme=scheme3,
             limiter=limiter,
         )
         
         
-        
         run_mms_test(
-            unstructured["coarse"],
+            unstructured["fine"],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag} unstructured",
             scheme=scheme3,
             limiter=limiter,
         )
         
         
-       
         
         
-        
-        """
-        # Uncomment to run convergence studies
         errors = run_convergence_study(
             [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_structured",
             scheme=scheme1,
             limiter=limiter,
@@ -325,7 +324,7 @@ if __name__ == "__main__":
         errors = run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
             scheme=scheme1,
             limiter=limiter,
@@ -337,7 +336,7 @@ if __name__ == "__main__":
         errors = run_convergence_study(
                     [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
                     bc_file,
-                    u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+                    u_fn, rhs_fn, grad_fn, mu, rho,
                     tag_prefix=f"{tag}_structured",
                     scheme=scheme2,
                     limiter=limiter,
@@ -347,17 +346,20 @@ if __name__ == "__main__":
         errors = run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
             scheme=scheme2,
             limiter=limiter,
             ax=ax,
             marker=next(marker_cycle)
         )
+        
+        
+        
         errors = run_convergence_study(
                     [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
                     bc_file,
-                    u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+                    u_fn, rhs_fn, grad_fn, mu, rho,
                     tag_prefix=f"{tag}_structured",
                     scheme=scheme3,
                     limiter=limiter,
@@ -367,7 +369,7 @@ if __name__ == "__main__":
         errors = run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
-            u_fn, u_field_fn, rhs_fn, grad_fn, mu, rho,
+            u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
             scheme=scheme3,
             limiter=limiter,
@@ -393,10 +395,6 @@ if __name__ == "__main__":
     Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
     plt.savefig("tests/test_output/MMS_convergence/convergence_plot_combined.pdf", dpi=300)
     plt.close()
-    """
-    
-    
-    
     
     
     print(f"Time taken: {time.time() - time_start:.2f} seconds")

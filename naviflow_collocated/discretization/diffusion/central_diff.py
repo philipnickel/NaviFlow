@@ -6,8 +6,8 @@ EPS = 1.0e-14
 BC_WALL = 0
 BC_DIRICHLET = 1
 BC_INLET = 2
-BC_OUTLET = 3
-BC_NEUMANN = 4
+BC_OUTLET = 4
+BC_NEUMANN = 3
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Internal faces
@@ -110,35 +110,68 @@ def compute_boundary_diffusive_correction(
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
-        #d_skew = np.ascontiguousarray(mesh.vector_skewness[f]) ---- skewness correction omitted for now
-        #grad_P_mark = grad_P + np.dot(grad_P, d_skew) ---- skewness correction omitted for now
-        
-            
-        fluxVb = -muF * np.dot(grad_P, T_f)
+        d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+        grad_P_mark = grad_P + np.dot(grad_P, d_skew)
+        fluxVb = -muF * np.dot(grad_P_mark, T_f)
         diffFlux_N_b += fluxVb
     elif bc_type == BC_NEUMANN:
         E_mag = np.linalg.norm(E_f) + EPS
         diffFlux_N_b = -muF * bc_val * E_mag
     elif bc_type == BC_WALL:
+        """
         P = mesh.owner_cells[f]
         Sf = np.ascontiguousarray(mesh.vector_S_f[f])
         n = Sf / np.linalg.norm(Sf)
-        E_f = np.ascontiguousarray(mesh.vector_E_f[f])
         d_Cb = np.ascontiguousarray(mesh.d_Cb[f])
-        e = E_f / np.linalg.norm(E_f)
-        d_Cb_vec = d_Cb * e
-        U_b = np.ascontiguousarray(mesh.boundary_values[f, :2])
+        d_Cb_vec = d_Cb * n
+        u_b = mesh.boundary_values[f, 0]
+        v_b = mesh.boundary_values[f, 1]
+
         # no slip wall moukalled 15.125
         d_orth = np.dot(d_Cb_vec, n)
-        id = component_idx
-        id_other = int(abs(1 - id))
+        frac = (muF * np.linalg.norm(Sf)) / (d_orth + EPS)
 
-        frac =  (muF * np.linalg.norm(Sf)) / (d_orth + EPS)
-        term = (1 - n[id]**2)
+        if component_idx == 0:  # u-momentum
+            term = (1 - n[0]**2)
+            cross_term = (U[P][1] - v_b) * n[1] * n[0]
+            main_term = u_b * term
+        elif component_idx == 1:  # v-momentum
+            term = (1 - n[1]**2)
+            cross_term = (U[P][0] - u_b) * n[0] * n[1]
+            main_term = v_b * term
 
-        diffFlux_P_b =   frac * term
-        diffFlux_N_b =  -(frac * (U_b[id] * term + (U[P][id_other] - U_b[id_other])*n[1]*n[0]) )#- Sf[id] * p_b)
-      
+        diffFlux_P_b = frac * term
+        diffFlux_N_b = -frac * (main_term - cross_term)
+        """
+        E_mag = np.linalg.norm(E_f)
+        diffFlux_P_b = muF * E_mag / (d_PB)
+        diffFlux_N_b = -diffFlux_P_b * bc_val  # explicit orthogonal part
+
+        # --- explicit non-orthogonal correction (FluxV_b) ---
+        grad_P = grad_phi[P]
+        d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+        grad_P_mark = grad_P + np.dot(grad_P, d_skew)
+        fluxVb = -muF * np.dot(grad_P_mark, T_f)
+        diffFlux_N_b += fluxVb
+
+        P = mesh.owner_cells[f]
+        Sf = np.ascontiguousarray(mesh.vector_S_f[f])
+        n = Sf / (np.linalg.norm(Sf) + EPS)
+        S_mag = np.linalg.norm(Sf)
+        d_Cb = np.ascontiguousarray(mesh.d_Cb[f])
+        d_Cb_vec = d_Cb * n
+        d_orth = np.dot(d_Cb_vec, n)
+
+        # Implicit contribution
+        a_wall = muF * S_mag / (d_orth + EPS)
+
+        # Matrix entry
+        #diffFlux_P_b = a_wall
+
+        # RHS contribution from current value (deferred correction)
+        #u_C = #U[P][component_idx]
+        #diffFlux_N_b -= a_wall * bc_val 
+
 
     elif bc_type == BC_INLET:
         E_mag = np.linalg.norm(E_f)

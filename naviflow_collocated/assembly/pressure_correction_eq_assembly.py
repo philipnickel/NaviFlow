@@ -1,10 +1,20 @@
 import numpy as np
 from numba import njit, prange
 
+
+
+BC_WALL = 0
+BC_DIRICHLET = 1
+BC_INLET = 2
+BC_OUTLET = 4
+BC_NEUMANN = 3
+
+
 @njit(parallel=False)
 def assemble_pressure_correction_matrix(mesh, rho):
     n_cells = mesh.cell_volumes.shape[0]
     n_internal = mesh.internal_faces.shape[0]
+    n_boundary = mesh.boundary_faces.shape[0]
 
     max_entries = 4 * n_internal + 1
     row = np.zeros(max_entries, dtype=np.int32)
@@ -25,13 +35,14 @@ def assemble_pressure_correction_matrix(mesh, rho):
         row[idx] = P; col[idx] = N; data[idx] = -coeff; idx += 1
         row[idx] = N; col[idx] = N; data[idx] =  coeff; idx += 1
         row[idx] = N; col[idx] = P; data[idx] = -coeff; idx += 1
-
-    # Add pressure pinning for cell 0
-    row[idx] = 0
-    col[idx] = 0
-    data[idx] = 1.0
-    idx += 1
-
+    
+    
+    #for i in range(n_boundary):
+    #    f = mesh.boundary_faces[i]
+    #    P = mesh.owner_cells[f]
+    #    if mesh.boundary_types[f,0] == BC_OUTLET:
+    #        row[idx] = P; col[idx] = P; data[idx] += 1.0; idx += 1
+    
 
     return row[:idx], col[:idx], data[:idx]
 
@@ -56,3 +67,45 @@ def pressure_correction_loop_term(mesh, rho, grad_p_prime_f):
         correction_term[N] -= coeff
 
     return correction_term
+
+    import numpy as np
+from numba import njit
+
+@njit
+def enforce_diagonal_dominance_from_csr(data, indices, indptr):
+    """
+    Enforces diagonal dominance on a CSR matrix in-place.
+    For each row i, ensures:
+        A[i, i] >= sum_j≠i |A[i, j]|
+    If not, sets A[i, i] = sum_j≠i |A[i, j]|
+    
+    Parameters
+    ----------
+    data : 1D ndarray
+        Non-zero values of the matrix.
+    indices : 1D ndarray
+        Column indices corresponding to each entry in `data`.
+    indptr : 1D ndarray
+        Index pointers to rows in `data`/`indices`.
+    """
+    n_rows = indptr.shape[0] - 1
+    for i in range(n_rows):
+        row_start = indptr[i]
+        row_end = indptr[i + 1]
+
+        diag_index = -1
+        sum_off_diag = 0.0
+
+        for k in range(row_start, row_end):
+            col = indices[k]
+            val = data[k]
+
+            if col == i:
+                diag_index = k
+            else:
+                if val > 0.0:
+                    data[k] = 0.0  # Enforce coercivity
+                sum_off_diag -= data[k]  # subtract negative
+
+        if diag_index >= 0:
+            data[diag_index] = max(data[diag_index], sum_off_diag)

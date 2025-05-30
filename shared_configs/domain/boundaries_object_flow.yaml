@@ -29,10 +29,10 @@ boundaries:
       bc: neumann
       gradient: 0.0
 
-  #object:                    # cylinder surface
-  #  velocity:
-  #    bc: wall
-  #    value: [0.0, 0.0]      # no‑slip
-  #  pressure:
-  #    bc: neumann
-  #    gradient: 0.0
+  object:                    # cylinder surface
+    velocity:
+      bc: wall
+      value: [0.0, 0.0]      # no‑slip
+    pressure:
+      bc: neumann
+      gradient: 0.0

@@ -5,8 +5,8 @@ from naviflow_collocated.assembly.rhie_chow import compute_velocity_gradient_lea
 BC_WALL = 0
 BC_DIRICHLET = 1
 BC_INLET = 2
-BC_OUTLET = 3
-BC_NEUMANN = 4
+BC_OUTLET = 4
+BC_NEUMANN = 3
 
 @njit(inline="always")
 def MUSCL(r):
@@ -31,16 +31,7 @@ def compute_convective_stencil(
     g_f = mesh.face_interp_factors[f]
     d_CE = np.ascontiguousarray(mesh.vector_d_CE[f])
     d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
-    """
 
-    if mdot[f] >= 0:
-        conv_a_P = mdot[f]
-        conv_a_N = 0
-    else:
-        conv_a_P = 0
-        conv_a_N = mdot[f]
-    b_corr = 0.0
-    """
     # Moukalled 15.72 (negative sign for neighbor handled in matrix assembly)
     Flux_P_f = max(mdot[f], 0)
     Flux_N_f = -max(-mdot[f],0) 
@@ -65,7 +56,7 @@ def compute_convective_stencil(
         #phi_W = 2 * phi_N - phi_P
         phi_W = 2 * phi_P - phi_N
         #r = (phi_N - phi_W )/(phi_N - phi_P + 1e-12) 
-        r = (phi_N - phi_P )/(phi_N - phi_W + 1e-12) 
+        r = (phi_N - phi_P )/(phi_P - phi_W + 1e-12) 
         if limiter == "MUSCL":
             psi = MUSCL(r)
         elif limiter == "OSPRE":
@@ -93,7 +84,7 @@ def compute_convective_stencil(
         # Compute the high order term
         phi_HO = phi_P +  np.dot(gradC * a + grad_f_mark * b, d_Cf)
         F_high = mdot[f] * phi_HO
-        convDC = +(F_high - F_low)
+        convDC = (F_high - F_low)
     
 
 
@@ -124,11 +115,11 @@ def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, p_b, bc_t
     Flux_N_b = -max(-mdot[f],0) # ghost cell 
 
     if bc_type == BC_DIRICHLET:
-        return Flux_C_b, Flux_N_b *(2*phi_P-bc_value) #- 2*phi_P)
+        return 0.0, 0.0#Flux_C_b, Flux_N_b *(2*phi_P-bc_value) #Flux_C_b, -Flux_N_b *bc_value #- 2*phi_P) (only used for MMS tests)
     elif bc_type == BC_NEUMANN:
         return 0.0, 0.0
     elif bc_type == BC_INLET:
-        return Flux_C_b, Flux_N_b *(2*phi_P-bc_value) #- 2*phi_P)
+        return Flux_C_b, Flux_N_b * (2*phi_P-bc_value) #- 2*phi_P)
     elif bc_type == BC_OUTLET:
         grad_v_b = compute_velocity_gradient_least_squares(mesh, u_field, u_field, mesh.face_centers[f], u_field[P], P, f)
         v_b = u_field[P] + np.dot(grad_v_b, d_Cb_vec)
@@ -137,4 +128,4 @@ def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, p_b, bc_t
         term3 = Sf * p_b 
         return -mdot[f], term1[component_idx] + term2 - term3[component_idx]
     elif bc_type == BC_WALL:
-        return 0.0, 0.0
+        return 0.0, 0.0#-Sf * p_b

@@ -14,8 +14,8 @@ from naviflow_collocated.discretization.convection.upwind import (
 BC_WALL = 0
 BC_DIRICHLET = 1
 BC_INLET = 2
-BC_OUTLET = 3
-BC_NEUMANN = 4
+BC_OUTLET = 4
+BC_NEUMANN = 3
 
 
 EPS = 1.0e-14
@@ -104,7 +104,7 @@ def assemble_diffusion_convection_matrix(
         # —— orthogonal diffusion ——
         diffFlux_P_f, diffFlux_N_f = compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu)
         # —— non-orthogonal correction (explicit) ——
-        diffDC = compute_diffusive_correction(f, grad_phi, mesh, mu) # -muF * np.dot(grad_f, T_f)
+        diffDC = compute_diffusive_correction(f, grad_phi, mesh, mu)
 
         # —— face fluxes —— Moukalled 15.72 ——
         Flux_P_f =  convFlux_P_f + diffFlux_P_f
@@ -149,8 +149,9 @@ def assemble_diffusion_convection_matrix(
         )
         
         row[idx] = P; col[idx] = P; data[idx] = +diffFlux_P_b + convFlux_P_b ; idx += 1
-        #if bc_type == BC_OUTLET:
-        #    b_P = -p_b * mag_S_b
+        if bc_type == BC_OUTLET:
+            #b[P] = -p_b * mag_S_b
+            continue
 
         b[P] -= diffFlux_N_b + convFlux_N_b
         

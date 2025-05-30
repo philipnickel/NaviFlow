@@ -78,9 +78,9 @@ def compute_residual(data, indices, indptr, x, b, max_residual=None):
     denominator = max_residual if max_residual is not None else L2_b
     
     # Return 1.0 if denominator is zero, otherwise return relative residual
-    rel_res = 1.0 if denominator == 0.0 else L2_res / denominator
+    #rel_res = 1.0 if denominator == 0.0 else L2_res / denominator
 
-    return rel_res, res_field
+    return L2_res, res_field
 
 @njit(parallel=True)
 def interpolate_to_face(mesh, quantity):
@@ -119,3 +119,43 @@ def bold_Dv_calculation(mesh, A_u_diag, A_v_diag):
 
     return bold_Dv
 
+from scipy.sparse import csr_matrix, vstack, hstack
+import numpy as np
+
+def apply_mean_zero_constraint(A: csr_matrix, b: np.ndarray, volumes: np.ndarray):
+    """
+    Augments system A x = b with a zero-mean constraint: sum(volumes * x) = 0.
+
+    Parameters
+    ----------
+    A : csr_matrix
+        Original system matrix (n x n).
+    b : np.ndarray
+        Original right-hand side vector (n,).
+    volumes : np.ndarray
+        Cell volumes or integration weights (n,).
+
+    Returns
+    -------
+    A_aug : csr_matrix
+        Augmented system matrix (n+1 x n+1).
+    b_aug : np.ndarray
+        Augmented RHS (n+1).
+    """
+    n = A.shape[0]
+    assert A.shape[0] == A.shape[1] == b.shape[0] == volumes.shape[0], "Incompatible dimensions"
+
+    # Row and column for constraint
+    v_row = csr_matrix(volumes.reshape(1, -1))  # shape (1, n)
+    v_col = csr_matrix(volumes.reshape(-1, 1))  # shape (n, 1)
+    zero_scalar = csr_matrix((1, 1))            # shape (1, 1)
+
+    # Assemble augmented system
+    A_aug = vstack([
+        hstack([A, v_col]),         # (n, n+1)
+        hstack([v_row, zero_scalar])  # (1, n+1)
+    ], format="csr")
+
+    b_aug = np.concatenate([b, [0.0]])
+
+    return A_aug, b_aug

@@ -11,19 +11,20 @@ physical_properties:
   rho: 1.0         # Density
   reynolds_number: 20 # may be overwritten by command line arguments
   characteristic_length: 0.1  # Cylinder diameter
-  characteristic_velocity: 0.3 # Free stream velocity
+  characteristic_velocity: 0.2 # Free stream velocity
 
 # Solver algorithm configuration
 algorithm:
   type: "SIMPLE"
+  #piso_iterations: 2
   relaxation_factors:
     velocity: 0.5 # may be overwritten by command line arguments
     pressure: 0.3 # may be overwritten by command line arguments
   max_iterations: 10000 # may be overwritten by command line arguments
   convergence_criteria:
-    residual: 1e-3
-  convection_discretization: "Upwind" 
-  limiter: None
+    residual: 1e-4
+  convection_discretization: "UPWIND" 
+  limiter: None 
 
 # Linear solver settings (from PETSc)
 linear_solvers:
@@ -35,7 +36,7 @@ linear_solvers:
   pressure:
     type: "bcgs"  
     preconditioner: "hypre"
-    tolerance: 1e-8
+    tolerance: 1e-5
     max_iterations: 100000
 
 # HPC stuff

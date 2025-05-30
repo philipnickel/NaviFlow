@@ -97,7 +97,7 @@ rho = config["physical_properties"]["rho"]
 U = config["physical_properties"].get("characteristic_velocity", 1.0)
 D = config["physical_properties"].get("characteristic_length", 1.0)
 Re = config["physical_properties"]["reynolds_number"]
-mu = (rho * U * D) / Re
+mu = (U * D) / Re
 
 # ----------------------------
 # Solver config

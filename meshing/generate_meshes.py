@@ -165,7 +165,7 @@ def generate_experiment_meshes(exp_name, exp_config, base_dir, selected_resoluti
                 )
                 export_mesh(msh_file)
             except Exception as e:
-                print(f"  ❌ Error generating unstructured mesh ({res_name}): {e}")
+                print(f"  Error generating unstructured mesh ({res_name}): {e}")
 
 def generate_all_meshes(selected_experiment=None, selected_resolution=None):
     gmsh.initialize()

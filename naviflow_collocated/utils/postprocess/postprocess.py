@@ -3,7 +3,7 @@ import argparse
 import numpy as np
 import yaml
 import pandas as pd
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import subprocess
 import tempfile
@@ -97,34 +97,32 @@ def ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, output_path):
                       0.78871, 1.00000])
     }
 
-    fig = plt.figure(figsize=(12, 5))
-    ax1 = fig.add_subplot(121)
+    fig = plt.figure(figsize=(10, 6))
+    
+    # Get u-velocity at x=0.5
     centerline_mask = np.abs(x - 0.5) < 0.01
     vertical_y = y[centerline_mask]
     vertical_u = U[centerline_mask, 0]
     idx = np.argsort(vertical_y)
-    ax1.plot(vertical_u[idx], vertical_y[idx], 'b-', label="Numerical")
-    ax1.plot(GHIA_RE_100["u"], GHIA_RE_100["y"], 'ro', label="Ghia")
-    ax1.set_title("u-velocity at x=0.5")
-    ax1.set_xlabel("u")
-    ax1.set_ylabel("y")
-    ax1.grid(True)
-    ax1.legend()
-
-    ax2 = fig.add_subplot(122)
+    
+    # Get v-velocity at y=0.5
     centerline_mask = np.abs(y - 0.5) < 0.01
     horizontal_x = x[centerline_mask]
     horizontal_v = U[centerline_mask, 1]
-    idx = np.argsort(horizontal_x)
-    ax2.plot(horizontal_x[idx], horizontal_v[idx], 'b-', label="Numerical")
-    ax2.plot(GHIA_RE_100["x"], GHIA_RE_100["v"], 'ro', label="Ghia")
-    ax2.set_title("v-velocity at y=0.5")
-    ax2.set_xlabel("x")
-    ax2.set_ylabel("v")
-    ax2.grid(True)
-    ax2.legend()
-
-    fig.suptitle("Ghia Comparison (Re=100)")
+    idx_v = np.argsort(horizontal_x)
+    
+    # Plot both velocities
+    plt.plot(vertical_y[idx], vertical_u[idx], 'b-', label="u-velocity (x=0.5)")
+    plt.plot(GHIA_RE_100["y"], GHIA_RE_100["u"], 'bo', label="Ghia u-velocity")
+    plt.plot(horizontal_x[idx_v], horizontal_v[idx_v], 'r-', label="v-velocity (y=0.5)")
+    plt.plot(GHIA_RE_100["x"], GHIA_RE_100["v"], 'ro', label="Ghia v-velocity")
+    
+    plt.title("Ghia Comparison (Re=100)")
+    plt.xlabel("Position")
+    plt.ylabel("Velocity")
+    plt.grid(True)
+    plt.legend()
+    
     save_pdf(fig, output_path)
 
 def flatten_dict(d, parent_key='', sep='.'):
