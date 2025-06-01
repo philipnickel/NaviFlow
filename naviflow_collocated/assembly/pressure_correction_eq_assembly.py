@@ -1,6 +1,7 @@
 import numpy as np
 from numba import njit, prange
-
+import numpy as np
+from numba import njit
 
 
 BC_WALL = 0
@@ -28,7 +29,7 @@ def assemble_pressure_correction_matrix(mesh, rho):
         N = mesh.neighbor_cells[f]
 
         E_f = np.linalg.norm(mesh.vector_E_f[f])
-        d_CF = np.linalg.norm(mesh.vector_d_CE[f]) + 1e-14
+        d_CF = np.linalg.norm(mesh.vector_d_CE[f]) #+ 1e-14
         coeff = rho * E_f / d_CF
 
         row[idx] = P; col[idx] = P; data[idx] =  coeff; idx += 1
@@ -68,8 +69,7 @@ def pressure_correction_loop_term(mesh, rho, grad_p_prime_f):
 
     return correction_term
 
-    import numpy as np
-from numba import njit
+
 
 @njit
 def enforce_diagonal_dominance_from_csr(data, indices, indptr):

@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit
+from naviflow_collocated.discretization.convection.upwind import compute_velocity_gradient_least_squares
 
 EPS = 1.0e-14
 
@@ -176,7 +177,7 @@ def compute_boundary_diffusive_correction(
     elif bc_type == BC_INLET:
         E_mag = np.linalg.norm(E_f)
         diffFlux_P_b = muF * E_mag / (d_PB)
-        diffFlux_N_b = diffFlux_P_b * bc_val  # explicit orthogonal part
+        diffFlux_N_b = -diffFlux_P_b * bc_val  # explicit orthogonal part
 
         # --- explicit non-orthogonal correction (FluxV_b) Moukalled 8.80 ---
         grad_P = grad_phi[P]
@@ -185,9 +186,16 @@ def compute_boundary_diffusive_correction(
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
         diffFlux_N_b += fluxVb 
     elif bc_type == BC_OUTLET:
+        grad_v_b = compute_velocity_gradient_least_squares(mesh, U, U, mesh.face_centers[f], U[P], P, f)
+        P = mesh.owner_cells[f]
+        Sf = np.ascontiguousarray(mesh.vector_S_f[f])
+        E_f = np.ascontiguousarray(mesh.vector_E_f[f])
+        e = E_f / np.linalg.norm(E_f)
+        d_Pb_vec = d_PB * e
+        v_b = U[P] + np.dot(grad_v_b, d_Pb_vec)
         E_mag = np.linalg.norm(E_f) 
         diffFlux_P_b = muF * E_mag / (d_PB )
-        diffFlux_N_b = -diffFlux_P_b * bc_val  # explicit orthogonal part
+        diffFlux_N_b = -diffFlux_P_b * U[P][component_idx] #v_b[component_idx] # explicit orthogonal part
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
@@ -195,6 +203,8 @@ def compute_boundary_diffusive_correction(
         grad_P_mark = grad_P + np.dot(grad_P, d_skew)
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
         diffFlux_N_b += fluxVb 
+        diffFlux_N_b = 0.0
+        diffFlux_P_b = 0.0
 
 
 

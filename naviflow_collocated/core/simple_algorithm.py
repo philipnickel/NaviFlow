@@ -10,7 +10,7 @@ from naviflow_collocated.assembly.pressure_correction_eq_assembly import assembl
 from naviflow_collocated.assembly.divergence import compute_divergence_from_face_fluxes
 from naviflow_collocated.core.corrections import velocity_correction
 import matplotlib.pyplot as plt
-from naviflow_collocated.core.helpers import bold_Dv_calculation, interpolate_to_face, compute_residual, relax_momentum_equation, apply_mean_zero_constraint
+from naviflow_collocated.core.helpers import bold_Dv_calculation, interpolate_to_face, compute_residual, relax_momentum_equation, apply_mean_zero_constraint, set_pressure_boundaries
 import time
 from numba import njit
 def piso_corrector_loop(mesh, A_p, ksp, mdot_start, rho, bold_D, U_star_rc, U_star, p, alpha_p, num_corrections=1):
@@ -331,6 +331,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
             p += alpha_p * p_prime
 
         # Update fields
+        #p = set_pressure_boundaries(mesh, p)
         U = U_2star
         U_old = U_2star
         mdot = mdot_2star

@@ -32,7 +32,7 @@ linear_solvers:
   momentum:
     type: "bcgs"  
     preconditioner: "hypre"
-    tolerance: 1e-5
+    tolerance: 1e-7
     max_iterations: 100000
   pressure:
     type: "bcgs"  

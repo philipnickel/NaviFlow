@@ -1,17 +1,17 @@
-Simulation id: 20250530_212530_36b28d7e
+Simulation id: 20250531_100008_f8ef7fd0
 Experiment: cylinderFlow
-Git commit: 933c3f8
-Wall time (s): '31.62'
+Git commit: 8c21f83
+Wall time (s): '64.72'
 Numba threads: default
-Number of control volumes: 8221
+Number of control volumes: 5516
 Mesh type: Structured
 Boundary conditions: shared_configs/domain/boundaries_object_flow.yaml
-Reynolds number: '20'
+Reynolds number: '5'
 Algorithm: SIMPLE
 Convection scheme: UPWIND
 Limiter: None
-Convergence tolerance: 1e-4
-Number of iterations: 436
+Convergence tolerance: 1e-7
+Number of iterations: 1623
 Final u-residual: 0e0
 Final v-residual: 0e0
 Final continuity-residual: 0e0

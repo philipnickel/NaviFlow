@@ -125,7 +125,9 @@ def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, p_b, bc_t
         v_b = u_field[P] + np.dot(grad_v_b, d_Cb_vec)
         term1 = mdot[f] * (v_b - u_field[P])
         term2 = mdot[f] * (2*phi_P - v_b[component_idx])
-        term3 = Sf * p_b 
-        return -mdot[f], term1[component_idx] + term2 - term3[component_idx]
+        pres_bcvalue = mesh.boundary_values[f, 2]
+        term3 = Sf * pres_bcvalue #p_b 
+        return Flux_C_b, Flux_C_b *(phi_P) #(2*phi_P-v_b[component_idx]) + term3[component_idx]
+    #mdot[f], term1[component_idx] + term2 - term3[component_idx]
     elif bc_type == BC_WALL:
-        return 0.0, 0.0#-Sf * p_b
+        return 0.0, 0.0#-Sf * p_bb

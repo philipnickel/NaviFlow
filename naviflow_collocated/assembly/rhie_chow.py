@@ -140,7 +140,7 @@ def rhie_chow_velocity(mesh, U_star, U_star_bar, U_old_bar, U_old_rc, grad_p_bar
             # Extrapolate to boundary face
             U_star_b = U_star_C + np.dot(grad_U_b, vec_Cb)
 
-            U_star_rc[f] = U_star_b
+            U_star_rc[f] = U_star[P][0]#U_star_b
 
 
     return U_star_rc
@@ -185,9 +185,8 @@ def mdot_calculation(mesh, rho, U_star_rc, correction=False):
     for i in prange(n_boundary):
         f = mesh.boundary_faces[i]
         if mesh.boundary_types[f,0] == BC_OUTLET:
-            if correction==True:
-                if sum_mdot_out != 0.0:
-                    mdot_faces[f] = mdot_faces[f] * sum_mdot_in / sum_mdot_out 
+            if correction==False:
+                mdot_faces[f] = mdot_faces[f] + (mdot_faces[f] * sum_mdot_in / (sum_mdot_out + 1e-14))
     
     
 

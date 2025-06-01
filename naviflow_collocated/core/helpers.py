@@ -85,7 +85,7 @@ def compute_residual(data, indices, indptr, x, b, max_residual=None):
 @njit(parallel=True)
 def interpolate_to_face(mesh, quantity):
     """
-    interpolate quantity to faces using face_interp_factors
+    Interpolate quantity to faces using face_interp_factors
     Quantity may be vector or scalar
     """
     n_faces = mesh.face_areas.shape[0]
@@ -159,3 +159,24 @@ def apply_mean_zero_constraint(A: csr_matrix, b: np.ndarray, volumes: np.ndarray
     b_aug = np.concatenate([b, [0.0]])
 
     return A_aug, b_aug
+BC_WALL = 0
+BC_DIRICHLET = 1
+BC_INLET = 2
+BC_OUTLET = 4
+BC_NEUMANN = 3
+
+def set_pressure_boundaries(mesh, p): 
+    n_boundary = mesh.boundary_faces.shape[0]
+    for i in prange(n_boundary):
+        f = mesh.boundary_faces[i]
+        if mesh.boundary_types[f,0] == BC_OUTLET:
+            p[f] = p[mesh.owner_cells[f]]
+        #elif mesh.boundary_types[f,0] == BC_INLET:
+            #p[f] = p[mesh.owner_cells[f]]
+        #elif mesh.boundary_types[f,0] == BC_WALL:
+            #p[f] = p[mesh.owner_cells[f]]
+        #elif mesh.boundary_types[f,0] == BC_DIRICHLET:
+            #p[f] = p[mesh.owner_cells[f]]
+        #elif mesh.boundary_types[f,0] == BC_NEUMANN:
+            #p[f] = p[mesh.owner_cells[f]]
+    return p
