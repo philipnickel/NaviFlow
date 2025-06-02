@@ -190,7 +190,7 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, 
     print(f"\nObserved convergence rate (global fit): {tag_prefix} --> p ≈ {p:.2f}")
 
     if ax is not None:
-        ax.loglog(hs, errors, label=rf"{tag_prefix} - {scheme}", marker=marker)
+        ax.loglog(hs, errors, label=f"{scheme} - observed order: {p:.2f}", marker=marker)
     return errors
 
 
@@ -256,24 +256,14 @@ if __name__ == "__main__":
     # === Additional MMS Cases ===
     mms_cases = {
         "Sinusoidal": ("cos(pi*y)*sin(pi*x)", "-cos(pi*x)*sin(pi*y)"),
-        #"Sine_cos": ("sin(pi*(x+y))+cos(pi*x*y)", "sin(pi*(x+y))+cos(pi*x*y)"),
-        #"SinSin": ("sin(pi*x)*sin(pi*y)", "sin(pi*x)*sin(pi*y)"),
-        #"Exponential": ("exp(x)*sin(y)+x", "cos(y)+x+0.1"),
-        #"Backwards": ("-1.0 + x*0.0", "0.0 + y*0.0"),
-        #"Uniform": ("1.0 + x*0.0", "0.0 + y*0.0"),
-        #"Linear": ("x", "y")
     }
     BC_files = {
         "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
-        #"Sine_cos": "shared_configs/domain/sanityChecks/sanityCheckSinCos.yaml",
-        #"SinSin": "shared_configs/domain/sanityChecks/sanityCheckSinSin.yaml",
-        #"Exponential": "shared_configs/domain/sanityChecks/sanityCheckEXP.yaml",
-        #"Backwards": "shared_configs/domain/sanityChecks/sanityCheckBackwards.yaml",
-        #"Uniform": "shared_configs/domain/sanityChecks/sanityCheckUniformFlow.yaml",
-        #"Linear": "shared_configs/domain/sanityChecks/sanityCheckLinear.yaml"
     }
 
-    fig, ax = plt.subplots(figsize=(10, 7))
+    # Create separate figures for structured and unstructured meshes
+    fig_structured, ax_structured = plt.subplots(figsize=(10, 7))
+    fig_unstructured, ax_unstructured = plt.subplots(figsize=(10, 7))
     marker_cycle = iter(['o', 's', '^', 'D', 'v', 'p', '*', 'x', 'P', 'H', 'X', 'D', 'p', 'P', 'H', 'X'])
 
     time_start = time.time()
@@ -288,113 +278,134 @@ if __name__ == "__main__":
         limiter = "MUSCL" # MUSCL, OSPRE, H_Cui
         u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
         bc_file = BC_files[tag]
-        
-        run_mms_test(
-            structured_uniform["medium"],
-            bc_file,
-            u_fn, rhs_fn, grad_fn, mu, rho,
-            tag_prefix=f"{tag} structured",
-            scheme=scheme3,
-            limiter=limiter,
-        )
-        
-        
-        run_mms_test(
-            unstructured["fine"],
-            bc_file,
-            u_fn, rhs_fn, grad_fn, mu, rho,
-            tag_prefix=f"{tag} unstructured",
-            scheme=scheme3,
-            limiter=limiter,
-        )
-        
-        
-        
-        
-        errors = run_convergence_study(
+
+        # Run convergence studies for structured mesh
+        errors_structured = run_convergence_study(
             [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
             bc_file,
             u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_structured",
             scheme=scheme1,
             limiter=limiter,
-            ax=ax,
+            ax=ax_structured,
             marker=next(marker_cycle)
         )
-        errors = run_convergence_study(
+
+        errors_structured = run_convergence_study(
+            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_structured",
+            scheme=scheme2,
+            limiter=limiter,
+            ax=ax_structured,
+            marker=next(marker_cycle)
+        )
+
+        errors_structured = run_convergence_study(
+            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_structured",
+            scheme=scheme3,
+            limiter=limiter,
+            ax=ax_structured,
+            marker=next(marker_cycle)
+        )
+
+        errors_structured = run_convergence_study(
+            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_structured",
+            scheme=scheme4,
+            limiter=limiter,
+            ax=ax_structured,
+            marker=next(marker_cycle)
+        )
+
+        # Run convergence studies for unstructured mesh
+        errors_unstructured = run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
             u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
             scheme=scheme1,
             limiter=limiter,
-            ax=ax,
+            ax=ax_unstructured,
             marker=next(marker_cycle)
         )
-        
-        
-        errors = run_convergence_study(
-                    [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
-                    bc_file,
-                    u_fn, rhs_fn, grad_fn, mu, rho,
-                    tag_prefix=f"{tag}_structured",
-                    scheme=scheme2,
-                    limiter=limiter,
-                    ax=ax,
-                    marker=next(marker_cycle)
-                )
-        errors = run_convergence_study(
+
+        errors_unstructured = run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
             u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
             scheme=scheme2,
             limiter=limiter,
-            ax=ax,
+            ax=ax_unstructured,
             marker=next(marker_cycle)
         )
-        
-        
-        
-        errors = run_convergence_study(
-                    [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
-                    bc_file,
-                    u_fn, rhs_fn, grad_fn, mu, rho,
-                    tag_prefix=f"{tag}_structured",
-                    scheme=scheme3,
-                    limiter=limiter,
-                    ax=ax,
-                    marker=next(marker_cycle)
-                )
-        errors = run_convergence_study(
+
+        errors_unstructured = run_convergence_study(
             [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
             bc_file,
             u_fn, rhs_fn, grad_fn, mu, rho,
             tag_prefix=f"{tag}_unstructured",
             scheme=scheme3,
             limiter=limiter,
-            ax=ax,
+            ax=ax_unstructured,
             marker=next(marker_cycle)
         )
 
+        errors_unstructured = run_convergence_study(
+            [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_unstructured",
+            scheme=scheme4,
+            limiter=limiter,
+            ax=ax_unstructured,
+            marker=next(marker_cycle)
+        )
 
-    hs = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
+    # Add reference slopes to both plots
+    hs_structured = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
         structured_uniform["coarse"],
         structured_uniform["medium"],
         structured_uniform["fine"]
     ]])
-    ref_slope = np.min(errors)*2 * (hs / hs[0])**2  # Normalize ref slope to first error value
+    hs_unstructured = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
+        unstructured["coarse"],
+        unstructured["medium"],
+        unstructured["fine"]
+    ]])
 
-    ax.loglog(hs, ref_slope, 'k--', label=r'$\mathcal{O}(h^2)$')
+    ref_slope_structured = np.min(errors_structured)*2 * (hs_structured / hs_structured[0])**2
+    ref_slope_unstructured = np.min(errors_unstructured)*2 * (hs_unstructured / hs_unstructured[0])**2
 
-    ax.grid(True, which="both")
-    ax.set_xlabel(r"Grid size $h$")
-    ax.set_ylabel(r"L2 Error")
-    ax.set_title("Order of Accuracy", fontsize=14)
-    ax.legend(loc="lower right")
+    # Configure structured mesh plot
+    ax_structured.loglog(hs_structured, ref_slope_structured, 'k--', label=r'$\mathcal{O}(h^2)$')
+    ax_structured.grid(True, which="both")
+    ax_structured.set_xlabel(r"Grid size $h$")
+    ax_structured.set_ylabel(r"L2 Error")
+    ax_structured.set_title("Order of Accuracy Convection-Diffusion Equation - Structured Mesh", fontsize=14)
+    ax_structured.legend(loc="lower right")
+
+    # Configure unstructured mesh plot
+    ax_unstructured.loglog(hs_unstructured, ref_slope_unstructured, 'k--', label=r'$\mathcal{O}(h^2)$')
+    ax_unstructured.grid(True, which="both")
+    ax_unstructured.set_xlabel(r"Grid size $h$")
+    ax_unstructured.set_ylabel(r"L2 Error")
+    ax_unstructured.set_title("Order of Accuracy Convection-Diffusion Equation - Unstructured Mesh", fontsize=14)
+    ax_unstructured.legend(loc="lower right")
+
+    # Save both plots
     Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
-    plt.savefig("tests/test_output/MMS_convergence/convergence_plot_combined.pdf", dpi=300)
-    plt.close()
-    
+    plt.figure(fig_structured.number)
+    plt.savefig("tests/test_output/MMS_convergence/convergence_plot_structured.pdf", dpi=300)
+    plt.figure(fig_unstructured.number)
+    plt.savefig("tests/test_output/MMS_convergence/convergence_plot_unstructured.pdf", dpi=300)
+    plt.close('all')
     
     print(f"Time taken: {time.time() - time_start:.2f} seconds")

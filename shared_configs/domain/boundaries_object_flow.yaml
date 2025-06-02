@@ -23,7 +23,7 @@ boundaries:
 
   right:                     # outlet
     velocity:
-      bc: oulet
+      bc: outlet
       value: [0.0, 0.0]
     pressure:
       bc: neumann

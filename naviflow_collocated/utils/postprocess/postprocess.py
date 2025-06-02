@@ -3,12 +3,12 @@ import argparse
 import numpy as np
 import yaml
 import pandas as pd
-#import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import subprocess
 import tempfile
 import shutil
 from utils.plot_style import plt
+from scipy.interpolate import griddata
 
 
 # ----------------------------
@@ -20,7 +20,7 @@ def save_pdf(fig, path):
     plt.close(fig)
     print(f"Saved: {path}")
 
-def plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, output_path):
+def plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, output_path, sim_id=None):
     fig = plt.figure(figsize=(15, 10))
     gs = plt.GridSpec(2, 2)
     
@@ -53,33 +53,119 @@ def plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, 
     ax4.set_aspect("equal", "box")
     
     fig.suptitle(f"Flow Field | Re={Re}, {scheme}, {mesh_type}")
+    if sim_id is not None:
+        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
     save_pdf(fig, output_path)
 
-def plot_residuals(res, output_path):
-    fig = plt.figure()
-    plt.semilogy(res["u"], label="u")
-    plt.semilogy(res["v"], label="v")
-    plt.semilogy(res["cont"], label="continuity")
-    plt.title("Residuals vs Iteration")
-    plt.grid(True)
-    plt.legend()
+def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_path=None, experiment=None, Re=None):
+    fig, axes = plt.subplots(1, 4, figsize=(24, 5))
+    titles = ["u-velocity", "v-velocity", "Velocity Magnitude", "Pressure + Streamlines"]
+
+    # 1. u-velocity
+    cf1 = axes[0].tricontourf(x, y, U[:, 0], levels=50, cmap='coolwarm')
+    fig.colorbar(cf1, ax=axes[0])
+    axes[0].set_title(titles[0])
+    axes[0].set_aspect('equal', 'box')
+
+    # 2. v-velocity
+    cf2 = axes[1].tricontourf(x, y, U[:, 1], levels=50, cmap='coolwarm')
+    fig.colorbar(cf2, ax=axes[1])
+    axes[1].set_title(titles[1])
+    axes[1].set_aspect('equal', 'box')
+
+    # 3. velocity magnitude
+    cf3 = axes[2].tricontourf(x, y, velocity_magnitude, levels=50, cmap='coolwarm')
+    fig.colorbar(cf3, ax=axes[2])
+    axes[2].set_title(titles[2])
+    axes[2].set_aspect('equal', 'box')
+
+    # 4. pressure with streamlines
+    cf4 = axes[3].tricontourf(x, y, p, levels=50, cmap='coolwarm')
+    fig.colorbar(cf4, ax=axes[3])
+    axes[3].set_title(titles[3])
+    axes[3].set_aspect('equal', 'box')
+
+    # Streamlines overlay
+    try:
+        n_grid = 100
+        xi = np.linspace(np.min(x), np.max(x), n_grid)
+        yi = np.linspace(np.min(y), np.max(y), n_grid)
+        Xg, Yg = np.meshgrid(xi, yi)
+        Ug = griddata((x, y), U[:, 0], (Xg, Yg), method='linear')
+        Vg = griddata((x, y), U[:, 1], (Xg, Yg), method='linear')
+        axes[3].streamplot(xi, yi, Ug, Vg, color='gray', density=1.2, linewidth=0.5)
+    except Exception as e:
+        print(f"Streamline plotting failed: {e}")
+
+    # Add experiment name and Reynolds number to suptitle
+    suptitle = "Flow Fields"
+    if experiment is not None:
+        suptitle += f" | {experiment}"
+    if Re is not None:
+        suptitle += f" | Re={Re}"
+    fig.suptitle(suptitle)
+
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    if sim_id is not None:
+        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
+    if output_path:
+        save_pdf(fig, output_path)
+    else:
+        plt.show()
+
+def plot_residuals(res, output_path, sim_id=None):
+    fig = plt.figure(figsize=(8, 5))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.semilogy(res["u"], label="u-momentum", color='tab:blue', linewidth=2)
+    ax.semilogy(res["v"], label="v-momentum", color='tab:orange', linewidth=2)
+    ax.semilogy(res["cont"], label="continuity", color='tab:green', linewidth=2)
+    ax.set_title("Residual History", fontsize=16)
+    ax.set_xlabel("Iteration", fontsize=14)
+    ax.set_ylabel("Residual", fontsize=14)
+    ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
+    ax.legend(fontsize=12, loc='upper right', frameon=True)
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    ax.tick_params(axis='both', which='minor', labelsize=10)
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    if sim_id is not None:
+        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
     save_pdf(fig, output_path)
 
-def plot_residual_fields(x, y, u_res, v_res, cont_res, output_path):
-    fig = plt.figure(figsize=(15, 5))
-    gs = plt.GridSpec(1, 3)
-    for idx, (res, title) in enumerate(zip(
-        [np.abs(u_res), np.abs(v_res), np.abs(cont_res)],
-        ["U-residual", "V-residual", "Mass Flux Imbalance"]
-    )):
-        ax = fig.add_subplot(gs[0, idx])
-        cf = ax.tricontourf(x, y, res, levels=50)
-        fig.colorbar(cf, ax=ax)
-        ax.set_title(title)
-        ax.set_aspect('equal', 'box')
+def plot_residual_fields(x, y, u_res, v_res, cont_res, output_path, sim_id=None, experiment=None, Re=None):
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    titles = ["U Residual", "V Residual", "Continuity Residual"]
+    colormap = "viridis"  # perceptually uniform, good for magnitude fields
+
+    # 1. U residual
+    cf1 = axes[0].tricontourf(x, y, np.abs(u_res), levels=50, cmap=colormap)
+    fig.colorbar(cf1, ax=axes[0])
+    axes[0].set_title(titles[0])
+    axes[0].set_aspect('equal', 'box')
+
+    # 2. V residual
+    cf2 = axes[1].tricontourf(x, y, np.abs(v_res), levels=50, cmap=colormap)
+    fig.colorbar(cf2, ax=axes[1])
+    axes[1].set_title(titles[1])
+    axes[1].set_aspect('equal', 'box')
+
+    # 3. Continuity residual
+    cf3 = axes[2].tricontourf(x, y, np.abs(cont_res), levels=50, cmap=colormap)
+    fig.colorbar(cf3, ax=axes[2])
+    axes[2].set_title(titles[2])
+    axes[2].set_aspect('equal', 'box')
+
+    suptitle = "Residual Fields"
+    if experiment is not None:
+        suptitle += f" | {experiment}"
+    if Re is not None:
+        suptitle += f" | Re={Re}"
+    fig.suptitle(suptitle)
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    if sim_id is not None:
+        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
     save_pdf(fig, output_path)
 
-def ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, output_path):
+def ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, output_path, sim_id=None):
     if Re != 100:
         print("Ghia comparison only supported for Re=100")
         return
@@ -97,32 +183,39 @@ def ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, output_path):
                       0.78871, 1.00000])
     }
 
+    # centerline extraction using griddata
+    points = np.column_stack((x, y))
+    unique_y = np.unique(y)
+    unique_x = np.unique(x)
+    
+    # u-velocity at x=0.5 (vertical centerline)
+    u_centerline = griddata(
+        points=points,
+        values=U[:, 0],
+        xi=np.column_stack((np.full_like(unique_y, 0.5), unique_y)),
+        method='linear'
+    )
+    # v-velocity at y=0.5 (horizontal centerline)
+    v_centerline = griddata(
+        points=points,
+        values=U[:, 1],
+        xi=np.column_stack((unique_x, np.full_like(unique_x, 0.5))),
+        method='linear'
+    )
+
     fig = plt.figure(figsize=(10, 6))
-    
-    # Get u-velocity at x=0.5
-    centerline_mask = np.abs(x - 0.5) < 0.01
-    vertical_y = y[centerline_mask]
-    vertical_u = U[centerline_mask, 0]
-    idx = np.argsort(vertical_y)
-    
-    # Get v-velocity at y=0.5
-    centerline_mask = np.abs(y - 0.5) < 0.01
-    horizontal_x = x[centerline_mask]
-    horizontal_v = U[centerline_mask, 1]
-    idx_v = np.argsort(horizontal_x)
-    
-    # Plot both velocities
-    plt.plot(vertical_y[idx], vertical_u[idx], 'b-', label="u-velocity (x=0.5)")
-    plt.plot(GHIA_RE_100["y"], GHIA_RE_100["u"], 'bo', label="Ghia u-velocity")
-    plt.plot(horizontal_x[idx_v], horizontal_v[idx_v], 'r-', label="v-velocity (y=0.5)")
-    plt.plot(GHIA_RE_100["x"], GHIA_RE_100["v"], 'ro', label="Ghia v-velocity")
-    
-    plt.title("Ghia Comparison (Re=100)")
+    plt.plot(unique_y, u_centerline, '-', color='tab:blue', label="u-velocity (x=0.5)")
+    plt.plot(GHIA_RE_100["y"], GHIA_RE_100["u"], 'o', color='tab:blue', label="Ghia u-velocity")
+    plt.plot(unique_x, v_centerline, '-', color='tab:red', label="v-velocity (y=0.5)")
+    plt.plot(GHIA_RE_100["x"], GHIA_RE_100["v"], 'o', color='tab:red', label="Ghia v-velocity")
+    plt.title(f"Ghia Comparison (Re={Re})")
     plt.xlabel("Position")
     plt.ylabel("Velocity")
     plt.grid(True)
     plt.legend()
-    
+    if sim_id is not None:
+        fig = plt.gcf()
+        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
     save_pdf(fig, output_path)
 
 def flatten_dict(d, parent_key='', sep='.'):
@@ -181,6 +274,131 @@ def yaml_to_latex_pdf(yaml_path, output_pdf_path):
     
     print(f"PDF saved: {output_pdf_path}")
 
+def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
+    """
+    Verify channel flow solution against analytical solution for constant inlet velocity.
+    
+    Parameters:
+    -----------
+    x, y : ndarray
+        Cell center coordinates
+    U : ndarray
+        Velocity field (n_cells, 2)
+    p : ndarray
+        Pressure field
+    Re : float
+        Reynolds number
+    output_path : str
+        Path to save the verification plot
+    sim_id : str, optional
+        Simulation ID for plot annotation
+    """
+    # Get channel parameters from config
+    with open(os.path.join("experiments", "channelFlow", "config.yaml"), "r") as f:
+        config = yaml.safe_load(f)
+    u_inlet = config["physical_properties"]["characteristic_velocity"]  # Inlet velocity
+    H = config["physical_properties"]["characteristic_length"]  # Channel height
+    h = H/2  # Half height
+    rho = config["physical_properties"]["rho"]
+    mu = rho * u_inlet * h / Re
+
+    # Calculate channel length from domain coordinates
+    L = 5.0
+    
+    # Create figure with 1x2 subplots
+    fig = plt.figure(figsize=(15, 6))
+    gs = plt.GridSpec(1, 2)
+    
+    # 1. Velocity Profile Plot (at x=L/2)
+    ax1 = fig.add_subplot(gs[0, 0])
+    
+    # Extract numerical solution at x=L/2
+    points = np.column_stack((x, y))
+    unique_y = np.unique(y)
+    x_center = (np.max(x) + np.min(x)) / 2
+    
+    u_numerical = griddata(
+        points=points,
+        values=U[:, 0],
+        xi=np.column_stack((np.full_like(unique_y, x_center), unique_y)),
+        method='linear'
+    )
+    
+    # Remove any NaN values
+    mask = ~np.isnan(u_numerical)
+    y_valid = unique_y[mask]
+    u_numerical = u_numerical[mask]
+    
+    # Normalize y coordinates to [-1,1]
+    y_norm = (y_valid)/h -1
+    
+    # Analytical solution for fully developed flow with constant inlet
+    u_analytical = 1.5 * u_inlet * (1 - y_norm**2)  # Parabolic profile with inlet velocity
+    
+    # Plot both solutions
+    ax1.plot(y_norm, u_numerical, 'o-', color='tab:blue', label="Numerical", markersize=4, alpha=0.6)
+    ax1.plot(y_norm, u_analytical, '--', color='tab:red', label="Analytical", linewidth=2)
+    
+    ax1.set_title(f"Velocity Profile at x=L/2 (Re={Re})")
+    ax1.set_xlabel("y/h [-]")
+    ax1.set_ylabel("u/u_inlet [-]")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    
+    # 2. Pressure Drop Plot
+    ax2 = fig.add_subplot(gs[0, 1])
+    
+    # Get unique x locations and sort them
+    unique_x = np.sort(np.unique(x))
+    
+    # Calculate average pressure at each x location
+    p_avg = np.array([np.mean(p[np.isclose(x, x_loc)]) for x_loc in unique_x])
+    
+    # Normalize x coordinates to [0,1]
+    x_norm = (unique_x - np.min(x)) / (np.max(x) - np.min(x))
+    
+    # Analytical pressure drop (dp/dx = -8μu_inlet/h²)
+    dp_dx_analytical = -8 * mu * u_inlet / (h**2)
+    p_analytical = dp_dx_analytical * (unique_x - np.min(x))
+    
+    # Plot pressure drop
+    ax2.plot(x_norm, p_avg, 'o-', color='tab:blue', label="Numerical", markersize=4, alpha=0.6)
+    ax2.plot(x_norm, p_analytical, '--', color='tab:red', label="Analytical", linewidth=2)
+    
+    ax2.set_title("Pressure Drop Along Channel")
+    ax2.set_xlabel("x/L [-]")
+    ax2.set_ylabel("Pressure [Pa]")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    
+    # Add flow parameters to plot
+    param_text = (
+        f"Channel height (H): {H:.3f} m\n"
+        f"Channel length (L): {L:.3f} m\n"
+        f"Inlet velocity: {u_inlet:.3f} m/s\n"
+        f"Reynolds number: {Re}\n"
+    )
+    fig.text(0.02, 0.02, param_text, bbox=dict(facecolor='white', alpha=0.8))
+    
+    if sim_id is not None:
+        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
+    
+    plt.tight_layout()
+    save_pdf(fig, output_path)
+    print(f"Channel flow verification saved to {output_path}")
+    
+    # Print error metrics
+    u_error = np.abs(u_numerical - u_analytical)
+    l2_error = np.sqrt(np.mean(u_error**2))
+    linf_error = np.max(u_error)
+    p_grad_numerical = np.polyfit(unique_x, p_avg, 1)[0]
+    p_grad_error = np.abs((p_grad_numerical - dp_dx_analytical) / dp_dx_analytical) * 100
+    
+    print("\nChannel Flow Verification Results:")
+    print(f"L2 Error: {l2_error:.2e}")
+    print(f"Linf Error: {linf_error:.2e}")
+    print(f"Pressure Gradient Error: {p_grad_error:.2f}%")
+
 # ----------------------------
 # Main Entrypoint
 # ----------------------------
@@ -212,16 +430,23 @@ if __name__ == "__main__":
 
     out = lambda name: os.path.join(results_dir, f"{name}.pdf")
 
+    sim_id = meta["Simulation id"]
+    print(sim_id)
+
     if args.all:
-        plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, out("flow_fields"))
-        plot_residuals(res, out("residual_history"))
+        plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=sim_id, output_path=out("flow_fields"), experiment=experiment, Re=Re)
+        plot_residuals(res, out("residual_history"), sim_id=sim_id)
 
         u_res = np.load(os.path.join(results_dir, "u_residual.npy"))
         v_res = np.load(os.path.join(results_dir, "v_residual.npy"))
         cont_res = np.load(os.path.join(results_dir, "continuity_field.npy"))
-        plot_residual_fields(x, y, u_res, v_res, cont_res, out("residual_fields"))
+        plot_residual_fields(x, y, u_res, v_res, cont_res, out("residual_fields"), sim_id=sim_id, experiment=experiment, Re=Re)
 
-        if experiment == "lidDrivenCavity":
-            ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, out("ghia_comparison"))
+        # Ghia plot: check config, not just directory name
+        if config.get('experiment', None) == 'lidDrivenCavity':
+            ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, out("ghia_comparison"), sim_id=sim_id)
+        # Poiseuille verification for channel flow
+        elif config.get('experiment', None) == 'channelFlow':
+            poiseuille_verification(x, y, U, p, Re, out("poiseuille_verification"), sim_id=sim_id)
 
         yaml_to_latex_pdf(os.path.join(results_dir, "metadata.yaml"), out("metadata"))

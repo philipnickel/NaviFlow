@@ -4,7 +4,7 @@ tags: ["cylinderFlow"]
 
 domain:
   # Using the coarse structured mesh 
-  mesh: [unstructured, coarse]
+  mesh: [unstructured, fine]
   boundary_conditions: "shared_configs/domain/boundaries_object_flow.yaml"
 
 physical_properties:
@@ -23,20 +23,20 @@ algorithm:
   max_iterations: 10000 # may be overwritten by command line arguments
   convergence_criteria:
     residual: 1e-4
-  convection_discretization: "UPWIND" 
-  limiter: None 
+  convection_discretization: "TVD" 
+  limiter: MUSCL 
 
 # Linear solver settings (from PETSc)
 linear_solvers:
   momentum:
     type: "bcgs"  
     preconditioner: "hypre"
-    tolerance: 1e-5
+    tolerance: 1e-8
     max_iterations: 100000
   pressure:
     type: "bcgs"  
     preconditioner: "hypre"
-    tolerance: 1e-5
+    tolerance: 1e-10
     max_iterations: 100000
 
 # HPC stuff

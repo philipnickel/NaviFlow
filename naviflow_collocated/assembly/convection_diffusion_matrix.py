@@ -14,8 +14,8 @@ from naviflow_collocated.discretization.convection.upwind import (
 BC_WALL = 0
 BC_DIRICHLET = 1
 BC_INLET = 2
-BC_OUTLET = 4
-BC_NEUMANN = 3
+BC_OUTLET = 3
+BC_OBSTACLE = 4
 
 
 EPS = 1.0e-14
@@ -125,6 +125,8 @@ def assemble_diffusion_convection_matrix(
     for i in range(n_boundary):
         f        = mesh.boundary_faces[i]
         bc_type  = mesh.boundary_types[f, 0]
+        #bc_name = ["Wall", "Dirichlet", "Inlet", "Outlet", "Obstacle"][bc_type]
+        #print(f"Boundary type for cell with coordinates: {mesh.cell_centers[P]} is: {bc_name} (type {bc_type})")
         bc_val   = mesh.boundary_values[f, component_idx]
         P = mesh.owner_cells[f]
         S_b = np.ascontiguousarray(mesh.vector_S_f[f])

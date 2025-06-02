@@ -5,8 +5,8 @@ from naviflow_collocated.assembly.rhie_chow import compute_velocity_gradient_lea
 BC_WALL = 0
 BC_DIRICHLET = 1
 BC_INLET = 2
-BC_OUTLET = 4
-BC_NEUMANN = 3
+BC_OUTLET = 3
+BC_OBSTACLE = 4
 
 @njit(inline="always")
 def MUSCL(r):
@@ -53,10 +53,23 @@ def compute_convective_stencil(
         # Compute the limiter
         if limiter is None:
             psi = 1.0 # numba type safeguard
-        #phi_W = 2 * phi_N - phi_P
-        phi_W = 2 * phi_P - phi_N
-        #r = (phi_N - phi_W )/(phi_N - phi_P + 1e-12) 
-        r = (phi_N - phi_P )/(phi_P - phi_W + 1e-12) 
+            
+        # Determine upwind and downwind cells based on mass flux direction
+        if mdot[f] >= 0:
+            # Flow from P to N
+            phi_up = phi_P
+            phi_down = phi_N
+            # For P as upwind, W is the upwind neighbor of P
+            phi_W = 2 * phi_P - phi_N  # Linear extrapolation from P to W
+            r = (phi_N - phi_P) / (phi_P - phi_W + 1e-12)
+        else:
+            # Flow from N to P
+            phi_up = phi_N
+            phi_down = phi_P
+            # For N as upwind, W is the upwind neighbor of N
+            phi_W = 2 * phi_N - phi_P  # Linear extrapolation from N to W
+            r = (phi_P - phi_N) / (phi_N - phi_W + 1e-12)
+
         if limiter == "MUSCL":
             psi = MUSCL(r)
         elif limiter == "OSPRE":
@@ -64,8 +77,8 @@ def compute_convective_stencil(
         elif limiter == "H_Cui":
             psi = H_Cui(r)
 
-        # Apply the limiter
-        phi_HO = phi_P + psi * np.dot(grad_f_mark , d_Cf)
+        # Apply the limiter to get high-order face value
+        phi_HO = phi_up + 0.5 * psi * (phi_down - phi_up)
         F_high = mdot[f] * phi_HO
         convDC = (F_high - F_low)
     elif scheme == "Upwind": 
@@ -102,32 +115,21 @@ def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, p_b, bc_t
     d_Cb = np.ascontiguousarray(mesh.d_Cb[f])
     e = E_f / np.linalg.norm(E_f)
     d_Cb_vec = d_Cb * e
-    u_boundary = np.ascontiguousarray(mesh.boundary_values[f, :2])
     phi_P = phi[P]
-
-
-    mdot_boundary = rho * np.dot(u_boundary, np.ascontiguousarray(Sf))
-    mdot_boundary = max(0.0, -mdot_boundary)
-    flux = mdot[f]
-    phi_B = bc_value  # Dirichlet BC at the boundary
 
     Flux_C_b = max(mdot[f], 0)
     Flux_N_b = -max(-mdot[f],0) # ghost cell 
 
     if bc_type == BC_DIRICHLET:
-        return 0.0, 0.0#Flux_C_b, Flux_N_b *(2*phi_P-bc_value) #Flux_C_b, -Flux_N_b *bc_value #- 2*phi_P) (only used for MMS tests)
-    elif bc_type == BC_NEUMANN:
+        return 0.0, 0.0
+    elif bc_type == BC_OBSTACLE:
         return 0.0, 0.0
     elif bc_type == BC_INLET:
-        return Flux_C_b, Flux_N_b * (2*phi_P-bc_value) #- 2*phi_P)
+        return Flux_C_b, Flux_N_b * (2*phi_P-bc_value) 
     elif bc_type == BC_OUTLET:
         grad_v_b = compute_velocity_gradient_least_squares(mesh, u_field, u_field, mesh.face_centers[f], u_field[P], P, f)
         v_b = u_field[P] + np.dot(grad_v_b, d_Cb_vec)
-        term1 = mdot[f] * (v_b - u_field[P])
-        term2 = mdot[f] * (2*phi_P - v_b[component_idx])
-        pres_bcvalue = mesh.boundary_values[f, 2]
-        term3 = Sf * pres_bcvalue #p_b 
-        return Flux_C_b, Flux_C_b *(phi_P) #(2*phi_P-v_b[component_idx]) + term3[component_idx]
-    #mdot[f], term1[component_idx] + term2 - term3[component_idx]
+        term2 =  (2*phi_P - v_b[component_idx])
+        return Flux_C_b, Flux_N_b * term2 
     elif bc_type == BC_WALL:
-        return 0.0, 0.0#-Sf * p_bb
+        return 0.0, 0.0

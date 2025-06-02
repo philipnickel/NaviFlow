@@ -7,8 +7,8 @@ from numba import njit
 BC_WALL = 0
 BC_DIRICHLET = 1
 BC_INLET = 2
-BC_OUTLET = 4
-BC_NEUMANN = 3
+BC_OUTLET = 3
+BC_NEUMANN = 4
 
 
 @njit(parallel=False)
@@ -37,13 +37,17 @@ def assemble_pressure_correction_matrix(mesh, rho):
         row[idx] = N; col[idx] = N; data[idx] =  coeff; idx += 1
         row[idx] = N; col[idx] = P; data[idx] = -coeff; idx += 1
     
+    for i in range(n_boundary):
+        f = mesh.boundary_faces[i]
+        P = mesh.owner_cells[f]
+        E_f = np.linalg.norm(mesh.vector_E_f[f])
+        d_CB = mesh.d_Cb[f]
+        coeff = rho * E_f / d_CB
+
+
+        row[idx] = P; col[idx] = P; data[idx] += coeff; idx += 1
     
-    #for i in range(n_boundary):
-    #    f = mesh.boundary_faces[i]
-    #    P = mesh.owner_cells[f]
-    #    if mesh.boundary_types[f,0] == BC_OUTLET:
-    #        row[idx] = P; col[idx] = P; data[idx] += 1.0; idx += 1
-    
+
 
     return row[:idx], col[:idx], data[:idx]
 

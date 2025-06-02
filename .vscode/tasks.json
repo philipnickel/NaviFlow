@@ -206,7 +206,8 @@
         "description": "Choose experiment to run:",
         "options": [
           "lidDrivenCavity",
-          "cylinderFlow"
+          "cylinderFlow",
+          "channelFlow"
         ],
         "default": "lidDrivenCavity"
       },
@@ -226,19 +227,19 @@
         "id": "velocity_relaxation",
         "type": "promptString",
         "description": "Velocity relaxation factor",
-        "default": "0.6"
+        "default": "0.8"
       },
       {
         "id": "pressure_relaxation",
         "type": "promptString",
         "description": "Pressure relaxation factor",
-        "default": "0.4"
+        "default": "0.2"
       },
       {
         "id": "tolerance_exponent",
         "type": "promptString",
         "description": "Convergence tolerance as 10^-x (e.g., 3 for 1e-3)",
-        "default": "4"
+        "default": "5"
       },
       {
         "id": "print_interval",

@@ -58,9 +58,8 @@ def collect_metadata(
     logger_status=None,
 ):
     # Generate a unique run ID with date and hash
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     random_hash = hashlib.sha256(str(time.time()).encode()).hexdigest()[:8]
-    run_id = f"{timestamp}_{random_hash}"
+    run_id = f"{random_hash}"
 
     # Get git info
     try:

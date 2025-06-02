@@ -5,8 +5,8 @@ from numba import njit, prange
 BC_WALL = 0
 BC_DIRICHLET = 1
 BC_INLET = 2
-BC_OUTLET = 4
-BC_NEUMANN = 3
+BC_OUTLET = 3
+BC_NEUMANN = 4
 
 
 @njit
@@ -120,7 +120,7 @@ def rhie_chow_velocity(mesh, U_star, U_star_bar, U_old_bar, U_old_rc, grad_p_bar
         if mesh.boundary_types[f,0] == BC_WALL or mesh.boundary_types[f,0] == BC_INLET:
             U_star_b = mesh.boundary_values[f,:2]
             mag_bold_D_bar = np.linalg.norm(bold_D_bar[f]) + 1e-14
-            U_star_rc[f] = U_star[P] - mag_bold_D_bar * (p_b - p[P])
+            U_star_rc[f] = U_star[P] - mag_bold_D_bar * (p_b - p[P]) #//// correction omitted
             
         elif mesh.boundary_types[f, 0] == BC_OUTLET:
             e_b = np.ascontiguousarray(mesh.unit_vector_e[f])
@@ -130,17 +130,8 @@ def rhie_chow_velocity(mesh, U_star, U_star_bar, U_old_bar, U_old_rc, grad_p_bar
             mag_S_b = np.linalg.norm(S_b) + 1e-14
             n = S_b / mag_S_b
             vec_Cb = d_Cb * n
-            x_P = mesh.cell_centers[P]
-            grad_U_P = np.ascontiguousarray(compute_velocity_gradient_least_squares(mesh, U_star_rc, U_star, x_P, U_star_C, P, f))
 
-
-            # Remove normal component 
-            grad_U_b = grad_U_P - np.outer(np.dot(grad_U_P, e_b), e_b)
-
-            # Extrapolate to boundary face
-            U_star_b = U_star_C + np.dot(grad_U_b, vec_Cb)
-
-            U_star_rc[f] = U_star[P][0]#U_star_b
+            U_star_rc[f] = U_star[P] - mag_bold_D_bar * (p_b - p[P]) #//// correction omitted
 
 
     return U_star_rc
@@ -175,21 +166,26 @@ def mdot_calculation(mesh, rho, U_star_rc, correction=False):
             else:
                 mdot_faces[f] = 0.0
         elif mesh.boundary_types[f,0] == BC_OUTLET:
+            # Always calculate mass flux for outlets
             if correction==False:
                 mdot_faces[f] = rho * np.dot(np.ascontiguousarray(U_star_rc[f]), np.ascontiguousarray(mesh.vector_S_f[f]))
                 sum_mdot_out += mdot_faces[f]
             else:
                 mdot_faces[f] = 0.0
+
     
     
     for i in prange(n_boundary):
         f = mesh.boundary_faces[i]
         if mesh.boundary_types[f,0] == BC_OUTLET:
             if correction==False:
-                mdot_faces[f] = mdot_faces[f] + (mdot_faces[f] * sum_mdot_in / (sum_mdot_out + 1e-14))
+                if sum_mdot_out != 0.0:
+                    mdot_faces[f] =  (mdot_faces[f] * abs(sum_mdot_in) / abs(sum_mdot_out))
+                continue
     
     
-
+    
+    
     return mdot_faces
 
 

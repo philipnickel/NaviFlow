@@ -1,0 +1,25 @@
+Simulation id: '58414683'
+Experiment: channelFlow
+Git commit: 5c625c2
+Wall time (s): '69.33'
+Numba threads: default
+Number of control volumes: 5294
+Mesh type: Structured
+Boundary conditions: shared_configs/domain/boundaries_channelFlow.yaml
+Reynolds number: '10'
+Algorithm: SIMPLE
+Convection scheme: UPWIND
+Limiter: None
+Convergence tolerance: 1e-5
+Number of iterations: 1711
+Final u-residual: 0e0
+Final v-residual: 0e0
+Final continuity-residual: 0e0
+Momentum relaxation: '0.6'
+Pressure relaxation: '0.2'
+Pressure solver: bcgs
+Pressure solver preconditioner: hypre
+Pressure solver tolerance: 1e-10
+Momentum solver: bcgs
+Momentum solver preconditioner: hypre
+Momentum solver tolerance: 1e-8

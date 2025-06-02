@@ -1,6 +1,7 @@
 name: "lidDrivenCavity"
 description: "Defaults simulation config for Lid driven cavity" 
 tags: ["lidDrivenCavity"]
+experiment: "lidDrivenCavity"
 
 domain:
   # Using the coarse structured mesh 

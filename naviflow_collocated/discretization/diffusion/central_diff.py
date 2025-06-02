@@ -7,8 +7,8 @@ EPS = 1.0e-14
 BC_WALL = 0
 BC_DIRICHLET = 1
 BC_INLET = 2
-BC_OUTLET = 4
-BC_NEUMANN = 3
+BC_OUTLET = 3
+BC_OBSTACLE = 4
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Internal faces
@@ -105,6 +105,7 @@ def compute_boundary_diffusive_correction(
 
     
     if bc_type == BC_DIRICHLET:
+
         E_mag = np.linalg.norm(E_f)
         diffFlux_P_b = muF * E_mag / (d_PB)
         diffFlux_N_b = -diffFlux_P_b * bc_val  # explicit orthogonal part
@@ -115,46 +116,9 @@ def compute_boundary_diffusive_correction(
         grad_P_mark = grad_P + np.dot(grad_P, d_skew)
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
         diffFlux_N_b += fluxVb
-    elif bc_type == BC_NEUMANN:
-        E_mag = np.linalg.norm(E_f) + EPS
-        diffFlux_N_b = -muF * bc_val * E_mag
-    elif bc_type == BC_WALL:
-        """
-        P = mesh.owner_cells[f]
-        Sf = np.ascontiguousarray(mesh.vector_S_f[f])
-        n = Sf / np.linalg.norm(Sf)
-        d_Cb = np.ascontiguousarray(mesh.d_Cb[f])
-        d_Cb_vec = d_Cb * n
-        u_b = mesh.boundary_values[f, 0]
-        v_b = mesh.boundary_values[f, 1]
-
-        # no slip wall moukalled 15.125
-        d_orth = np.dot(d_Cb_vec, n)
-        frac = (muF * np.linalg.norm(Sf)) / (d_orth + EPS)
-
-        if component_idx == 0:  # u-momentum
-            term = (1 - n[0]**2)
-            cross_term = (U[P][1] - v_b) * n[1] * n[0]
-            main_term = u_b * term
-        elif component_idx == 1:  # v-momentum
-            term = (1 - n[1]**2)
-            cross_term = (U[P][0] - u_b) * n[0] * n[1]
-            main_term = v_b * term
-
-        diffFlux_P_b = frac * term
-        diffFlux_N_b = -frac * (main_term - cross_term)
-        """
-        E_mag = np.linalg.norm(E_f)
-        diffFlux_P_b = muF * E_mag / (d_PB)
-        diffFlux_N_b = -diffFlux_P_b * bc_val  # explicit orthogonal part
-
-        # --- explicit non-orthogonal correction (FluxV_b) ---
-        grad_P = grad_phi[P]
-        d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
-        grad_P_mark = grad_P + np.dot(grad_P, d_skew)
-        fluxVb = -muF * np.dot(grad_P_mark, T_f)
-        diffFlux_N_b += fluxVb
-
+    
+    elif bc_type == BC_WALL or bc_type == BC_OBSTACLE:
+        # --- wall shear stress ---
         P = mesh.owner_cells[f]
         Sf = np.ascontiguousarray(mesh.vector_S_f[f])
         n = Sf / (np.linalg.norm(Sf) + EPS)
@@ -163,16 +127,34 @@ def compute_boundary_diffusive_correction(
         d_Cb_vec = d_Cb * n
         d_orth = np.dot(d_Cb_vec, n)
 
-        # Implicit contribution
-        a_wall = muF * S_mag / (d_orth + EPS)
+        # Get boundary values
+        U_b = mesh.boundary_values[f]  # Boundary velocity
+        U_C = U[P]  # Cell center velocity
 
-        # Matrix entry
-        #diffFlux_P_b = a_wall
+        # Calculate wall conductance (Moukalled 15.125)
+        frac = (muF * S_mag) / (d_orth + EPS) 
 
-        # RHS contribution from current value (deferred correction)
-        #u_C = #U[P][component_idx]
-        #diffFlux_N_b -= a_wall * bc_val 
+        if component_idx == 0:  # u-momentum
+            term = (1 - n[0]**2)  # Tangential component for u
+            # Use boundary values for cross-coupling
+            cross_term = (U_C[1] - U_b[1]) * n[1] * n[0]  # Cross-coupling with v
+            main_term = U_b[0] * (1 - n[0]**2)  # Wall velocity contribution
+        elif component_idx == 1:  # v-momentum
+            term = (1 - n[1]**2)  # Tangential component for v
+            # Use boundary values for cross-coupling
+            cross_term = (U_C[0] - U_b[0]) * n[0] * n[1]  # Cross-coupling with u
+            main_term = U_b[1] * (1 - n[1]**2)  # Wall velocity contribution
 
+        # Matrix coefficients for wall shear stress
+        diffFlux_P_b += frac * term
+        diffFlux_N_b += -frac * (main_term + cross_term) #- p_b * Sf[component_idx]
+
+        # --- explicit non-orthogonal correction (FluxV_b) ---
+        #grad_P = grad_phi[P]
+        #d_skew = np.ascontiguousarray(mesh.vector_skewness[f])
+        #grad_P_mark = grad_P + np.dot(grad_P, d_skew)
+        #fluxVb = -muF * np.dot(grad_P_mark, T_f)
+        #diffFlux_N_b += fluxVb
 
     elif bc_type == BC_INLET:
         E_mag = np.linalg.norm(E_f)
@@ -195,7 +177,7 @@ def compute_boundary_diffusive_correction(
         v_b = U[P] + np.dot(grad_v_b, d_Pb_vec)
         E_mag = np.linalg.norm(E_f) 
         diffFlux_P_b = muF * E_mag / (d_PB )
-        diffFlux_N_b = -diffFlux_P_b * U[P][component_idx] #v_b[component_idx] # explicit orthogonal part
+        diffFlux_N_b = -diffFlux_P_b * v_b[component_idx] #v_b[component_idx] # explicit orthogonal part
 
         # --- explicit non-orthogonal correction (FluxV_b) ---
         grad_P = grad_phi[P]
@@ -203,9 +185,9 @@ def compute_boundary_diffusive_correction(
         grad_P_mark = grad_P + np.dot(grad_P, d_skew)
         fluxVb = -muF * np.dot(grad_P_mark, T_f)
         diffFlux_N_b += fluxVb 
-        diffFlux_N_b = 0.0
+        diffFlux_N_b = 0.0  
         diffFlux_P_b = 0.0
-
-
+        ## no diffusive flux at outlet ferziger 8.10.2 Outlet - grid assumed to be orthogonal to the boundary (this may not be entirely true)
+    
 
     return diffFlux_P_b, diffFlux_N_b

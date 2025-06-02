@@ -1,7 +1,7 @@
-Simulation id: 20250601_181350_88e14e9d
+Simulation id: 47c01919
 Experiment: lidDrivenCavity
-Git commit: 8c21f83
-Wall time (s): '30.27'
+Git commit: 5c625c2
+Wall time (s): '58.05'
 Numba threads: default
 Number of control volumes: 3969
 Mesh type: Structured
@@ -11,10 +11,10 @@ Algorithm: SIMPLE
 Convection scheme: Upwind
 Limiter: None
 Convergence tolerance: 1e-5
-Number of iterations: 901
-Final u-residual: '7.26e-6'
-Final v-residual: '8.08e-6'
-Final continuity-residual: '3.71e-3'
+Number of iterations: 2001
+Final u-residual: '7.58e-6'
+Final v-residual: '3.79e-6'
+Final continuity-residual: '8.49e-4'
 Momentum relaxation: '0.8'
 Pressure relaxation: '0.2'
 Pressure solver: bcgs

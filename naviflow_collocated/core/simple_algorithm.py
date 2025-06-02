@@ -80,6 +80,7 @@ def piso_corrector_loop(mesh, A_p, ksp, mdot_start, rho, bold_D, U_star_rc, U_st
     return U, p, mdot, U_faces
 
 
+
 @njit
 def enforce_boundary_conditions(mesh, u_field):
     boundary_faces = mesh.boundary_faces
@@ -160,6 +161,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
     mom_solver_u = None
     mom_solver_v = None
     pres_solver = None
+    max_mass_imbalance = 0.0
 
     for i in range(max_iter):
         if interruption_flag():
@@ -247,9 +249,11 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         # PRESSURE CORRECTION EQUATION
         #=============================================================================
         rhs_p = compute_divergence_from_face_fluxes(mesh, mdot_star) 
+        # Calculate total mass flow rate for normalization
+        mass_imbalance = np.linalg.norm(rhs_p) 
+        continuity_l2norm[i] = mass_imbalance 
         
-
-        continuity_l2norm[i] = np.linalg.norm(rhs_p)
+        
 
         # pin one pressure node
         row_p, col_p, data_p = assemble_pressure_correction_matrix(mesh, rho)
@@ -257,9 +261,9 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         #A_p.setdiag(A_p.diagonal() + 1e-20)
         #rhs_p = rhs_p + 1e-20 
         
-        #cell_centers= mesh.cell_centers
-        #pinned_cell_coords = [1.5, 0.2]
-        #pinned_cell = np.argmin(np.linalg.norm(cell_centers - pinned_cell_coords, axis=1))
+        cell_centers= mesh.cell_centers
+        pinned_cell_coords = [2.2, 0.0]
+        pinned_cell = np.argmin(np.linalg.norm(cell_centers - pinned_cell_coords, axis=1))
         #pinned_cell = 0
         #random cell index:
         #pinned_cell = np.random.randint(0, n_cells)
@@ -278,7 +282,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         #A_p[pinned_cell, :] = 0.0
         #A_p[pinned_cell, pinned_cell] = 1#e-10 
         #A_p = A_p.tocsr()
-        #rhs_p[pinned_cell] = np.mean(p_prime) 
+        #rhs_p[pinned_cell] = 0
         #epsilon = np.max(np.abs(A_p.diagonal()))
         #epsilon = 1e-12 * np.max(np.abs(A_p.diagonal()))
         #A_p.setdiag(A_p.diagonal() + epsilon)

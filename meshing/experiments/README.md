@@ -6,6 +6,9 @@ Sanity check for mesh generation
 ### lidDrivenCavity
 Classic lid-driven cavity problem with moving top wall
 
+### channelFlow
+Flow in a channel
+
 ### cylinderFlow
 Flow around a circular cylinder in a rectangular domain
 
