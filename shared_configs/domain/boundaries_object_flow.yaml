@@ -32,6 +32,7 @@ boundaries:
   object:                    # cylinder surface
     velocity:
       bc: wall
+      bc: wall
       value: [0.0, 0.0]      # no‑slip
     pressure:
       bc: neumann
