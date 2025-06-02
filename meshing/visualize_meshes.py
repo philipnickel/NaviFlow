@@ -83,9 +83,7 @@ def visualize_mesh(file_path):
 
     view = GetActiveViewOrCreate('RenderView')
     view.UseColorPaletteForBackground = 0
-    view.BackgroundColorMode = 'Gradient'
-    view.Background = [1.0, 1.0, 1.0]  # Bottom (white)
-    view.Background2 = [0.55, 0.70, 0.90]  # Top (light blue)
+    view.Background = [1.0, 1.0, 1.0]  # Pure white background
     view.OrientationAxesVisibility = 0
 
     # Base layer: light surface fill (use separate surface filter)
@@ -287,7 +285,6 @@ def visualize_mesh(file_path):
         print("  Auto-fitting camera...")
         view.ResetCamera(True)
         view.CameraParallelProjection = 1
-        #view.CameraParallelScale *= 0.4  # Zoom in to fill more of the screen
     except Exception as e:
         print(f"  Warning: Auto-fitting camera failed. {e}")
         view.ResetCamera()
