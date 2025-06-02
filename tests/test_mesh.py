@@ -120,6 +120,10 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
     vector_scale = 0.2
 
     os.makedirs("tests/test_output/mesh_test", exist_ok=True)
+    # Create subfolders for different Tf magnitudes
+    for rank in ['largest', 'second_largest', 'third_largest']:
+        os.makedirs(f"tests/test_output/mesh_test/{rank}_Tf", exist_ok=True)
+
     path = f"tests/test_output/mesh_test/mesh_diagnostics_{mesh_label}.pdf"
 
     fig, ax = plt.subplots(figsize=(11, 11))
@@ -156,594 +160,340 @@ def test_mesh_visual_diagnostics(mesh_instance, mesh_label):
 
     # --- Plotting for INTERNAL FACES --- 
     if np.any(internal_mask):
-        # Find the internal face with largest T_f magnitude
+        # Find the top 3 internal faces with largest T_f magnitudes
         internal_faces = np.where(internal_mask)[0]
         T_f_magnitude = np.linalg.norm(mesh.vector_T_f[internal_mask], axis=1)
-        largest_Tf_idx = np.argmax(T_f_magnitude)
-        largest_Tf_face = internal_faces[largest_Tf_idx]
+        top_3_indices = np.argsort(T_f_magnitude)[-3:][::-1]  # Get indices of top 3 largest
+        top_3_faces = internal_faces[top_3_indices]
+        top_3_magnitudes = T_f_magnitude[top_3_indices]
+
+        for rank, (face_idx, magnitude) in enumerate(zip(top_3_faces, top_3_magnitudes)):
+            rank_name = ['largest', 'second_largest', 'third_largest'][rank]
+            fig_int, ax_int = plt.subplots(figsize=(11, 11))
+            ax_int.set_aspect("equal")
+            ax_int.axis('off')
         
-        # Create mask for just this face
-        single_internal_mask = np.zeros_like(internal_mask)
-        single_internal_mask[largest_Tf_face] = True
+            # Create mask for just this face
+            single_internal_mask = np.zeros_like(internal_mask)
+            single_internal_mask[face_idx] = True
 
-        # Shade the owner and neighbor cells
-        owner_cell = mesh.owner_cells[largest_Tf_face]
-        neighbor_cell = mesh.neighbor_cells[largest_Tf_face]
-        
-        # Draw the shaded cells
-        for c in [owner_cell, neighbor_cell]:
-            face_ids = mesh.cell_faces[c]
-            verts_idx = []
-            for f in face_ids:
-                if f >= 0:
-                    verts_idx.extend(mesh.face_vertices[f].tolist())
-            if not verts_idx:
-                continue
-            verts_idx = list(dict.fromkeys(verts_idx))
-            verts = mesh.vertices[verts_idx]
-            center = mesh.cell_centers[c]
-            angles = np.arctan2(verts[:, 1] - center[1], verts[:, 0] - center[0])
-            poly_coords = verts[np.argsort(angles)]
-            if c == owner_cell:
-                ax.add_patch(Polygon(poly_coords, facecolor='lightblue', edgecolor='blue', lw=1.0, alpha=0.7, label='Owner Cell'))
-            else:
-                ax.add_patch(Polygon(poly_coords, facecolor='lightgreen', edgecolor='green', lw=1.0, alpha=0.7, label='Neighbor Cell'))
+            # Draw all cells with gray outlines
+            for c, face_ids in enumerate(mesh.cell_faces):
+                verts_idx = []
+                for f in face_ids:
+                    if f >= 0:
+                        verts_idx.extend(mesh.face_vertices[f].tolist())
+                if not verts_idx:
+                    continue
+                verts_idx = list(dict.fromkeys(verts_idx))
+                verts = mesh.vertices[verts_idx]
+                center = mesh.cell_centers[c]
+                angles = np.arctan2(verts[:, 1] - center[1], verts[:, 0] - center[0])
+                poly_coords = verts[np.argsort(angles)]
+                if c == mesh.owner_cells[face_idx]:
+                    ax_int.add_patch(Polygon(poly_coords, facecolor='#A7C7E7', edgecolor='#24527A', lw=0.6, alpha=0.7, label='Owner Cell'))
+                elif c == mesh.neighbor_cells[face_idx]:
+                    ax_int.add_patch(Polygon(poly_coords, facecolor='#B7E7A7', edgecolor='#2A7A24', lw=0.6, alpha=0.7, label='Neighbor Cell'))
+                else:
+                    ax_int.add_patch(Polygon(poly_coords, facecolor='none', edgecolor='#B0B0B0', lw=0.6))
 
-        fc_internal = mesh.face_centers[single_internal_mask]
-        cc_owner_internal = mesh.cell_centers[mesh.owner_cells[single_internal_mask]]
+            # Highlight the face in question (thinner, dark orange)
+            face_verts = mesh.vertices[mesh.face_vertices[face_idx]]
+            ax_int.add_patch(Polygon(face_verts, facecolor='none', edgecolor='#D2691E', lw=0.6))
 
-        # 1. vector_S_f (Internal, scaled, at face centers)
-        ax.quiver(fc_internal[:, 0], fc_internal[:, 1],
-                  mesh.vector_S_f[single_internal_mask, 0] * vector_scale,
-                  mesh.vector_S_f[single_internal_mask, 1] * vector_scale,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.7)
+            # Cell centres (only for owner and neighbor)
+            owner_centroid = mesh.cell_centers[mesh.owner_cells[face_idx]]
+            neighbor_centroid = mesh.cell_centers[mesh.neighbor_cells[face_idx]]
+            ax_int.scatter(
+                [owner_centroid[0], neighbor_centroid[0]],
+                [owner_centroid[1], neighbor_centroid[1]],
+                s=20,  # Increased from 16
+                color=colors[0],
+                zorder=3,
+                label="Cell Centroids",
+            )
 
-        # 2. vector_d_CE (Internal, from Owner Cell Center)
-        ax.quiver(cc_owner_internal[:, 0], cc_owner_internal[:, 1],
-                  mesh.vector_d_CE[single_internal_mask, 0],
-                  mesh.vector_d_CE[single_internal_mask, 1],
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.2)
-        
-        # Add annotations for owner and neighbor cell centroids
-        for i in range(cc_owner_internal.shape[0]):
-            # Owner cell centroid 'C'
-            ax.annotate('C', xy=cc_owner_internal[i],
-                    xytext=(cc_owner_internal[i][0] - 0.3, cc_owner_internal[i][1] - 0.3),
-                    fontsize=12, color=colors[0])
-            
-            # Neighbor cell centroid 'E'
-            neighbor_center = mesh.cell_centers[mesh.neighbor_cells[single_internal_mask][i]]
-            ax.annotate('E', xy=neighbor_center,
-                    xytext=(neighbor_center[0] - 0.3, neighbor_center[1] - 0.3),
-                    fontsize=12, color=colors[0])
-            
-            # Original d_CE annotation
-            v = mesh.vector_d_CE[single_internal_mask][i]
-            mid = cc_owner_internal[i] + 0.25 * v
-            label_pos = mid + mesh.vector_T_f[single_internal_mask][i] / np.linalg.norm(mesh.vector_T_f[single_internal_mask][i]) * 0.1
-            ax.annotate(r"$\vec{d}_{CE}$", xy=cc_owner_internal[i], xytext=(label_pos[0], label_pos[1]),
-                        fontsize=10, color=colors[0])
+            # Add legend
+            ax_int.legend(loc='upper right', frameon=True, framealpha=0.9)
 
-        # 3. unit_vector_n (Internal, normalized, at face centers, no scaling)
-        ax.quiver(fc_internal[:, 0], fc_internal[:, 1],
-                  mesh.unit_vector_n[single_internal_mask, 0] * vector_scale*2,
-                  mesh.unit_vector_n[single_internal_mask, 1] * vector_scale*2,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.7)
-        # Annotate unit_vector_n at every internal face (perpendicular offset from centerline)
-        for i in range(fc_internal.shape[0]):
-            v = mesh.unit_vector_n[single_internal_mask][i] * vector_scale*2
-            mid = fc_internal[i] + 0.3 * v
-            label_pos = mid + mesh.vector_T_f[single_internal_mask][i] / np.linalg.norm(mesh.vector_T_f[single_internal_mask][i]) * 0.1
-            ax.annotate(r"$\vec{n}$", xy=fc_internal[i], xytext=(label_pos[0], label_pos[1]),
-                        fontsize=10, color=colors[0])
+            fc_internal = mesh.face_centers[single_internal_mask]
+            cc_owner_internal = mesh.cell_centers[mesh.owner_cells[single_internal_mask]]
 
-        # 5. vector_E_f (Internal, scaled, at face centers)
-        ax.quiver(fc_internal[:, 0], fc_internal[:, 1],
-                  mesh.vector_E_f[single_internal_mask, 0] * vector_scale,
-                  mesh.vector_E_f[single_internal_mask, 1] * vector_scale,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.7)
-
-        # 6. vector_T_f (Internal, scaled, at tf_origin = fc_internal + vector_E_f * vector_scale)
-        tf_origin = fc_internal + mesh.vector_E_f[single_internal_mask] * vector_scale
-        ax.quiver(tf_origin[:, 0], tf_origin[:, 1],
-                  mesh.vector_T_f[single_internal_mask, 0] * vector_scale,
-                  mesh.vector_T_f[single_internal_mask, 1] * vector_scale,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.7)
-
-        # --- Annotate S_f, E_f, T_f using midpoint-to-midpoint triangle center logic ---
-        for i in range(fc_internal.shape[0]):
-            S_vec = mesh.vector_S_f[single_internal_mask][i] * vector_scale
-            E_vec = mesh.vector_E_f[single_internal_mask][i] * vector_scale
-            T_vec = mesh.vector_T_f[single_internal_mask][i] * vector_scale
-
-            O_S = fc_internal[i]
-            O_E = fc_internal[i]
-            O_T = tf_origin[i]
-
-            mid_S = O_S + 0.5 * S_vec
-            mid_E = O_E + 0.5 * E_vec
-            mid_T = O_T + 0.5 * T_vec
-
-            # Triangle center = midpoint of face center to midpoint of T_f
-            triangle_center = O_S + 0.5 * (mid_T - O_S)
-
-            # Annotate S_f
-            label_pos_S = mid_S + T_vec / np.linalg.norm(T_vec) * 0.2
-            ax.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
-                        fontsize=9, color=colors[0])
-
-            # Annotate E_f
-            label_pos_E = mid_E - T_vec / np.linalg.norm(T_vec) * 0.2
-            ax.annotate(r"$\vec{E}_f$", xy=O_E, xytext=label_pos_E,
-                        fontsize=9, color=colors[0])
-
-            # Annotate T_f
-            dir_T = mid_T - triangle_center
-            label_pos_T = triangle_center + 1.2 * dir_T
-            ax.annotate(r"$\vec{T}_f$", xy=O_T, xytext=label_pos_T,
-                        fontsize=9, color=colors[0])
-
-    # --- Plotting for BOUNDARY FACES --- 
-    if np.any(boundary_mask):
-        # Find the boundary face with largest T_f magnitude
-        boundary_faces = np.where(boundary_mask)[0]
-        T_f_magnitude = np.linalg.norm(mesh.vector_T_f[boundary_mask], axis=1)
-        largest_Tf_idx = np.argmax(T_f_magnitude)
-        largest_Tf_face = boundary_faces[largest_Tf_idx]
-        
-        # Create mask for just this face
-        single_boundary_mask = np.zeros_like(boundary_mask)
-        single_boundary_mask[largest_Tf_face] = True
-
-        # Shade the owner cell
-        owner_cell = mesh.owner_cells[largest_Tf_face]
-        
-        # Draw the shaded cell
-        face_ids = mesh.cell_faces[owner_cell]
-        verts_idx = []
-        for f in face_ids:
-            if f >= 0:
-                verts_idx.extend(mesh.face_vertices[f].tolist())
-        if verts_idx:
-            verts_idx = list(dict.fromkeys(verts_idx))
-            verts = mesh.vertices[verts_idx]
-            center = mesh.cell_centers[owner_cell]
-            angles = np.arctan2(verts[:, 1] - center[1], verts[:, 0] - center[0])
-            poly_coords = verts[np.argsort(angles)]
-            ax.add_patch(Polygon(poly_coords, facecolor='lightblue', edgecolor='blue', lw=1.0, alpha=0.7, label='Owner Cell'))
-
-        fc_boundary = mesh.face_centers[single_boundary_mask]
-        cc_owner_boundary = mesh.cell_centers[mesh.owner_cells[single_boundary_mask]]
-
-        # 1. vector_S_f (Boundary, scaled, at face centers)
-        ax.quiver(fc_boundary[:, 0], fc_boundary[:, 1],
-                  mesh.vector_S_f[single_boundary_mask, 0] * vector_scale,
-                  mesh.vector_S_f[single_boundary_mask, 1] * vector_scale,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.7)
-
-        # Annotate boundary vector_S_f using triangle center logic (same as internal faces)
-        for i in range(fc_boundary.shape[0]):
-            S_vec = mesh.vector_S_f[single_boundary_mask][i] * vector_scale
-            T_vec =  mesh.vector_T_f[single_boundary_mask][i] * vector_scale
-            O_S = fc_boundary[i]
-            O_T = O_S + mesh.vector_E_f[single_boundary_mask][i] * vector_scale
-            mid_S = O_S + 0.5 * S_vec
-            mid_T = O_T + 0.5 * T_vec
-            triangle_center = O_S + 0.5 * (mid_T - O_S)
-            label_pos_S = mid_S + T_vec / (np.linalg.norm(T_vec) + 1e-12) * 0.2
-            ax.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
-                        fontsize=9, color=colors[0])
-
-        # 2. Vector from Owner Cell Center to Boundary Face Center (P->f), scaled
-        vec_Pf_boundary = fc_boundary - cc_owner_boundary
-        ax.quiver(cc_owner_boundary[:, 0], cc_owner_boundary[:, 1],
-                  vec_Pf_boundary[:, 0],
-                  vec_Pf_boundary[:, 1],
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.2)
-        # Annotate boundary d_Pf near tip
-        for i in range(cc_owner_boundary.shape[0]):
-            Pf_orth = np.array([-vec_Pf_boundary[i][1], vec_Pf_boundary[i][0]])
-            Pf_mid = cc_owner_boundary[i] + vec_Pf_boundary[i] * 0.5
-            Pf_tip = Pf_mid + Pf_orth * 0.1
-            ax.annotate(r"$\vec{d}_{Pf}$", xy=cc_owner_boundary[i],
-                    xytext=(Pf_tip[0] + 0.01, Pf_tip[1] + 0.01),
-                    fontsize=9, color=colors[0])
-
-        # 3. vector_E_f (Boundary, scaled, at face centers)
-        ax.quiver(fc_boundary[:, 0], fc_boundary[:, 1],
-                  mesh.vector_E_f[single_boundary_mask, 0] * vector_scale,
-                  mesh.vector_E_f[single_boundary_mask, 1] * vector_scale,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.7)
-        # Annotate vector_E_f at midpoint, offset perpendicular to T_f
-        for i in range(fc_boundary.shape[0]):
-            E_vec = mesh.vector_E_f[single_boundary_mask][i] * vector_scale
-            mid = fc_boundary[i] + 0.5 * E_vec
-            T_vec = mesh.vector_T_f[single_boundary_mask][i]
-            T_hat = T_vec / (np.linalg.norm(T_vec) + 1e-12)
-            label_pos = mid - T_hat/(np.linalg.norm(T_hat) + 1e-12) * 0.2
-            ax.annotate(r"$\vec{E}_f$", xy=fc_boundary[i], xytext=(label_pos[0], label_pos[1]),
-                        fontsize=9, color=colors[0])
-
-        # 4. vector_T_f (Boundary, scaled, at tf_origin_boundary)
-        tf_origin_boundary = fc_boundary + mesh.vector_E_f[single_boundary_mask] * vector_scale
-        ax.quiver(tf_origin_boundary[:, 0], tf_origin_boundary[:, 1],
-                  mesh.vector_T_f[single_boundary_mask, 0] * vector_scale,
-                  mesh.vector_T_f[single_boundary_mask, 1] * vector_scale,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.001, alpha=0.7)
-        # Annotate vector_T_f near its midpoint
-        for i in range(fc_boundary.shape[0]):
-            T_vec = mesh.vector_T_f[single_boundary_mask][i] * vector_scale
-            O_T = tf_origin_boundary[i]
-            mid_T = O_T + 0.5 * T_vec
-            dir_T = T_vec / (np.linalg.norm(T_vec) + 1e-12)
-            label_pos = mid_T + dir_T * 0.3
-            ax.annotate(r"$\vec{T}_f$", xy=O_T, xytext=(label_pos[0], label_pos[1]),
-                        fontsize=9, color=colors[0])
-
-    # Remove legend, use inline annotations instead
-    plt.tight_layout()
-
-    plt.savefig(path, dpi=300)
-    plt.close()
-    assert os.path.exists(path), f"Failed to create {path}"
-
-    # --- Plot for interior face with largest Tf ---
-    if np.any(internal_mask):
-        fig_int, ax_int = plt.subplots(figsize=(11, 11))
-        ax_int.set_aspect("equal")
-        ax_int.axis('off')
-
-        # Find the internal face with largest T_f magnitude
-        internal_faces = np.where(internal_mask)[0]
-        T_f_magnitude = np.linalg.norm(mesh.vector_T_f[internal_mask], axis=1)
-        largest_Tf_idx = np.argmax(T_f_magnitude)
-        largest_Tf_face = internal_faces[largest_Tf_idx]
-        
-        # Create mask for just this face
-        single_internal_mask = np.zeros_like(internal_mask)
-        single_internal_mask[largest_Tf_face] = True
-
-        # Draw all cells with gray outlines
-        for c, face_ids in enumerate(mesh.cell_faces):
-            verts_idx = []
-            for f in face_ids:
-                if f >= 0:
-                    verts_idx.extend(mesh.face_vertices[f].tolist())
-            if not verts_idx:
-                continue
-            verts_idx = list(dict.fromkeys(verts_idx))
-            verts = mesh.vertices[verts_idx]
-            center = mesh.cell_centers[c]
-            angles = np.arctan2(verts[:, 1] - center[1], verts[:, 0] - center[0])
-            poly_coords = verts[np.argsort(angles)]
-            if c == mesh.owner_cells[largest_Tf_face]:
-                ax_int.add_patch(Polygon(poly_coords, facecolor='#A7C7E7', edgecolor='#24527A', lw=0.6, alpha=0.7, label='Owner Cell'))
-            elif c == mesh.neighbor_cells[largest_Tf_face]:
-                ax_int.add_patch(Polygon(poly_coords, facecolor='#B7E7A7', edgecolor='#2A7A24', lw=0.6, alpha=0.7, label='Neighbor Cell'))
-            else:
-                ax_int.add_patch(Polygon(poly_coords, facecolor='none', edgecolor='#B0B0B0', lw=0.6))
-
-        # Highlight the face in question (thinner, dark orange)
-        face_verts = mesh.vertices[mesh.face_vertices[largest_Tf_face]]
-        ax_int.add_patch(Polygon(face_verts, facecolor='none', edgecolor='#D2691E', lw=0.6))
-
-        # Cell centres (only for owner and neighbor)
-        owner_centroid = mesh.cell_centers[mesh.owner_cells[largest_Tf_face]]
-        neighbor_centroid = mesh.cell_centers[mesh.neighbor_cells[largest_Tf_face]]
-        ax_int.scatter(
-            [owner_centroid[0], neighbor_centroid[0]],
-            [owner_centroid[1], neighbor_centroid[1]],
-            s=16,
-            color=colors[0],
-            zorder=3,
-            label="Cell Centroids",
-        )
-
-        # Add legend
-        ax_int.legend(loc='upper right', frameon=True, framealpha=0.9)
-
-        fc_internal = mesh.face_centers[single_internal_mask]
-        cc_owner_internal = mesh.cell_centers[mesh.owner_cells[single_internal_mask]]
-
-        # Plot all vectors for this face
-        # 1. vector_S_f
-        ax_int.quiver(fc_internal[:, 0], fc_internal[:, 1],
-                  mesh.vector_S_f[single_internal_mask, 0] * vector_scale,
-                  mesh.vector_S_f[single_internal_mask, 1] * vector_scale,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.002, alpha=0.7)
-
-        # 2. vector_d_CE
-        ax_int.quiver(cc_owner_internal[:, 0], cc_owner_internal[:, 1],
-                  mesh.vector_d_CE[single_internal_mask, 0],
-                  mesh.vector_d_CE[single_internal_mask, 1],
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.002, alpha=0.2)
-
-        # Add annotations for owner and neighbor cell centroids
-        for i in range(cc_owner_internal.shape[0]):
-            # Owner cell centroid 'C'
-            ax_int.annotate('C', xy=cc_owner_internal[i],
-                    xytext=(cc_owner_internal[i][0] - 0.45, cc_owner_internal[i][1] - 0.45),
-                    fontsize=12, color=colors[0])
-            
-            # Neighbor cell centroid 'E'
-            neighbor_center = mesh.cell_centers[mesh.neighbor_cells[single_internal_mask][i]]
-            ax_int.annotate('E', xy=neighbor_center,
-                    xytext=(neighbor_center[0] - 0.45, neighbor_center[1] - 0.45),
-                    fontsize=12, color=colors[0])
-            
-            # d_CE annotation
-            v = mesh.vector_d_CE[single_internal_mask][i]
-            mid = cc_owner_internal[i] + 0.25 * v
-            label_pos = mid + mesh.vector_T_f[single_internal_mask][i] / np.linalg.norm(mesh.vector_T_f[single_internal_mask][i]) * 0.2
-            ax_int.annotate(r"$\vec{d}_{CE}$", xy=cc_owner_internal[i], xytext=(label_pos[0], label_pos[1]),
-                        fontsize=10, color=colors[0])
-
-        # 3. unit_vector_n
-        ax_int.quiver(fc_internal[:, 0], fc_internal[:, 1],
-                  mesh.unit_vector_n[single_internal_mask, 0] * vector_scale*2,
-                  mesh.unit_vector_n[single_internal_mask, 1] * vector_scale*2,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.002, alpha=0.7)
-
-        # Annotate unit_vector_n
-        for i in range(fc_internal.shape[0]):
-            v = mesh.unit_vector_n[single_internal_mask][i] * vector_scale*2
-            mid = fc_internal[i] + 0.45 * v
-            label_pos = mid + mesh.vector_T_f[single_internal_mask][i] / np.linalg.norm(mesh.vector_T_f[single_internal_mask][i]) * 0.2
-            ax_int.annotate(r"$\vec{n}$", xy=fc_internal[i], xytext=(label_pos[0], label_pos[1]),
-                        fontsize=10, color=colors[0])
-
-        # Only plot Tf, Ef, and df'f if Tf magnitude is not too small (for unstructured grids)
-        Tf_magnitude = np.linalg.norm(mesh.vector_T_f[single_internal_mask][0])
-        if Tf_magnitude > 1e-10:  # Only plot for unstructured grids
-            # 4. vector_E_f
+            # 1. vector_S_f (Internal, scaled, at face centers)
             ax_int.quiver(fc_internal[:, 0], fc_internal[:, 1],
-                      mesh.vector_E_f[single_internal_mask, 0] * vector_scale,
-                      mesh.vector_E_f[single_internal_mask, 1] * vector_scale,
+                      mesh.vector_S_f[single_internal_mask, 0] * vector_scale,
+                      mesh.vector_S_f[single_internal_mask, 1] * vector_scale,
                       angles="xy", scale_units="xy", scale=1, color=colors[0],
-                      width=0.002, alpha=0.7)
+                      width=0.001, alpha=1.0)
 
-            # 5. vector_T_f
-            tf_origin = fc_internal + mesh.vector_E_f[single_internal_mask] * vector_scale
-            ax_int.quiver(tf_origin[:, 0], tf_origin[:, 1],
-                      mesh.vector_T_f[single_internal_mask, 0] * vector_scale,
-                      mesh.vector_T_f[single_internal_mask, 1] * vector_scale,
+            # 2. vector_d_CE (Internal, from Owner Cell Center)
+            ax_int.quiver(cc_owner_internal[:, 0], cc_owner_internal[:, 1],
+                      mesh.vector_d_CE[single_internal_mask, 0],
+                      mesh.vector_d_CE[single_internal_mask, 1],
                       angles="xy", scale_units="xy", scale=1, color=colors[0],
-                      width=0.002, alpha=0.7)
+                      width=0.001, alpha=0.2)
+            
+            # Add annotations for owner and neighbor cell centroids
+            for i in range(cc_owner_internal.shape[0]):
+                # Owner cell centroid 'C'
+                ax_int.annotate('C', xy=cc_owner_internal[i],
+                        xytext=(cc_owner_internal[i][0] - 0.45, cc_owner_internal[i][1] - 0.45),
+                        fontsize=16, color=colors[0])  # Increased from 14
+                
+                # Neighbor cell centroid 'E'
+                neighbor_center = mesh.cell_centers[mesh.neighbor_cells[single_internal_mask][i]]
+                ax_int.annotate('E', xy=neighbor_center,
+                        xytext=(neighbor_center[0] - 0.45, neighbor_center[1] - 0.45),
+                        fontsize=16, color=colors[0])  # Increased from 14
+                
+                # d_CE annotation
+                v = mesh.vector_d_CE[single_internal_mask][i]
+                mid = cc_owner_internal[i] + 0.25 * v
+                label_pos = mid + mesh.vector_T_f[single_internal_mask][i] / np.linalg.norm(mesh.vector_T_f[single_internal_mask][i]) * 0.3
+                ax_int.annotate(r"$\vec{d}_{CE}$", xy=cc_owner_internal[i], xytext=(label_pos[0], label_pos[1]),
+                            fontsize=12, color=colors[0])
 
-            # Annotate S_f, E_f, T_f
-            for i in range(fc_internal.shape[0]):
-                S_vec = mesh.vector_S_f[single_internal_mask][i] * vector_scale
-                E_vec = mesh.vector_E_f[single_internal_mask][i] * vector_scale
-                T_vec = mesh.vector_T_f[single_internal_mask][i] * vector_scale
-
-                O_S = fc_internal[i]
-                O_E = fc_internal[i]
-                O_T = tf_origin[i]
-
-                mid_S = O_S + 0.5 * S_vec
-                mid_E = O_E + 0.5 * E_vec
-                mid_T = O_T + 0.5 * T_vec
-
-                triangle_center = O_S + 0.5 * (mid_T - O_S)
-
-                label_pos_S = mid_S + T_vec / np.linalg.norm(T_vec) * 0.35
-                ax_int.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
-                            fontsize=9, color=colors[0])
-
-                label_pos_E = mid_E - T_vec / np.linalg.norm(T_vec) * 0.35
-                ax_int.annotate(r"$\vec{E}_f$", xy=O_E, xytext=label_pos_E,
-                            fontsize=9, color=colors[0])
-
-                dir_T = mid_T - triangle_center
-                label_pos_T = triangle_center + 1.5 * dir_T
-                ax_int.annotate(r"$\vec{T}_f$", xy=O_T, xytext=label_pos_T,
-                            fontsize=9, color=colors[0])
-
-            # Add df'f vector plotting at the end
-            # vector_skewness (Internal)
-            ax_int.quiver(fc_internal[:, 0]- mesh.vector_skewness[single_internal_mask, 0] , fc_internal[:, 1]- mesh.vector_skewness[single_internal_mask, 1] ,
-                      mesh.vector_skewness[single_internal_mask, 0],
-                      mesh.vector_skewness[single_internal_mask, 1],
+            # 3. unit_vector_n
+            ax_int.quiver(fc_internal[:, 0], fc_internal[:, 1],
+                      mesh.unit_vector_n[single_internal_mask, 0] * vector_scale*2,
+                      mesh.unit_vector_n[single_internal_mask, 1] * vector_scale*2,
                       angles="xy", scale_units="xy", scale=1, color=colors[0],
-                      width=0.002, alpha=0.7)
+                      width=0.002, alpha=1.0)
 
-            # Annotate vector_skewness
+            # Annotate unit_vector_n
             for i in range(fc_internal.shape[0]):
-                v = mesh.vector_skewness[single_internal_mask][i]
-                mid = fc_internal[i]- mesh.vector_skewness[single_internal_mask][i] + 0.5 * v
-                label_pos = mid - mesh.unit_vector_n[single_internal_mask][i] * vector_scale * 1.2
-                ax_int.annotate(r"$\vec{d}_{f'f}$", xy=fc_internal[i], xytext=(label_pos[0], label_pos[1]),
-                            fontsize=8, color=colors[0])
-        else:
-            # For structured grids, only annotate S_f
-            for i in range(fc_internal.shape[0]):
-                S_vec = mesh.vector_S_f[single_internal_mask][i] * vector_scale
-                mid_S = fc_internal[i] + 0.5 * S_vec
-                label_pos_S = mid_S + np.array([0.2, 0.2])  # Simple offset for structured grid
-                ax_int.annotate(r"$\vec{S}_f$", xy=fc_internal[i], xytext=label_pos_S,
-                            fontsize=9, color=colors[0])
+                v = mesh.unit_vector_n[single_internal_mask][i] * vector_scale*2
+                mid = fc_internal[i] + 0.6 * v
+                label_pos = mid + mesh.vector_T_f[single_internal_mask][i] / np.linalg.norm(mesh.vector_T_f[single_internal_mask][i]) * 0.3
+                ax_int.annotate(r"$\vec{n}$", xy=fc_internal[i], xytext=(label_pos[0], label_pos[1]),
+                            fontsize=12, color=colors[0])
 
-        plt.tight_layout()
-        int_path = f"tests/test_output/mesh_test/mesh_interior_face_{mesh_label}.pdf"
-        plt.savefig(int_path, dpi=300)
-        plt.close()
-        assert os.path.exists(int_path), f"Failed to create {int_path}"
+            # Only plot Tf, Ef, and df'f if Tf magnitude is not too small (for unstructured grids)
+            Tf_magnitude = np.linalg.norm(mesh.vector_T_f[single_internal_mask][0])
+            if Tf_magnitude > 1e-10:  # Only plot for unstructured grids
+                # 4. vector_E_f
+                ax_int.quiver(fc_internal[:, 0], fc_internal[:, 1],
+                          mesh.vector_E_f[single_internal_mask, 0] * vector_scale,
+                          mesh.vector_E_f[single_internal_mask, 1] * vector_scale,
+                          angles="xy", scale_units="xy", scale=1, color=colors[0],
+                          width=0.001, alpha=1.0)
+
+                # 5. vector_T_f
+                tf_origin = fc_internal + mesh.vector_E_f[single_internal_mask] * vector_scale
+                ax_int.quiver(tf_origin[:, 0], tf_origin[:, 1],
+                          mesh.vector_T_f[single_internal_mask, 0] * vector_scale,
+                          mesh.vector_T_f[single_internal_mask, 1] * vector_scale,
+                          angles="xy", scale_units="xy", scale=1, color=colors[0],
+                          width=0.001, alpha=1.0)
+
+                # Annotate S_f, E_f, T_f
+                for i in range(fc_internal.shape[0]):
+                    S_vec = mesh.vector_S_f[single_internal_mask][i] * vector_scale
+                    E_vec = mesh.vector_E_f[single_internal_mask][i] * vector_scale
+                    T_vec = mesh.vector_T_f[single_internal_mask][i] * vector_scale
+
+                    O_S = fc_internal[i]
+                    O_E = fc_internal[i]
+                    O_T = tf_origin[i]
+
+                    mid_S = O_S + 0.5 * S_vec
+                    mid_E = O_E + 0.5 * E_vec
+                    mid_T = O_T + 0.5 * T_vec
+
+                    triangle_center = O_S + 0.5 * (mid_T - O_S)
+
+                    label_pos_S = mid_S + T_vec / np.linalg.norm(T_vec) * 0.3
+                    ax_int.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
+                                fontsize=11, color=colors[0])
+
+                    label_pos_E = mid_E - T_vec / np.linalg.norm(T_vec) * 0.3
+                    ax_int.annotate(r"$\vec{E}_f$", xy=O_E, xytext=label_pos_E,
+                                fontsize=11, color=colors[0])
+
+                    dir_T = mid_T - triangle_center
+                    label_pos_T = triangle_center + 1.4 * dir_T
+                    ax_int.annotate(r"$\vec{T}_f$", xy=O_T, xytext=label_pos_T,
+                                fontsize=11, color=colors[0])
+
+                # Add df'f vector plotting at the end
+                # vector_skewness (Internal)
+                ax_int.quiver(fc_internal[:, 0]- mesh.vector_skewness[single_internal_mask, 0] , fc_internal[:, 1]- mesh.vector_skewness[single_internal_mask, 1] ,
+                          mesh.vector_skewness[single_internal_mask, 0],
+                          mesh.vector_skewness[single_internal_mask, 1],
+                          angles="xy", scale_units="xy", scale=1, color=colors[0],
+                          width=0.002, alpha=1.0)
+
+                # Annotate vector_skewness
+                for i in range(fc_internal.shape[0]):
+                    v = mesh.vector_skewness[single_internal_mask][i]
+                    mid = fc_internal[i]- mesh.vector_skewness[single_internal_mask][i] + 0.5 * v
+                    label_pos = mid - mesh.unit_vector_n[single_internal_mask][i] * vector_scale * 1.0
+                    ax_int.annotate(r"$\vec{d}_{f'f}$", xy=fc_internal[i], xytext=(label_pos[0], label_pos[1]),
+                                fontsize=10, color=colors[0])
+            else:
+                # For structured grids, only annotate S_f
+                for i in range(fc_internal.shape[0]):
+                    S_vec = mesh.vector_S_f[single_internal_mask][i] * vector_scale
+                    mid_S = fc_internal[i] + 0.5 * S_vec
+                    label_pos_S = mid_S + np.array([0.3, 0.3])  # Increased offset for structured grid
+                    ax_int.annotate(r"$\vec{S}_f$", xy=fc_internal[i], xytext=label_pos_S,
+                                fontsize=11, color=colors[0])
+
+            plt.tight_layout()
+            int_path = f"tests/test_output/mesh_test/{rank_name}_Tf/mesh_interior_face_{mesh_label}.pdf"
+            plt.savefig(int_path, dpi=300)
+            plt.close()
+            assert os.path.exists(int_path), f"Failed to create {int_path}"
 
     # --- Plot for boundary face with largest Tf ---
     if np.any(boundary_mask):
-        fig_bnd, ax_bnd = plt.subplots(figsize=(11, 11))
-        ax_bnd.set_aspect("equal")
-        ax_bnd.axis('off')
-
-        # Find the boundary face with largest T_f magnitude
+        # Find the top 3 boundary faces with largest T_f magnitudes
         boundary_faces = np.where(boundary_mask)[0]
         T_f_magnitude = np.linalg.norm(mesh.vector_T_f[boundary_mask], axis=1)
-        largest_Tf_idx = np.argmax(T_f_magnitude)
-        largest_Tf_face = boundary_faces[largest_Tf_idx]
+        top_3_indices = np.argsort(T_f_magnitude)[-3:][::-1]  # Get indices of top 3 largest
+        top_3_faces = boundary_faces[top_3_indices]
+        top_3_magnitudes = T_f_magnitude[top_3_indices]
+
+        for rank, (face_idx, magnitude) in enumerate(zip(top_3_faces, top_3_magnitudes)):
+            rank_name = ['largest', 'second_largest', 'third_largest'][rank]
+            fig_bnd, ax_bnd = plt.subplots(figsize=(11, 11))
+            ax_bnd.set_aspect("equal")
+            ax_bnd.axis('off')
         
-        # Create mask for just this face
-        single_boundary_mask = np.zeros_like(boundary_mask)
-        single_boundary_mask[largest_Tf_face] = True
+            # Create mask for just this face
+            single_boundary_mask = np.zeros_like(boundary_mask)
+            single_boundary_mask[face_idx] = True
 
-        # Draw all cells with gray outlines
-        for c, face_ids in enumerate(mesh.cell_faces):
-            verts_idx = []
-            for f in face_ids:
-                if f >= 0:
-                    verts_idx.extend(mesh.face_vertices[f].tolist())
-            if not verts_idx:
-                continue
-            verts_idx = list(dict.fromkeys(verts_idx))
-            verts = mesh.vertices[verts_idx]
-            center = mesh.cell_centers[c]
-            angles = np.arctan2(verts[:, 1] - center[1], verts[:, 0] - center[0])
-            poly_coords = verts[np.argsort(angles)]
-            if c == mesh.owner_cells[largest_Tf_face]:
-                ax_bnd.add_patch(Polygon(poly_coords, facecolor='#A7C7E7', edgecolor='#24527A', lw=0.6, alpha=0.7, label='Owner Cell'))
-            else:
-                ax_bnd.add_patch(Polygon(poly_coords, facecolor='none', edgecolor='#B0B0B0', lw=0.6))
+            # Draw all cells with gray outlines
+            for c, face_ids in enumerate(mesh.cell_faces):
+                verts_idx = []
+                for f in face_ids:
+                    if f >= 0:
+                        verts_idx.extend(mesh.face_vertices[f].tolist())
+                if not verts_idx:
+                    continue
+                verts_idx = list(dict.fromkeys(verts_idx))
+                verts = mesh.vertices[verts_idx]
+                center = mesh.cell_centers[c]
+                angles = np.arctan2(verts[:, 1] - center[1], verts[:, 0] - center[0])
+                poly_coords = verts[np.argsort(angles)]
+                if c == mesh.owner_cells[face_idx]:
+                    ax_bnd.add_patch(Polygon(poly_coords, facecolor='#A7C7E7', edgecolor='#24527A', lw=0.6, alpha=0.7, label='Owner Cell'))
+                else:
+                    ax_bnd.add_patch(Polygon(poly_coords, facecolor='none', edgecolor='#B0B0B0', lw=0.6))
 
-        # Highlight the face in question (thinner, dark orange)
-        face_verts = mesh.vertices[mesh.face_vertices[largest_Tf_face]]
-        ax_bnd.add_patch(Polygon(face_verts, facecolor='none', edgecolor='#D2691E', lw=0.6))
+            # Highlight the face in question (thinner, dark orange)
+            face_verts = mesh.vertices[mesh.face_vertices[face_idx]]
+            ax_bnd.add_patch(Polygon(face_verts, facecolor='none', edgecolor='#D2691E', lw=0.6))
 
-        # Cell centres (only for owner cell)
-        owner_centroid = mesh.cell_centers[mesh.owner_cells[largest_Tf_face]]
-        ax_bnd.scatter(
-            [owner_centroid[0]],
-            [owner_centroid[1]],
-            s=16,
-            color=colors[0],
-            zorder=3,
-            label="Cell Centroids",
-        )
+            # Cell centres (only for owner cell)
+            owner_centroid = mesh.cell_centers[mesh.owner_cells[face_idx]]
+            ax_bnd.scatter(
+                [owner_centroid[0]],
+                [owner_centroid[1]],
+                s=20,  # Increased from 16
+                color=colors[0],
+                zorder=3,
+                label="Cell Centroids",
+            )
 
-        # Add legend
-        ax_bnd.legend(loc='upper right', frameon=True, framealpha=0.9)
+            # Add legend
+            ax_bnd.legend(loc='upper right', frameon=True, framealpha=0.9)
 
-        fc_boundary = mesh.face_centers[single_boundary_mask]
-        cc_owner_boundary = mesh.cell_centers[mesh.owner_cells[single_boundary_mask]]
+            fc_boundary = mesh.face_centers[single_boundary_mask]
+            cc_owner_boundary = mesh.cell_centers[mesh.owner_cells[single_boundary_mask]]
 
-        # Plot all vectors for this face
-        # 1. vector_S_f
-        ax_bnd.quiver(fc_boundary[:, 0], fc_boundary[:, 1],
-                  mesh.vector_S_f[single_boundary_mask, 0] * vector_scale,
-                  mesh.vector_S_f[single_boundary_mask, 1] * vector_scale,
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.002, alpha=0.7)
-
-        # Annotate boundary vector_S_f
-        for i in range(fc_boundary.shape[0]):
-            S_vec = mesh.vector_S_f[single_boundary_mask][i] * vector_scale
-            T_vec =  mesh.vector_T_f[single_boundary_mask][i] * vector_scale
-            O_S = fc_boundary[i]
-            O_T = O_S + mesh.vector_E_f[single_boundary_mask][i] * vector_scale
-            mid_S = O_S + 0.5 * S_vec
-            mid_T = O_T + 0.5 * T_vec
-            triangle_center = O_S + 0.5 * (mid_T - O_S)
-            label_pos_S = mid_S + T_vec / (np.linalg.norm(T_vec) + 1e-12) * 0.35
-            ax_bnd.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
-                        fontsize=9, color=colors[0])
-
-        # 2. Vector from Owner Cell Center to Boundary Face Center (P->f)
-        vec_Pf_boundary = fc_boundary - cc_owner_boundary
-        ax_bnd.quiver(cc_owner_boundary[:, 0], cc_owner_boundary[:, 1],
-                  vec_Pf_boundary[:, 0],
-                  vec_Pf_boundary[:, 1],
-                  angles="xy", scale_units="xy", scale=1, color=colors[0],
-                  width=0.002, alpha=0.2)
-
-        # Annotate boundary d_Pf
-        for i in range(cc_owner_boundary.shape[0]):
-            Pf_orth = np.array([-vec_Pf_boundary[i][1], vec_Pf_boundary[i][0]])
-            Pf_mid = cc_owner_boundary[i] + vec_Pf_boundary[i] * 0.5
-            Pf_tip = Pf_mid + Pf_orth * 0.2
-            ax_bnd.annotate(r"$\vec{d}_{Pf}$", xy=cc_owner_boundary[i],
-                    xytext=(Pf_tip[0] + 0.02, Pf_tip[1] + 0.02),
-                    fontsize=9, color=colors[0])
-
-        # Only plot Tf, Ef, and df'f if Tf magnitude is not too small (for unstructured grids)
-        Tf_magnitude = np.linalg.norm(mesh.vector_T_f[single_boundary_mask][0])
-        if Tf_magnitude > 1e-10:  # Only plot for unstructured grids
-            # 3. vector_E_f (Boundary, scaled, at face centers)
+            # Plot all vectors for this face
+            # 1. vector_S_f
             ax_bnd.quiver(fc_boundary[:, 0], fc_boundary[:, 1],
-                      mesh.vector_E_f[single_boundary_mask, 0] * vector_scale,
-                      mesh.vector_E_f[single_boundary_mask, 1] * vector_scale,
+                      mesh.vector_S_f[single_boundary_mask, 0] * vector_scale,
+                      mesh.vector_S_f[single_boundary_mask, 1] * vector_scale,
                       angles="xy", scale_units="xy", scale=1, color=colors[0],
-                      width=0.002, alpha=0.7)
+                      width=0.002, alpha=1.0)
 
-            # Annotate vector_E_f
-            for i in range(fc_boundary.shape[0]):
-                E_vec = mesh.vector_E_f[single_boundary_mask][i] * vector_scale
-                mid = fc_boundary[i] + 0.5 * E_vec
-                T_vec = mesh.vector_T_f[single_boundary_mask][i]
-                T_hat = T_vec / (np.linalg.norm(T_vec) + 1e-12)
-                label_pos = mid - T_hat/(np.linalg.norm(T_hat) + 1e-12) * 0.35
-                ax_bnd.annotate(r"$\vec{E}_f$", xy=fc_boundary[i], xytext=(label_pos[0], label_pos[1]),
-                            fontsize=9, color=colors[0])
-
-            # 4. vector_T_f (Boundary, scaled, at tf_origin_boundary)
-            tf_origin_boundary = fc_boundary + mesh.vector_E_f[single_boundary_mask] * vector_scale
-            ax_bnd.quiver(tf_origin_boundary[:, 0], tf_origin_boundary[:, 1],
-                      mesh.vector_T_f[single_boundary_mask, 0] * vector_scale,
-                      mesh.vector_T_f[single_boundary_mask, 1] * vector_scale,
-                      angles="xy", scale_units="xy", scale=1, color=colors[0],
-                      width=0.002, alpha=0.7)
-
-            # Annotate vector_T_f
-            for i in range(fc_boundary.shape[0]):
-                T_vec = mesh.vector_T_f[single_boundary_mask][i] * vector_scale
-                O_T = tf_origin_boundary[i]
-                mid_T = O_T + 0.5 * T_vec
-                dir_T = T_vec / (np.linalg.norm(T_vec) + 1e-12)
-                label_pos = mid_T + dir_T * 0.45
-                ax_bnd.annotate(r"$\vec{T}_f$", xy=O_T, xytext=(label_pos[0], label_pos[1]),
-                            fontsize=9, color=colors[0])
-
-            # Add df'f vector plotting at the end
-            # vector_skewness (Boundary)
-            ax_bnd.quiver(fc_boundary[:, 0] - mesh.vector_skewness[single_boundary_mask, 0],
-                      fc_boundary[:, 1] - mesh.vector_skewness[single_boundary_mask, 1],
-                      mesh.vector_skewness[single_boundary_mask, 0],
-                      mesh.vector_skewness[single_boundary_mask, 1],
-                      angles="xy", scale_units="xy", scale=1, color=colors[0],
-                      width=0.002, alpha=0.7)
-
-            # Annotate vector_skewness
-            for i in range(fc_boundary.shape[0]):
-                v = mesh.vector_skewness[single_boundary_mask][i]
-                base = fc_boundary[i] - v
-                mid = base + 0.5 * v
-                n_hat = mesh.unit_vector_n[single_boundary_mask][i]
-                label_pos = mid - n_hat * vector_scale * 1.2
-                ax_bnd.annotate(r"$\vec{d}_{f'f}$", xy=fc_boundary[i], xytext=(label_pos[0], label_pos[1]),
-                            fontsize=8, color=colors[0])
-        else:
-            # For structured grids, only annotate S_f
+            # Annotate boundary vector_S_f
             for i in range(fc_boundary.shape[0]):
                 S_vec = mesh.vector_S_f[single_boundary_mask][i] * vector_scale
-                mid_S = fc_boundary[i] + 0.5 * S_vec
-                label_pos_S = mid_S + np.array([0.2, 0.2])  # Simple offset for structured grid
-                ax_bnd.annotate(r"$\vec{S}_f$", xy=fc_boundary[i], xytext=label_pos_S,
-                            fontsize=9, color=colors[0])
+                T_vec =  mesh.vector_T_f[single_boundary_mask][i] * vector_scale
+                O_S = fc_boundary[i]
+                O_T = O_S + mesh.vector_E_f[single_boundary_mask][i] * vector_scale
+                mid_S = O_S + 0.5 * S_vec
+                mid_T = O_T + 0.5 * T_vec
+                triangle_center = O_S + 0.5 * (mid_T - O_S)
+                label_pos_S = mid_S + T_vec / (np.linalg.norm(T_vec) + 1e-12) * 0.6  # Increased from 0.3
+                ax_bnd.annotate(r"$\vec{S}_f$", xy=O_S, xytext=label_pos_S,
+                            fontsize=11, color=colors[0])
 
-        plt.tight_layout()
-        bnd_path = f"tests/test_output/mesh_test/mesh_boundary_face_{mesh_label}.pdf"
-        plt.savefig(bnd_path, dpi=300)
-        plt.close()
-        assert os.path.exists(bnd_path), f"Failed to create {bnd_path}"
+            # 2. Vector from Owner Cell Center to Boundary Face Center (P->f)
+            vec_Pf_boundary = fc_boundary - cc_owner_boundary
+            ax_bnd.quiver(cc_owner_boundary[:, 0], cc_owner_boundary[:, 1],
+                      vec_Pf_boundary[:, 0],
+                      vec_Pf_boundary[:, 1],
+                      angles="xy", scale_units="xy", scale=1, color=colors[0],
+                      width=0.002, alpha=0.2)
+
+            # Annotate boundary d_Pf
+            for i in range(cc_owner_boundary.shape[0]):
+                Pf_orth = np.array([-vec_Pf_boundary[i][1], vec_Pf_boundary[i][0]])
+                Pf_mid = cc_owner_boundary[i] + vec_Pf_boundary[i] * 0.5
+                Pf_tip = Pf_mid + Pf_orth * 0.4  # Increased from 0.3
+                ax_bnd.annotate(r"$\vec{d}_{Pf}$", xy=cc_owner_boundary[i],
+                        xytext=(Pf_tip[0] + 0.05, Pf_tip[1] + 0.05),  # Increased from 0.03
+                        fontsize=11, color=colors[0])
+
+            # Only plot Tf, Ef, and df'f if Tf magnitude is not too small (for unstructured grids)
+            Tf_magnitude = np.linalg.norm(mesh.vector_T_f[single_boundary_mask][0])
+            if Tf_magnitude > 1e-10:  # Only plot for unstructured grids
+                # 3. vector_E_f (Boundary, scaled, at face centers)
+                ax_bnd.quiver(fc_boundary[:, 0], fc_boundary[:, 1],
+                          mesh.vector_E_f[single_boundary_mask, 0] * vector_scale,
+                          mesh.vector_E_f[single_boundary_mask, 1] * vector_scale,
+                          angles="xy", scale_units="xy", scale=1, color=colors[0],
+                          width=0.002, alpha=1.0)
+
+                # Annotate vector_E_f
+                for i in range(fc_boundary.shape[0]):
+                    E_vec = mesh.vector_E_f[single_boundary_mask][i] * vector_scale
+                    mid = fc_boundary[i] + 0.5 * E_vec
+                    T_vec = mesh.vector_T_f[single_boundary_mask][i]
+                    T_hat = T_vec / (np.linalg.norm(T_vec) + 1e-12)
+                    label_pos = mid - T_hat/(np.linalg.norm(T_hat) + 1e-12) * 0.6  # Increased from 0.3
+                    ax_bnd.annotate(r"$\vec{E}_f$", xy=fc_boundary[i], xytext=(label_pos[0], label_pos[1]),
+                                fontsize=11, color=colors[0])
+
+                # 4. vector_T_f (Boundary, scaled, at tf_origin_boundary)
+                tf_origin_boundary = fc_boundary + mesh.vector_E_f[single_boundary_mask] * vector_scale
+                ax_bnd.quiver(tf_origin_boundary[:, 0], tf_origin_boundary[:, 1],
+                          mesh.vector_T_f[single_boundary_mask, 0] * vector_scale,
+                          mesh.vector_T_f[single_boundary_mask, 1] * vector_scale,
+                          angles="xy", scale_units="xy", scale=1, color=colors[0],
+                          width=0.002, alpha=1.0)
+
+                # Annotate vector_T_f
+                for i in range(fc_boundary.shape[0]):
+                    T_vec = mesh.vector_T_f[single_boundary_mask][i] * vector_scale
+                    O_T = tf_origin_boundary[i]
+                    mid_T = O_T + 0.5 * T_vec
+                    dir_T = T_vec / (np.linalg.norm(T_vec) + 1e-12)
+                    label_pos = mid_T + dir_T * 0.7
+                    ax_bnd.annotate(r"$\vec{T}_f$", xy=O_T, xytext=(label_pos[0], label_pos[1]),
+                                fontsize=11, color=colors[0])
+            else:
+                # For structured grids, only annotate S_f
+                for i in range(fc_boundary.shape[0]):
+                    S_vec = mesh.vector_S_f[single_boundary_mask][i] * vector_scale
+                    mid_S = fc_boundary[i] + 0.5 * S_vec
+                    # Place Sf annotation in a different direction than n
+                    n_vec = mesh.unit_vector_n[single_boundary_mask][i] * vector_scale * 2
+                    label_pos_S = mid_S + np.array([0.4, 0.4])  # Increased offset and moved diagonally
+                    ax_bnd.annotate(r"$\vec{S}_f$", xy=fc_boundary[i], xytext=label_pos_S,
+                                fontsize=11, color=colors[0])
+
+            plt.tight_layout()
+            bnd_path = f"tests/test_output/mesh_test/{rank_name}_Tf/mesh_boundary_face_{mesh_label}.pdf"
+            plt.savefig(bnd_path, dpi=300)
+            plt.close()
+            assert os.path.exists(bnd_path), f"Failed to create {bnd_path}"
 
 
 # --- Comprehensive mesh data completeness check ---

@@ -9,24 +9,102 @@ import tempfile
 import shutil
 from utils.plot_style import plt
 from scipy.interpolate import griddata
+from scipy.spatial import cKDTree
+import re
+import matplotlib.patches as mpatches
 
 
 # ----------------------------
 # Plotting Helpers
 # ----------------------------
-def save_pdf(fig, path):
+def save_pdf(fig, path, also_save_in_plots=False):
+    # Create plots directory if it doesn't exist
+    plots_dir = os.path.join(os.path.dirname(path), "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+    # Save the combined plot
     with PdfPages(path) as pdf:
         pdf.savefig(fig)
-    plt.close(fig)
     print(f"Saved: {path}")
+    # Optionally also save in plots directory
+    if also_save_in_plots:
+        plots_path = os.path.join(plots_dir, os.path.basename(path))
+        with PdfPages(plots_path) as pdf:
+            pdf.savefig(fig)
+        print(f"Saved: {plots_path}")
+    plt.close(fig)
+
+def get_obstacle_mask_from_msh(x, y, experiment):
+    """
+    Use the original mesh tagging from the .msh file to assign obstacle tags to solution cells.
+    For 'cylinderFlow', use a geometric mask based on known center and radius.
+    Returns a boolean mask where True means obstacle cell (physical tag 5 or inside obstacle geometry).
+    """
+    if experiment == "cylinderFlow":
+        # Cylinder center and radius from mesh generation
+        center = np.array([0.2, 0.2])
+        radius = 0.05
+        dist = np.sqrt((x - center[0])**2 + (y - center[1])**2)
+        mask = dist < radius
+        return mask
+    # Fallback to original .msh-based logic for other experiments
+    msh_file = os.path.join("meshing", "experiments", experiment, "unstructured", "medium", f"{experiment}_unstructured_medium.msh")
+    try:
+        with open(msh_file, 'r') as f:
+            lines = f.readlines()
+        # Parse $Nodes section
+        node_section = lines.index('$Nodes\n')
+        n_nodes = int(lines[node_section+1])
+        node_lines = lines[node_section+2:node_section+2+n_nodes]
+        node_coords = {}
+        for line in node_lines:
+            parts = line.strip().split()
+            idx = int(parts[0])
+            coord = tuple(map(float, parts[1:4]))
+            node_coords[idx] = coord
+        # Parse $Elements section
+        elem_section = lines.index('$Elements\n')
+        n_elems = int(lines[elem_section+1])
+        elem_lines = lines[elem_section+2:elem_section+2+n_elems]
+        centroids = []
+        tags = []
+        for line in elem_lines:
+            parts = line.strip().split()
+            elem_type = int(parts[1])
+            if elem_type == 2:  # triangle (2D cell)
+                num_tags = int(parts[2])
+                physical_tag = int(parts[3])
+                # Node indices are at the end
+                node_ids = list(map(int, parts[3+num_tags:]))
+                coords = [node_coords[nid] for nid in node_ids]
+                centroid = tuple(np.mean(coords, axis=0))
+                centroids.append(centroid)
+                tags.append(physical_tag)
+        centroids = np.array(centroids)
+        tags = np.array(tags)
+        # Only use x, y for centroid matching
+        centroids_2d = centroids[:, :2]
+        # Build KDTree for triangle centroids
+        tree = cKDTree(centroids_2d)
+        sol_xy = np.column_stack((x, y))
+        _, idx = tree.query(sol_xy)
+        tags_for_solution = tags[idx]
+        return tags_for_solution == 5
+    except Exception as e:
+        print(f"Warning: Could not robustly detect obstacle cells from .msh: {e}")
+        return np.zeros_like(x, dtype=bool)
 
 def plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, output_path, sim_id=None):
     fig = plt.figure(figsize=(15, 10))
     gs = plt.GridSpec(2, 2)
     
+    # Robust obstacle mask from .msh
+    obstacle_mask = get_obstacle_mask_from_msh(x, y, experiment)
+    
     # U-velocity
     ax1 = fig.add_subplot(gs[0, 0])
     cf1 = ax1.tricontourf(x, y, U[:, 0], levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        ax1.tricontourf(x[obstacle_mask], y[obstacle_mask], U[obstacle_mask, 0], levels=1, colors='gray', alpha=0.5)
     fig.colorbar(cf1, ax=ax1)
     ax1.set_title("U-velocity")
     ax1.set_aspect("equal", "box")
@@ -34,6 +112,8 @@ def plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, 
     # V-velocity
     ax2 = fig.add_subplot(gs[0, 1])
     cf2 = ax2.tricontourf(x, y, U[:, 1], levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        ax2.tricontourf(x[obstacle_mask], y[obstacle_mask], U[obstacle_mask, 1], levels=1, colors='gray', alpha=0.5)
     fig.colorbar(cf2, ax=ax2)
     ax2.set_title("V-velocity")
     ax2.set_aspect("equal", "box")
@@ -41,6 +121,8 @@ def plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, 
     # Velocity Magnitude
     ax3 = fig.add_subplot(gs[1, 0])
     cf3 = ax3.tricontourf(x, y, velocity_magnitude, levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        ax3.tricontourf(x[obstacle_mask], y[obstacle_mask], velocity_magnitude[obstacle_mask], levels=1, colors='gray', alpha=0.5)
     fig.colorbar(cf3, ax=ax3)
     ax3.set_title("Velocity Magnitude")
     ax3.set_aspect("equal", "box")
@@ -48,6 +130,8 @@ def plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, 
     # Pressure
     ax4 = fig.add_subplot(gs[1, 1])
     cf4 = ax4.tricontourf(x, y, p, levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        ax4.tricontourf(x[obstacle_mask], y[obstacle_mask], p[obstacle_mask], levels=1, colors='gray', alpha=0.5)
     fig.colorbar(cf4, ax=ax4)
     ax4.set_title("Pressure")
     ax4.set_aspect("equal", "box")
@@ -58,34 +142,29 @@ def plot_fields(x, y, U, velocity_magnitude, p, scheme, mesh_type, Re, n_cells, 
     save_pdf(fig, output_path)
 
 def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_path=None, experiment=None, Re=None):
-    fig, axes = plt.subplots(1, 4, figsize=(24, 5))
-    titles = ["u-velocity", "v-velocity", "Velocity Magnitude", "Pressure + Streamlines"]
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    titles = ["Velocity Magnitude", "Pressure", "Streamlines"]
 
-    # 1. u-velocity
-    cf1 = axes[0].tricontourf(x, y, U[:, 0], levels=50, cmap='coolwarm')
-    fig.colorbar(cf1, ax=axes[0])
+    # Robust obstacle mask from .msh
+    obstacle_mask = get_obstacle_mask_from_msh(x, y, experiment)
+
+    # 1. velocity magnitude
+    cf1 = axes[0].tricontourf(x, y, velocity_magnitude, levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        axes[0].tricontourf(x[obstacle_mask], y[obstacle_mask], velocity_magnitude[obstacle_mask], levels=1, colors='gray', alpha=0.5)
+    fig.colorbar(cf1, ax=axes[0], orientation='horizontal', pad=0.1)
     axes[0].set_title(titles[0])
     axes[0].set_aspect('equal', 'box')
 
-    # 2. v-velocity
-    cf2 = axes[1].tricontourf(x, y, U[:, 1], levels=50, cmap='coolwarm')
-    fig.colorbar(cf2, ax=axes[1])
+    # 2. pressure
+    cf2 = axes[1].tricontourf(x, y, p, levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        axes[1].tricontourf(x[obstacle_mask], y[obstacle_mask], p[obstacle_mask], levels=1, colors='gray', alpha=0.5)
+    fig.colorbar(cf2, ax=axes[1], orientation='horizontal', pad=0.1)
     axes[1].set_title(titles[1])
     axes[1].set_aspect('equal', 'box')
 
-    # 3. velocity magnitude
-    cf3 = axes[2].tricontourf(x, y, velocity_magnitude, levels=50, cmap='coolwarm')
-    fig.colorbar(cf3, ax=axes[2])
-    axes[2].set_title(titles[2])
-    axes[2].set_aspect('equal', 'box')
-
-    # 4. pressure with streamlines
-    cf4 = axes[3].tricontourf(x, y, p, levels=50, cmap='coolwarm')
-    fig.colorbar(cf4, ax=axes[3])
-    axes[3].set_title(titles[3])
-    axes[3].set_aspect('equal', 'box')
-
-    # Streamlines overlay
+    # 3. streamlines only
     try:
         n_grid = 100
         xi = np.linspace(np.min(x), np.max(x), n_grid)
@@ -93,9 +172,34 @@ def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_p
         Xg, Yg = np.meshgrid(xi, yi)
         Ug = griddata((x, y), U[:, 0], (Xg, Yg), method='linear')
         Vg = griddata((x, y), U[:, 1], (Xg, Yg), method='linear')
-        axes[3].streamplot(xi, yi, Ug, Vg, color='gray', density=1.2, linewidth=0.5)
+        # Mask obstacle region in streamline generation
+        if experiment == "cylinderFlow":
+            center = np.array([0.2, 0.2])
+            radius = 0.05
+            dist = np.sqrt((Xg - center[0])**2 + (Yg - center[1])**2)
+            mask = dist < radius
+            Ug[mask] = np.nan
+            Vg[mask] = np.nan
+        axes[2].streamplot(xi, yi, Ug, Vg, color='tab:blue', density=4.0, linewidth=0.2, arrowsize=0.2)
     except Exception as e:
         print(f"Streamline plotting failed: {e}")
+    axes[2].set_title(titles[2])
+    axes[2].set_aspect('equal', 'box')
+
+    # Ensure all subplots have the same x and y limits
+    xlim = (np.min(x), np.max(x))
+    ylim = (np.min(y), np.max(y))
+    for ax in axes:
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+
+    # Overlay and fill obstacle boundary for cylinderFlow
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        for ax in axes:
+            circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+            ax.add_patch(circle)
 
     # Add experiment name and Reynolds number to suptitle
     suptitle = "Flow Fields"
@@ -109,7 +213,7 @@ def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_p
     if sim_id is not None:
         fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
     if output_path:
-        save_pdf(fig, output_path)
+        save_pdf(fig, output_path, also_save_in_plots=True)
     else:
         plt.show()
 
@@ -119,17 +223,18 @@ def plot_residuals(res, output_path, sim_id=None):
     ax.semilogy(res["u"], label="u-momentum", color='tab:blue', linewidth=2)
     ax.semilogy(res["v"], label="v-momentum", color='tab:orange', linewidth=2)
     ax.semilogy(res["cont"], label="continuity", color='tab:green', linewidth=2)
-    ax.set_title("Residual History", fontsize=16)
+    title = "Residual History"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title, fontsize=16)
     ax.set_xlabel("Iteration", fontsize=14)
     ax.set_ylabel("Residual", fontsize=14)
     ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
     ax.legend(fontsize=12, loc='upper right', frameon=True)
     ax.tick_params(axis='both', which='major', labelsize=12)
     ax.tick_params(axis='both', which='minor', labelsize=10)
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-    if sim_id is not None:
-        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
-    save_pdf(fig, output_path)
+    fig.tight_layout(pad=0.1)
+    save_pdf(fig, output_path, also_save_in_plots=True)
 
 def plot_residual_fields(x, y, u_res, v_res, cont_res, output_path, sim_id=None, experiment=None, Re=None):
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -138,21 +243,29 @@ def plot_residual_fields(x, y, u_res, v_res, cont_res, output_path, sim_id=None,
 
     # 1. U residual
     cf1 = axes[0].tricontourf(x, y, np.abs(u_res), levels=50, cmap=colormap)
-    fig.colorbar(cf1, ax=axes[0])
+    fig.colorbar(cf1, ax=axes[0], orientation='horizontal', pad=0.1)
     axes[0].set_title(titles[0])
     axes[0].set_aspect('equal', 'box')
 
     # 2. V residual
     cf2 = axes[1].tricontourf(x, y, np.abs(v_res), levels=50, cmap=colormap)
-    fig.colorbar(cf2, ax=axes[1])
+    fig.colorbar(cf2, ax=axes[1], orientation='horizontal', pad=0.1)
     axes[1].set_title(titles[1])
     axes[1].set_aspect('equal', 'box')
 
     # 3. Continuity residual
     cf3 = axes[2].tricontourf(x, y, np.abs(cont_res), levels=50, cmap=colormap)
-    fig.colorbar(cf3, ax=axes[2])
+    fig.colorbar(cf3, ax=axes[2], orientation='horizontal', pad=0.1)
     axes[2].set_title(titles[2])
     axes[2].set_aspect('equal', 'box')
+
+    # Overlay and fill obstacle boundary for cylinderFlow
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        for ax in axes:
+            circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+            ax.add_patch(circle)
 
     suptitle = "Residual Fields"
     if experiment is not None:
@@ -163,7 +276,7 @@ def plot_residual_fields(x, y, u_res, v_res, cont_res, output_path, sim_id=None,
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     if sim_id is not None:
         fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
-    save_pdf(fig, output_path)
+    save_pdf(fig, output_path, also_save_in_plots=True)
 
 def ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, output_path, sim_id=None):
     if Re != 100:
@@ -399,6 +512,208 @@ def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
     print(f"Linf Error: {linf_error:.2e}")
     print(f"Pressure Gradient Error: {p_grad_error:.2f}%")
 
+def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None):
+    """Create a standalone streamlines plot."""
+    fig = plt.figure(figsize=(8, 6))
+    ax = fig.add_subplot(111)
+    
+    # Create grid for streamlines
+    n_grid = 100
+    xi = np.linspace(np.min(x), np.max(x), n_grid)
+    yi = np.linspace(np.min(y), np.max(y), n_grid)
+    Xg, Yg = np.meshgrid(xi, yi)
+    Ug = griddata((x, y), U[:, 0], (Xg, Yg), method='linear')
+    Vg = griddata((x, y), U[:, 1], (Xg, Yg), method='linear')
+    
+    # Mask obstacle region in streamline generation for cylinderFlow
+    if experiment == "cylinderFlow":
+        center = np.array([0.2, 0.2])
+        radius = 0.05
+        dist = np.sqrt((Xg - center[0])**2 + (Yg - center[1])**2)
+        mask = dist < radius
+        Ug[mask] = np.nan
+        Vg[mask] = np.nan
+        
+        # Add cylinder
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+    
+    # Plot streamlines
+    ax.streamplot(xi, yi, Ug, Vg, color='tab:blue', density=4.0, linewidth=0.2, arrowsize=0.2)
+    
+    # Set title and labels
+    title = "Streamlines"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_aspect('equal', 'box')
+    
+    fig.tight_layout(pad=0.1)
+    save_pdf(fig, output_path)
+
+def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, sim_id, results_dir):
+    plots_dir = os.path.join(results_dir, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+    obstacle_mask = get_obstacle_mask_from_msh(x, y, experiment)
+
+    # u-velocity
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cf = ax.tricontourf(x, y, U[:, 0], levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], U[obstacle_mask, 0], levels=1, colors='gray', alpha=0.5)
+    cbar = plt.colorbar(cf, ax=ax, orientation='horizontal', pad=0.1)
+    title = "u-velocity"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title)
+    ax.set_aspect('equal', 'box')
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+    fig.tight_layout(pad=0.1)
+    plt.savefig(os.path.join(plots_dir, "u_velocity.pdf"))
+    plt.close(fig)
+
+    # v-velocity
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cf = ax.tricontourf(x, y, U[:, 1], levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], U[obstacle_mask, 1], levels=1, colors='gray', alpha=0.5)
+    cbar = plt.colorbar(cf, ax=ax, orientation='horizontal', pad=0.1)
+    title = "v-velocity"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title)
+    ax.set_aspect('equal', 'box')
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+    fig.tight_layout(pad=0.1)
+    plt.savefig(os.path.join(plots_dir, "v_velocity.pdf"))
+    plt.close(fig)
+
+    # velocity magnitude
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cf = ax.tricontourf(x, y, velocity_magnitude, levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], velocity_magnitude[obstacle_mask], levels=1, colors='gray', alpha=0.5)
+    cbar = plt.colorbar(cf, ax=ax, orientation='horizontal', pad=0.1)
+    title = "Velocity Magnitude"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title)
+    ax.set_aspect('equal', 'box')
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+    fig.tight_layout(pad=0.1)
+    plt.savefig(os.path.join(plots_dir, "velocity_magnitude.pdf"))
+    plt.close(fig)
+
+    # pressure
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cf = ax.tricontourf(x, y, p, levels=50, cmap='coolwarm')
+    if np.any(obstacle_mask):
+        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], p[obstacle_mask], levels=1, colors='gray', alpha=0.5)
+    cbar = plt.colorbar(cf, ax=ax, orientation='horizontal', pad=0.1)
+    title = "Pressure"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title)
+    ax.set_aspect('equal', 'box')
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+    fig.tight_layout(pad=0.1)
+    plt.savefig(os.path.join(plots_dir, "pressure.pdf"))
+    plt.close(fig)
+
+    # streamlines only
+    plot_streamlines(x, y, U, os.path.join(plots_dir, "streamlines.pdf"), experiment=experiment, Re=Re, sim_id=sim_id)
+
+    # Overlay obstacle mask on all individual plots for cylinderFlow
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        for ax in [fig.axes[0] for fig in plt.get_fignums()]:
+            circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+            ax.add_patch(circle)
+
+def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re, sim_id, results_dir):
+    plots_dir = os.path.join(results_dir, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+    obstacle_mask = get_obstacle_mask_from_msh(x, y, experiment)
+
+    # U residual
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cf = ax.tricontourf(x, y, np.abs(u_res), levels=50, cmap='viridis')
+    if np.any(obstacle_mask):
+        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], np.abs(u_res[obstacle_mask]), levels=1, colors='gray', alpha=0.5)
+    cbar = plt.colorbar(cf, ax=ax, orientation='horizontal', pad=0.1)
+    title = "U Residual"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title)
+    ax.set_aspect('equal', 'box')
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+    fig.tight_layout(pad=0.1)
+    plt.savefig(os.path.join(plots_dir, "u_residual.pdf"))
+    plt.close(fig)
+
+    # V residual
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cf = ax.tricontourf(x, y, np.abs(v_res), levels=50, cmap='viridis')
+    if np.any(obstacle_mask):
+        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], np.abs(v_res[obstacle_mask]), levels=1, colors='gray', alpha=0.5)
+    cbar = plt.colorbar(cf, ax=ax, orientation='horizontal', pad=0.1)
+    title = "V Residual"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title)
+    ax.set_aspect('equal', 'box')
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+    fig.tight_layout(pad=0.1)
+    plt.savefig(os.path.join(plots_dir, "v_residual.pdf"))
+    plt.close(fig)
+
+    # Continuity residual
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cf = ax.tricontourf(x, y, np.abs(cont_res), levels=50, cmap='viridis')
+    if np.any(obstacle_mask):
+        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], np.abs(cont_res[obstacle_mask]), levels=1, colors='gray', alpha=0.5)
+    cbar = plt.colorbar(cf, ax=ax, orientation='horizontal', pad=0.1)
+    title = "Continuity Residual"
+    if sim_id is not None:
+        title += f" | Simulation ID: {sim_id}"
+    ax.set_title(title)
+    ax.set_aspect('equal', 'box')
+    if experiment == "cylinderFlow":
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+    fig.tight_layout(pad=0.1)
+    plt.savefig(os.path.join(plots_dir, "continuity_residual.pdf"))
+    plt.close(fig)
+
 # ----------------------------
 # Main Entrypoint
 # ----------------------------
@@ -411,6 +726,8 @@ if __name__ == "__main__":
     experiment = args.experiment
     experiment_path = os.path.join("experiments", experiment)
     results_dir = os.path.join(experiment_path, "results")
+    plots_dir = os.path.join(results_dir, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
 
     U = np.load(os.path.join(results_dir, "U_final.npy"))
     p = np.load(os.path.join(results_dir, "p_final.npy"))
@@ -434,13 +751,19 @@ if __name__ == "__main__":
     print(sim_id)
 
     if args.all:
+        # Flow fields (combined)
         plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=sim_id, output_path=out("flow_fields"), experiment=experiment, Re=Re)
+        # Individual field plots
+        save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, sim_id, results_dir)
+        
+        # Residuals (combined and individual)
         plot_residuals(res, out("residual_history"), sim_id=sim_id)
 
         u_res = np.load(os.path.join(results_dir, "u_residual.npy"))
         v_res = np.load(os.path.join(results_dir, "v_residual.npy"))
         cont_res = np.load(os.path.join(results_dir, "continuity_field.npy"))
         plot_residual_fields(x, y, u_res, v_res, cont_res, out("residual_fields"), sim_id=sim_id, experiment=experiment, Re=Re)
+        save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re, sim_id, results_dir)
 
         # Ghia plot: check config, not just directory name
         if config.get('experiment', None) == 'lidDrivenCavity':
