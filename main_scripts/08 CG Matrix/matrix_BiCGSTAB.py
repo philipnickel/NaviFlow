@@ -14,14 +14,14 @@ import sys
 # Add the parent directory to the path if needed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
-from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.solver.Algorithms.simple import SimpleSolver
-from naviflow_oo.solver.pressure_solver.matrix_BiCGSTAB import BiCGSTABSolver
-from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
-from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
-from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_staggered.preprocessing.mesh.structured import StructuredMesh
+from naviflow_staggered.constructor.properties.fluid import FluidProperties
+from naviflow_staggered.solver.Algorithms.simple import SimpleSolver
+from naviflow_staggered.solver.pressure_solver.matrix_BiCGSTAB import BiCGSTABSolver
+from naviflow_staggered.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
+from naviflow_staggered.solver.velocity_solver.standard import StandardVelocityUpdater
+from naviflow_staggered.solver.momentum_solver.AMG_solver import AMGMomentumSolver
+from naviflow_staggered.postprocessing.visualization import plot_final_residuals
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)
@@ -32,7 +32,7 @@ start_time = time.time()
 # 1. Set up simulation parameters
 nx, ny = 2**6-1, 2**6-1           # Grid size (smaller for quick testing)
 reynolds = 100            # Reynolds number
-alpha_p = 0.1            # Even more conservative pressure relaxation
+alpha_p = 0.2            # Even more conservative pressure relaxation
 alpha_u = 0.8             # Even more conservative velocity relaxation
 max_iterations = 1000    
 tolerance = 1e-3          # Convergence tolerance

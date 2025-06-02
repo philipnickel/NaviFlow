@@ -14,13 +14,13 @@ import sys
 # Add the parent directory to the path if needed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
-from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.solver.Algorithms.piso import PisoSolver
-from naviflow_oo.solver.pressure_solver.preconditioned_cg_solver import PreconditionedCGSolver
-from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
-from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_staggered.preprocessing.mesh.structured import StructuredMesh
+from naviflow_staggered.constructor.properties.fluid import FluidProperties
+from naviflow_staggered.solver.Algorithms.piso import PisoSolver
+from naviflow_staggered.solver.pressure_solver.preconditioned_cg_solver import PreconditionedCGSolver
+from naviflow_staggered.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
+from naviflow_staggered.solver.velocity_solver.standard import StandardVelocityUpdater
+from naviflow_staggered.postprocessing.visualization import plot_final_residuals
 # Create results directory
 results_dir = os.path.join(os.path.dirname(__file__), 'results')
 os.makedirs(results_dir, exist_ok=True)

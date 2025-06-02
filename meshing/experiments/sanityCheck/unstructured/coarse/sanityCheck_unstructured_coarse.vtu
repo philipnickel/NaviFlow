@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<VTKFile type="UnstructuredGrid" version="0.1" byte_order="LittleEndian" compressor="vtkZLibDataCompressor">
+<!--This file was created by meshio v5.3.5-->
+<UnstructuredGrid>
+<Piece NumberOfPoints="11" NumberOfCells="20">
+<Points>
+<DataArray type="Float64" Name="Points" NumberOfComponents="3" format="binary">
+AQAAAACAAAAIAQAASAAAAA==eJxjYMAHTBzwixOSZ2B4+x8ElHGqQ5cXBJMqOM1HlYeZL+wgDOaJwMV/gcU1HL6BaVm4+A+b859tzos7XP0MYmjCxQH9NCxJ
+</DataArray>
+</Points>
+<Cells>
+<DataArray type="Int32" Name="connectivity" format="binary">
+AQAAAACAAADQAAAAQwAAAA==eJxNzoEKwCAIAFFbrpX//8EjeEHCoZ4iRkQkGl48GOj4EPyyv+vSNznNjut2hhvF7Zhcqo+ryy9u8dOt8+8PZ9wBGw==
+</DataArray>
+<DataArray type="Int32" Name="offsets" format="binary">
+AQAAAACAAABQAAAANAAAAA==eJwNw4EGgDAUAMAnmUlmjBERMSIi+v9v646bImI2mV1cLVab3c3dw9Ph5e3j6+cPNiAB8w==
+</DataArray>
+<DataArray type="Int64" Name="types" format="binary">
+AQAAAACAAACgAAAAEQAAAA==eJxjZoAAZjJpVhrTABkwAFU=
+</DataArray>
+</Cells>
+<CellData>
+<DataArray type="Int32" Name="gmsh:physical" format="binary">
+AQAAAACAAABQAAAAGQAAAA==eJxjZGBgYARiJihmhmIWKOYiEQMAEVgAjQ==
+</DataArray>
+<DataArray type="Int32" Name="gmsh:geometrical" format="binary">
+AQAAAACAAABQAAAAGQAAAA==eJxjZGBgYARiJihmhmIWKGYkEQMABmAAIQ==
+</DataArray>
+</CellData>
+</Piece>
+</UnstructuredGrid>
+</VTKFile>

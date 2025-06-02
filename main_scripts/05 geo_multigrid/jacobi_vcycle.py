@@ -7,16 +7,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import os
-from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
-from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
-from naviflow_oo.preprocessing.fields.vector_field import VectorField
-from naviflow_oo.solver.Algorithms.simple import SimpleSolver
-from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
-from naviflow_oo.solver.pressure_solver.jacobi import JacobiSolver
-from naviflow_oo.solver.momentum_solver.power_law import PowerLawMomentumSolver
-from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_staggered.preprocessing.mesh.structured import StructuredMesh
+from naviflow_staggered.constructor.properties.fluid import FluidProperties
+from naviflow_staggered.preprocessing.fields.scalar_field import ScalarField
+from naviflow_staggered.preprocessing.fields.vector_field import VectorField
+from naviflow_staggered.solver.Algorithms.simple import SimpleSolver
+from naviflow_staggered.solver.pressure_solver.multigrid import MultiGridSolver
+from naviflow_staggered.solver.pressure_solver.jacobi import JacobiSolver
+from naviflow_staggered.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
+from naviflow_staggered.solver.velocity_solver.standard import StandardVelocityUpdater
+from naviflow_staggered.postprocessing.visualization import plot_final_residuals
 
 # Start timing
 start_time = time.time()
@@ -64,7 +64,7 @@ multigrid_solver = MultiGridSolver(
     restriction_method='restrict_inject',
     interpolation_method='interpolate_cubic'
 )
-momentum_solver = PowerLawMomentumSolver()
+momentum_solver = JacobiMomentumSolver()
 velocity_updater = StandardVelocityUpdater()
 
 # 5. Create algorithm

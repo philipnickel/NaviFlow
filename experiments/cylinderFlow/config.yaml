@@ -1,0 +1,43 @@
+name: "cylinderFlow"
+description: "Flow past a circular cylinder simulation"
+tags: ["cylinderFlow"]
+
+domain:
+  # Using the coarse structured mesh 
+  mesh: [unstructured, fine]
+  boundary_conditions: "shared_configs/domain/boundaries_object_flow.yaml"
+
+physical_properties:
+  rho: 1.0         # Density
+  reynolds_number: 20 # may be overwritten by command line arguments
+  characteristic_length: 0.1  # Cylinder diameter
+  characteristic_velocity: 0.2 # Free stream velocity
+
+# Solver algorithm configuration
+algorithm:
+  type: "SIMPLE"
+  #piso_iterations: 2
+  relaxation_factors:
+    velocity: 0.5 # may be overwritten by command line arguments
+    pressure: 0.3 # may be overwritten by command line arguments
+  max_iterations: 10000 # may be overwritten by command line arguments
+  convergence_criteria:
+    residual: 1e-4
+  convection_discretization: "TVD" 
+  limiter: MUSCL 
+
+# Linear solver settings (from PETSc)
+linear_solvers:
+  momentum:
+    type: "bcgs"  
+    preconditioner: "hypre"
+    tolerance: 1e-8
+    max_iterations: 100000
+  pressure:
+    type: "bcgs"  
+    preconditioner: "hypre"
+    tolerance: 1e-10
+    max_iterations: 100000
+
+# HPC stuff
+numba_cores: default # may be overwritten by command line arguments 

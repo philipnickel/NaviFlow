@@ -1,0 +1,12 @@
+# Example simulation configuration
+solver_settings:
+  scheme: SIMPLE
+  max_iterations: 1000
+  tolerance: 1e-6
+
+domain:
+  mesh_file: "path/to/mesh.msh"
+
+output:
+  save_frequency: 100
+  output_dir: "results/" 

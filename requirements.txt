@@ -1,0 +1,11 @@
+# Core dependencies
+numpy
+scipy
+petsc4py
+numba
+# Testing
+pytest
+# IO
+pyyaml
+meshio # Or another mesh library
+# Optional: Add specific versions like numpy>=1.20 

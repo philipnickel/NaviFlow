@@ -1,0 +1,38 @@
+boundaries:
+  top:
+    velocity:
+      bc: wall
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  bottom:
+    velocity:
+      bc: wall
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+  left:                      # inlet
+    velocity: {bc: inlet, value: ["4.0* 0.3 * x[1]*(0.41-x[1])/(0.41*0.41)", "0.0"]}
+    pressure: {bc: neumann, gradient: 0.0}
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  right:                     # outlet
+    velocity:
+      bc: outlet
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  object:                    # cylinder surface
+    velocity:
+      bc: wall
+      value: [0.0, 0.0]      # no‑slip
+    pressure:
+      bc: neumann
+      gradient: 0.0

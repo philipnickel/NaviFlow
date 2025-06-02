@@ -7,21 +7,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import os
-from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
-from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.preprocessing.fields.scalar_field import ScalarField
-from naviflow_oo.preprocessing.fields.vector_field import VectorField
-from naviflow_oo.solver.Algorithms.simple import SimpleSolver
-from naviflow_oo.solver.pressure_solver.multigrid import MultiGridSolver
-from naviflow_oo.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
-from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
-from naviflow_oo.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrixMomentumSolver
-from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
-from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.solver.momentum_solver.matrix_free_momentum_PETSc import MatrixFreeMomentumSolverPETSc
-from naviflow_oo.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
-from naviflow_oo.solver.momentum_solver.matrix_momentum_solver import MatrixMomentumSolver
-from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_staggered.preprocessing.mesh.structured import StructuredMesh
+from naviflow_staggered.constructor.properties.fluid import FluidProperties
+from naviflow_staggered.preprocessing.fields.scalar_field import ScalarField
+from naviflow_staggered.preprocessing.fields.vector_field import VectorField
+from naviflow_staggered.solver.Algorithms.simple import SimpleSolver
+from naviflow_staggered.solver.pressure_solver.multigrid import MultiGridSolver
+from naviflow_staggered.solver.pressure_solver.gauss_seidel import GaussSeidelSolver
+from naviflow_staggered.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
+from naviflow_staggered.solver.momentum_solver.jacobi_matrix_solver import JacobiMatrixMomentumSolver
+from naviflow_staggered.solver.momentum_solver.AMG_solver import AMGMomentumSolver
+from naviflow_staggered.solver.velocity_solver.standard import StandardVelocityUpdater
+from naviflow_staggered.solver.momentum_solver.matrix_free_momentum_PETSc import MatrixFreeMomentumSolverPETSc
+from naviflow_staggered.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
+from naviflow_staggered.solver.momentum_solver.matrix_momentum_solver import MatrixMomentumSolver
+from naviflow_staggered.postprocessing.visualization import plot_final_residuals
 
 # Start timing
 start_time = time.time()

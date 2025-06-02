@@ -1,0 +1,32 @@
+boundaries:
+  top:
+    velocity:
+      bc: wall
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  bottom:
+    velocity:
+      bc: wall
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  left:                      # inlet
+    velocity: 
+      bc: inlet
+      value: [1.0, 0.0]  # Constant inlet velocity
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  right:                     # outlet
+    velocity:
+      bc: outlet
+      value: [0.0, 0.0]
+    pressure:
+      bc: dirichlet
+      value: 0.0  # Fixed pressure at outlet

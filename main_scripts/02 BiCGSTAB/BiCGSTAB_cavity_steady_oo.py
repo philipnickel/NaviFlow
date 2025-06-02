@@ -6,25 +6,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import os
-from naviflow_oo.preprocessing.mesh.structured import StructuredMesh
-from naviflow_oo.constructor.properties.fluid import FluidProperties
-from naviflow_oo.solver.Algorithms.simple import SimpleSolver
-from naviflow_oo.solver.pressure_solver.matrix_free_BiCGSTAB import MatrixFreeBiCGSTABSolver
-from naviflow_oo.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
-from naviflow_oo.solver.momentum_solver.AMG_solver import AMGMomentumSolver
-from naviflow_oo.solver.momentum_solver.BiCGSTAB_solver import BiCGSTABMomentumSolver
-from naviflow_oo.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
-from naviflow_oo.solver.velocity_solver.standard import StandardVelocityUpdater
-from naviflow_oo.postprocessing.visualization import plot_final_residuals
+from naviflow_staggered.preprocessing.mesh.structured import StructuredMesh
+from naviflow_staggered.constructor.properties.fluid import FluidProperties
+from naviflow_staggered.solver.Algorithms.simple import SimpleSolver
+from naviflow_staggered.solver.pressure_solver.matrix_free_BiCGSTAB import MatrixFreeBiCGSTABSolver
+from naviflow_staggered.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
+from naviflow_staggered.solver.momentum_solver.AMG_solver import AMGMomentumSolver
+from naviflow_staggered.solver.momentum_solver.BiCGSTAB_solver import BiCGSTABMomentumSolver
+from naviflow_staggered.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
+from naviflow_staggered.solver.velocity_solver.standard import StandardVelocityUpdater
+from naviflow_staggered.postprocessing.visualization import plot_final_residuals
 # Start timing
 
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**9-1, 2**9-1 # Grid size
-reynolds = 3200             # Reynolds number
-alpha_p = 0.3              # Pressure relaxation factor
-alpha_u = 0.7         # Velocity relaxation factor
-max_iterations = 30000     # Maximum number of iterations
+nx, ny = 2**6-1, 2**6-1 # Grid size
+reynolds = 100             # Reynolds number
+alpha_p = 0.2              # Pressure relaxation factor
+alpha_u = 0.8         # Velocity relaxation factor
+max_iterations = 5000     # Maximum number of iterations
 tolerance = 1e-4
 h = 1/nx 
 disc_order = 1
