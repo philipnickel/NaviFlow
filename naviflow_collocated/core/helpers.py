@@ -1,16 +1,7 @@
 import numpy as np
-from numba import njit, prange
+from numba import njit, prange, jit
 
-from numba import njit, prange
-import numpy as np
-
-from numba import njit, prange
-import numpy as np
-
-from numba import njit
-import numpy as np
-
-@njit(parallel=False)
+@njit(parallel=False, cache=True)
 def relax_momentum_equation(rhs, A_diag, phi, alpha):
     """
     In-place Patankar-style under-relaxation of a momentum equation system.
@@ -31,10 +22,8 @@ def relax_momentum_equation(rhs, A_diag, phi, alpha):
     return relaxed_diagonal, relaxed_rhs
 
 
-from numba import njit, prange
-import numpy as np
 
-@njit(parallel=False)
+@njit(parallel=False, cache=True)
 def compute_l2_norm(vec, indices=None):
     """
     Compute the L2 norm of a vector, optionally over a subset of indices.
@@ -60,7 +49,7 @@ def compute_l2_norm(vec, indices=None):
             total += vec[i] * vec[i]
         return np.sqrt(total)
 
-@njit(parallel=False)
+@njit(parallel=False, cache=True)
 def compute_residual(data, indices, indptr, x, b, max_residual=None, norm_indices=None):
     """
     Compute residual field and relative L2 norm: r = b - A @ x.
@@ -95,7 +84,7 @@ def compute_residual(data, indices, indptr, x, b, max_residual=None, norm_indice
     
     return L2_res, res_field
 
-@njit(parallel=True)
+@njit(cache=True)
 def interpolate_to_face(mesh, quantity):
     """
     Interpolate quantity to faces using face_interp_factors
@@ -121,7 +110,7 @@ def interpolate_to_face(mesh, quantity):
     return interpolated_quantity
 
 
-@njit(parallel=False)
+@njit(parallel=False, cache=True)
 def bold_Dv_calculation(mesh, A_u_diag, A_v_diag):
     n_cells = mesh.cell_volumes.shape[0]
     bold_Dv = np.zeros((n_cells, 2), dtype=np.float64)

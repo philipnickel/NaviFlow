@@ -11,6 +11,8 @@ from naviflow_collocated.core.simple_algorithm import simple_algorithm, calculat
 from naviflow_collocated.utils.logger import ResidualLogger
 from naviflow_collocated.utils.metadata import collect_metadata
 
+
+
 interrupted = False
 
 def handle_sigterm(signum, frame):

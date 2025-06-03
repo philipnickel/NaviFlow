@@ -9,7 +9,7 @@ BC_OUTLET = 3
 BC_NEUMANN = 4
 
 
-@njit
+@njit()
 def compute_velocity_gradient_least_squares(mesh, U_star_rc, U_star, x_P, U_star_C, P, f_exclude):
     """
     Compute 2x2 velocity gradient tensor delta_v at cell P using least squares

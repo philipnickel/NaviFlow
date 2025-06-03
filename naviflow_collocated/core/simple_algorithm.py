@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 from naviflow_collocated.core.helpers import bold_Dv_calculation, interpolate_to_face, compute_residual, relax_momentum_equation, apply_mean_zero_constraint, set_pressure_boundaries, compute_l2_norm, get_unique_cells_from_faces
 import time
 from numba import njit
+
+
 def piso_corrector_loop(mesh, A_p, ksp, mdot_start, rho, bold_D, U_star_rc, U_star, p, alpha_p, num_corrections=1):
     """
     Perform PISO pressure–velocity correction loops.
@@ -81,7 +83,7 @@ def piso_corrector_loop(mesh, A_p, ksp, mdot_start, rho, bold_D, U_star_rc, U_st
 
 
 
-@njit
+@njit(cache=True)
 def enforce_boundary_conditions(mesh, u_field):
     boundary_faces = mesh.boundary_faces
     n_boundary = boundary_faces.shape[0]
@@ -135,17 +137,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         velocity_correction,
         calculate_cylinder_forces
     ]
-    
-    # Initialize tracking for each function
-    for func in jitted_functions:
-        if not hasattr(func, "_seen_signatures"):
-            func._seen_signatures = set()
-            print(f"Initializing tracking for {func.__name__}")
-            # Print current overloads
-            if hasattr(func, 'overloads'):
-                print(f"Current overloads for {func.__name__}:")
-                for sig in func.overloads.keys():
-                    print(f"  {sig}")
+
 
     time_start = time.time()
 
@@ -206,15 +198,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
             print(f"Interrupted at iteration {i}. Exiting solver loop.")
             break
 
-        # Check for new Numba compilations
-        for func in jitted_functions:
-            current_overloads = set(func.overloads.keys())
-            new_overloads = current_overloads - func._seen_signatures
-            if new_overloads:
-                print(f"⚠️ New Numba compilation triggered at iteration {i} for {func.__name__}:")
-                for sig in new_overloads:
-                    print(f"   Signature: {sig}")
-                func._seen_signatures.update(new_overloads)
+
 
         #=============================================================================
         # PRECOMPUTE QUANTITIES
@@ -445,7 +429,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
 
     return U, p, rhs_p, u_l2norm, v_l2norm, continuity_l2norm, u_residual, v_residual, mdot, cd_history, cl_history 
 
-@njit
+@njit(cache=True)
 def calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D):
     """
     Calculate lift and drag coefficients for flow past a cylinder.
@@ -537,3 +521,4 @@ def calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D):
     cl = Fy / (q_inf * D)
     
     return cd, cl
+

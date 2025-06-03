@@ -8,7 +8,7 @@ BC_OUTLET = 4
 BC_NEUMANN = 3
 
 
-@njit
+@njit()
 def compute_divergence_from_face_fluxes(mesh, face_fluxes):
     """
     Compute divergence (mass imbalance) per cell from face mass fluxes.

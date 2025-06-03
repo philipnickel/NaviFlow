@@ -38,7 +38,7 @@ def ensure_contiguous(*arrays):
 
 
 # --- JIT-compatible face map construction ---
-@njit
+@njit(cache=True)
 def _compute_face_map_jit(cells):
     n_faces_est = cells.shape[0] * cells.shape[1]
     face_pairs = np.empty((n_faces_est, 2), dtype=np.int64)
@@ -59,7 +59,7 @@ def _compute_face_map_jit(cells):
 # --- JIT kernel for face map construction (fully JIT-compatible) ---
 from numba import njit
 
-@njit
+@njit(cache=True)
 def _compute_face_map_kernel(face_pairs, face_owners):
     # Sort the face pairs lexicographically
     keys = face_pairs[:, 0] * 10000000 + face_pairs[:, 1]
@@ -107,7 +107,7 @@ def _compute_face_map(cells):
 # --- JIT kernel for constructing faces ---
 from numba import njit
 
-@njit
+@njit(cache=True)
 def _construct_faces_kernel(face_keys, face_values, points, cell_centers,
                             face_centers_array, face_normals_array, edge_lengths_array,
                             face_vertices_array, owner_cells_array, neighbor_cells_array):

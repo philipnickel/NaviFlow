@@ -21,7 +21,7 @@ BC_OBSTACLE = 4
 EPS = 1.0e-14
 
 
-@njit(fastmath=True, parallel=True, cache=True)
+@njit(parallel=True)
 def _assemble_internal_faces_parallel(
     mesh,
     mdot,
@@ -43,12 +43,9 @@ def _assemble_internal_faces_parallel(
     data = np.zeros(4 * n_internal, dtype=np.float64)
     rhs = np.zeros(n_cells, dtype=np.float64)
 
-    internal_faces = mesh.internal_faces
-    owner_cells = mesh.owner_cells
-    neighbor_cells = mesh.neighbor_cells
-    face_interp_factors = mesh.face_interp_factors
-    vector_d_CE = mesh.vector_d_CE
-    vector_skewness = mesh.vector_skewness
+    internal_faces = np.ascontiguousarray(mesh.internal_faces)
+    owner_cells = np.ascontiguousarray(mesh.owner_cells)
+    neighbor_cells = np.ascontiguousarray(mesh.neighbor_cells)
 
     for i in prange(n_internal):
         f = internal_faces[i]
@@ -88,7 +85,7 @@ def _assemble_internal_faces_parallel(
 
     return row, col, data, rhs
 
-@njit(fastmath=True, cache=True)
+@njit()
 def _assemble_boundary_faces_parallel(
     mesh,
     mdot,
@@ -146,7 +143,7 @@ def _assemble_boundary_faces_parallel(
 
     return row, col, data, rhs
 
-@njit(fastmath=True, cache=True)
+@njit()
 def assemble_diffusion_convection_matrix(
     mesh,
     mdot,
