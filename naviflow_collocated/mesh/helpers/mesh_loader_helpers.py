@@ -86,7 +86,7 @@ def _load_structured_mesh(mesh, points, physical_names, boundary_conditions, _bu
     )
 
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def _calculate_cell_volumes(points, cells):
     # This function assumes cells is an np.array and points is an np.array
     # and cells.shape[1] is either 3 or 4, checked by the caller.
@@ -119,7 +119,7 @@ def _calculate_cell_volumes(points, cells):
     return np.empty(0, dtype=np.float64) # Should not be reached if caller validates. Added for Numba typing if somehow reached.
 
 
-@njit(parallel=False, fastmath=True)
+@njit(parallel=False, fastmath=True, cache=True)
 def _compute_detailed_geometry_kernel(
     n_faces, owner_cells, neighbor_cells, cell_centers, face_centers, 
     vector_S_f, face_areas, 
@@ -199,7 +199,7 @@ def _compute_detailed_geometry_kernel(
             face_interp_factors[f] = 1.0
             # skewness_vectors for boundary is already [0,0] by preallocation
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def _compute_d_Cb_kernel(d_Cb, boundary_faces, owner_cells, face_centers, cell_centers):
     for i in range(boundary_faces.shape[0]):
         f = boundary_faces[i]
@@ -209,7 +209,7 @@ def _compute_d_Cb_kernel(d_Cb, boundary_faces, owner_cells, face_centers, cell_c
         if dist == dist: # Check for NaN
             d_Cb[f] = dist
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def _count_faces_per_cell_kernel(n_cells, owner_cells, neighbor_cells, n_faces):
     num_faces_for_cell = np.zeros(n_cells, dtype=np.int64)
     for f in range(n_faces):
@@ -220,7 +220,7 @@ def _count_faces_per_cell_kernel(n_cells, owner_cells, neighbor_cells, n_faces):
             num_faces_for_cell[neigh] += 1
     return num_faces_for_cell
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def _populate_cell_faces_kernel(cell_faces, owner_cells, neighbor_cells, current_idx_for_cell, n_faces):
     # Assumes current_idx_for_cell is pre-filled with zeros
     for f in range(n_faces):

@@ -35,11 +35,37 @@ from numba import njit, prange
 import numpy as np
 
 @njit(parallel=False)
-def compute_residual(data, indices, indptr, x, b, max_residual=None):
+def compute_l2_norm(vec, indices=None):
+    """
+    Compute the L2 norm of a vector, optionally over a subset of indices.
+    Parameters
+    ----------
+    vec : ndarray
+        Input vector.
+    indices : ndarray or None
+        Indices to include in the norm. If None, use all elements.
+    Returns
+    -------
+    float
+        L2 norm over the selected elements.
+    """
+    if indices is not None:
+        total = 0.0
+        for i in range(indices.shape[0]):
+            total += vec[indices[i]] * vec[indices[i]]
+        return np.sqrt(total)
+    else:
+        total = 0.0
+        for i in range(vec.shape[0]):
+            total += vec[i] * vec[i]
+        return np.sqrt(total)
+
+@njit(parallel=False)
+def compute_residual(data, indices, indptr, x, b, max_residual=None, norm_indices=None):
     """
     Compute residual field and relative L2 norm: r = b - A @ x.
     If max_residual is provided, compute relative to that instead of ||b||.
-
+    Optionally, compute the norm over a subset of indices.
     Parameters
     ----------
     data, indices, indptr : CSR matrix format (A)
@@ -47,7 +73,8 @@ def compute_residual(data, indices, indptr, x, b, max_residual=None):
     b : ndarray, right-hand side vector
     max_residual : float, optional
         Maximum residual to use for relative calculation. If None, uses ||b||
-
+    norm_indices : ndarray or None
+        Indices to include in the norm. If None, use all elements.
     Returns
     -------
     rel_res : float
@@ -57,9 +84,6 @@ def compute_residual(data, indices, indptr, x, b, max_residual=None):
     """
     n = b.shape[0]
     res_field = np.zeros(n, dtype=np.float64)
-    res_sq = 0.0
-    b_sq = 0.0
-
     for i in prange(n):
         Ax_i = 0.0
         for j in range(indptr[i], indptr[i+1]):
@@ -67,19 +91,8 @@ def compute_residual(data, indices, indptr, x, b, max_residual=None):
         r_i = b[i] - Ax_i
         res_field[i] = r_i
 
-    for i in prange(n):
-        res_sq += res_field[i] * res_field[i]
-        b_sq += b[i] * b[i]
-
-    L2_res = np.sqrt(res_sq)
-    L2_b = np.sqrt(b_sq)
+    L2_res = compute_l2_norm(res_field, norm_indices)
     
-    # Use max_residual if provided, otherwise use L2_b
-    denominator = max_residual if max_residual is not None else L2_b
-    
-    # Return 1.0 if denominator is zero, otherwise return relative residual
-    #rel_res = 1.0 if denominator == 0.0 else L2_res / denominator
-
     return L2_res, res_field
 
 @njit(parallel=True)
@@ -180,3 +193,19 @@ def set_pressure_boundaries(mesh, p):
         #elif mesh.boundary_types[f,0] == BC_NEUMANN:
             #p[f] = p[mesh.owner_cells[f]]
     return p
+
+def get_unique_cells_from_faces(mesh, face_indices):
+    """
+    Given a set of face indices, return the unique cell indices (owners and neighbors) associated with those faces.
+    Parameters
+    ----------
+    mesh : Mesh object
+    face_indices : ndarray
+        Indices of faces (e.g., internal_faces or boundary_faces)
+    Returns
+    -------
+    unique_cells : ndarray
+        Unique cell indices (sorted)
+    """
+    owners = mesh.owner_cells[face_indices]
+    return np.unique(owners)

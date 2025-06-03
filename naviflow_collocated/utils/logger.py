@@ -13,7 +13,7 @@ class ResidualLogger:
         self.divergence_factor = divergence_factor
         self.stagnation_window = stagnation_window
         self.allow_unsteady = allow_unsteady
-        self.convergence_tolerance = convergence_tolerance
+        self.convergence_tolerance = float(convergence_tolerance)
 
         self.buffer = []
         self.history = {"u": [], "v": [], "cont": [], "iters": []}
@@ -79,8 +79,8 @@ class ResidualLogger:
     
     def _check_convergence(self):
         # Get the latest residuals
-        u_res = self.history["u"][-1]
-        v_res = self.history["v"][-1]
+        u_res = float(self.history["u"][-1])
+        v_res = float(self.history["v"][-1])
 
         # Check if momentum residuals are below tolerance
         if max(u_res, v_res) < self.convergence_tolerance:

@@ -220,9 +220,10 @@ def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_p
 def plot_residuals(res, output_path, sim_id=None):
     fig = plt.figure(figsize=(8, 5))
     ax = fig.add_subplot(1, 1, 1)
-    ax.semilogy(res["u"], label="u-momentum", color='tab:blue', linewidth=2)
-    ax.semilogy(res["v"], label="v-momentum", color='tab:orange', linewidth=2)
-    ax.semilogy(res["cont"], label="continuity", color='tab:green', linewidth=2)
+    # Slice arrays to exclude first and last iteration
+    ax.semilogy(res["u"][3:-3], label="u-momentum", color='tab:blue', linewidth=2)
+    ax.semilogy(res["v"][3:-3], label="v-momentum", color='tab:orange', linewidth=2)
+    ax.semilogy(res["cont"][3:-3], label="continuity", color='tab:green', linewidth=2)
     title = "Residual History"
     if sim_id is not None:
         title += f" | Simulation ID: {sim_id}"
@@ -410,10 +411,11 @@ def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
     with open(os.path.join("experiments", "channelFlow", "config.yaml"), "r") as f:
         config = yaml.safe_load(f)
     u_inlet = config["physical_properties"]["characteristic_velocity"]  # Inlet velocity
-    H = config["physical_properties"]["characteristic_length"]  # Channel height
-    h = H/2  # Half height
     rho = config["physical_properties"]["rho"]
-    mu = rho * u_inlet * h / Re
+    
+    # Calculate channel height from numerical data
+    H = np.max(y) - np.min(y)  # Total channel height
+    h = H/2  # Half height
 
     # Calculate channel length from domain coordinates
     L = 5.0
@@ -425,38 +427,42 @@ def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
     # 1. Velocity Profile Plot (at x=L/2)
     ax1 = fig.add_subplot(gs[0, 0])
     
-    # Extract numerical solution at x=L/2
+    # Extract numerical solution at x=L/2 using griddata
     points = np.column_stack((x, y))
     unique_y = np.unique(y)
-    x_center = (np.max(x) + np.min(x)) / 2
+    x_center = L/2
     
+    # Get u-velocity at x=L/2 using griddata
+    xi = np.column_stack((np.full_like(unique_y, x_center), unique_y))
     u_numerical = griddata(
         points=points,
         values=U[:, 0],
-        xi=np.column_stack((np.full_like(unique_y, x_center), unique_y)),
+        xi=xi,
         method='linear'
     )
     
-    # Remove any NaN values
-    mask = ~np.isnan(u_numerical)
-    y_valid = unique_y[mask]
-    u_numerical = u_numerical[mask]
+    # Calculate mean inlet velocity at the leftmost x-coordinate
+    x_inlet = np.min(x)
+    inlet_mask = np.isclose(x, x_inlet, atol=1e-6)
+    u_mean_inlet = np.mean(U[inlet_mask, 0])
     
-    # Normalize y coordinates to [-1,1]
-    y_norm = (y_valid)/h -1
+    # Analytical solution for fully developed flow
+    # u(y) = (3/2) * u_inlet * (1 - (y/h)^2)
+    r = np.linspace(-0.5, 0.5, len(u_numerical))
+    u_analytical = 1.5 * u_mean_inlet * (1 - (r**2/0.5**2))  # Use actual measured inlet velocity
+    y = np.linspace(0, 1, len(u_analytical))
     
-    # Analytical solution for fully developed flow with constant inlet
-    u_analytical = 1.5 * u_inlet * (1 - y_norm**2)  # Parabolic profile with inlet velocity
     
     # Plot both solutions
-    ax1.plot(y_norm, u_numerical, 'o-', color='tab:blue', label="Numerical", markersize=4, alpha=0.6)
-    ax1.plot(y_norm, u_analytical, '--', color='tab:red', label="Analytical", linewidth=2)
+    ax1.plot(y, u_numerical, 'o-', color='tab:blue', label="Numerical", markersize=2, alpha=0.6)
+    ax1.plot(y, u_analytical, '--', color='tab:orange', label="Analytical", linewidth=2)
     
-    ax1.set_title(f"Velocity Profile at x=L/2 (Re={Re})")
-    ax1.set_xlabel("y/h [-]")
-    ax1.set_ylabel("u/u_inlet [-]")
+    ax1.set_title(f"Velocity Profile at x=L/2", fontsize=12, pad=10)
+    ax1.set_xlabel("y/h", fontsize=10)
+    ax1.set_ylabel("u/u_inlet", fontsize=10)
     ax1.grid(True, alpha=0.3)
-    ax1.legend()
+    ax1.legend(fontsize=10, loc='upper right')
+    ax1.tick_params(axis='both', which='major', labelsize=9)
     
     # 2. Pressure Drop Plot
     ax2 = fig.add_subplot(gs[0, 1])
@@ -470,46 +476,50 @@ def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
     # Normalize x coordinates to [0,1]
     x_norm = (unique_x - np.min(x)) / (np.max(x) - np.min(x))
     
+    mu = rho * u_mean_inlet * 1.0 / Re
     # Analytical pressure drop (dp/dx = -8μu_inlet/h²)
-    dp_dx_analytical = -8 * mu * u_inlet / (h**2)
+    dp_dx_analytical = -8 * mu * u_mean_inlet / (h**2)
     p_analytical = dp_dx_analytical * (unique_x - np.min(x))
     
-    # Plot pressure drop
-    ax2.plot(x_norm, p_avg, 'o-', color='tab:blue', label="Numerical", markersize=4, alpha=0.6)
-    ax2.plot(x_norm, p_analytical, '--', color='tab:red', label="Analytical", linewidth=2)
+    # Calculate pressure gradient error
+    p_grad_numerical = np.polyfit(unique_x, p_avg, 1)[0]
+    p_grad_error = np.abs((p_grad_numerical - dp_dx_analytical) / dp_dx_analytical) * 100
     
-    ax2.set_title("Pressure Drop Along Channel")
-    ax2.set_xlabel("x/L [-]")
-    ax2.set_ylabel("Pressure [Pa]")
+    # Plot pressure drop
+    ax2.plot(x_norm, p_avg, 'o-', color='tab:blue', label="Numerical", markersize=2, alpha=0.6)
+    ax2.plot(x_norm, p_analytical, '--', color='tab:orange', label="Analytical", linewidth=2)
+    
+    ax2.set_title("Pressure Drop Along Channel", fontsize=12, pad=10)
+    ax2.set_xlabel("x/L", fontsize=10)
+    ax2.set_ylabel("Pressure", fontsize=10)
     ax2.grid(True, alpha=0.3)
-    ax2.legend()
+    ax2.legend(fontsize=10, loc='upper right')
+    ax2.tick_params(axis='both', which='major', labelsize=9)
     
     # Add flow parameters to plot
     param_text = (
-        f"Channel height (H): {H:.3f} m\n"
-        f"Channel length (L): {L:.3f} m\n"
+        f"Channel Parameters:\n"
+        f"Height (H): {H:.3f} m\n"
+        f"Length (L): {L:.3f} m\n"
         f"Inlet velocity: {u_inlet:.3f} m/s\n"
-        f"Reynolds number: {Re}\n"
+        f"Reynolds number: {Re}"
     )
-    fig.text(0.02, 0.02, param_text, bbox=dict(facecolor='white', alpha=0.8))
+    fig.text(0.02, 0.02, param_text, 
+             bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray', boxstyle='round,pad=0.5'),
+             fontsize=9)
     
+    # Add overall title with simulation ID
+    title = "Hagen–Poiseuille Verification"
     if sim_id is not None:
-        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
+        title += f" | Simulation ID: {sim_id}"
+    fig.suptitle(title, fontsize=14, y=0.98)
     
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     save_pdf(fig, output_path)
     print(f"Channel flow verification saved to {output_path}")
     
     # Print error metrics
-    u_error = np.abs(u_numerical - u_analytical)
-    l2_error = np.sqrt(np.mean(u_error**2))
-    linf_error = np.max(u_error)
-    p_grad_numerical = np.polyfit(unique_x, p_avg, 1)[0]
-    p_grad_error = np.abs((p_grad_numerical - dp_dx_analytical) / dp_dx_analytical) * 100
-    
     print("\nChannel Flow Verification Results:")
-    print(f"L2 Error: {l2_error:.2e}")
-    print(f"Linf Error: {linf_error:.2e}")
     print(f"Pressure Gradient Error: {p_grad_error:.2f}%")
 
 def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None):
@@ -714,6 +724,38 @@ def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re,
     plt.savefig(os.path.join(plots_dir, "continuity_residual.pdf"))
     plt.close(fig)
 
+def plot_force_coefficients(cd_history, cl_history, output_path, sim_id=None, experiment=None, Re=None):
+    """Create plots for drag and lift coefficient history."""
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    
+    # Plot drag coefficient
+    ax1.plot(cd_history, 'b-', linewidth=2)
+    ax1.set_title("Drag Coefficient (Cd) History")
+    ax1.set_xlabel("Iteration")
+    ax1.set_ylabel("Cd")
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot lift coefficient
+    ax2.plot(cl_history, 'r-', linewidth=2)
+    ax2.set_title("Lift Coefficient (Cl) History")
+    ax2.set_xlabel("Iteration")
+    ax2.set_ylabel("Cl")
+    ax2.grid(True, alpha=0.3)
+    
+    # Add experiment info to suptitle
+    suptitle = "Force Coefficients History"
+    if experiment is not None:
+        suptitle += f" | {experiment}"
+    if Re is not None:
+        suptitle += f" | Re={Re}"
+    fig.suptitle(suptitle)
+    
+    if sim_id is not None:
+        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
+    
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    save_pdf(fig, output_path, also_save_in_plots=True)
+
 # ----------------------------
 # Main Entrypoint
 # ----------------------------
@@ -771,5 +813,19 @@ if __name__ == "__main__":
         # Poiseuille verification for channel flow
         elif config.get('experiment', None) == 'channelFlow':
             poiseuille_verification(x, y, U, p, Re, out("poiseuille_verification"), sim_id=sim_id)
+
+        # Plot force coefficients if available
+        try:
+            force_coeffs = np.load(os.path.join(results_dir, "force_coefficients.npz"))
+            plot_force_coefficients(
+                force_coeffs["cd"], 
+                force_coeffs["cl"], 
+                out("force_coefficients"),
+                sim_id=sim_id,
+                experiment=experiment,
+                Re=Re
+            )
+        except FileNotFoundError:
+            print("Force coefficients history not found, skipping plot.")
 
         yaml_to_latex_pdf(os.path.join(results_dir, "metadata.yaml"), out("metadata"))

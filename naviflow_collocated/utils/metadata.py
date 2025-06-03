@@ -56,6 +56,8 @@ def collect_metadata(
     start_time,
     end_time,
     logger_status=None,
+    cd=None,
+    cl=None,
 ):
     # Generate a unique run ID with date and hash
     random_hash = hashlib.sha256(str(time.time()).encode()).hexdigest()[:8]
@@ -69,52 +71,52 @@ def collect_metadata(
 
     num_cells = mesh.cell_centers.shape[0]
     num_faces = mesh.face_centers.shape[0]
+    print(f"Mesh file: {mesh_file}")
 
     metadata = {
-        # Simulation identification
+        # Simulation identification and tracking
         "Simulation id": run_id,
         "Experiment": args.experiment,
         "Git commit": git_commit,
-        
-        # Computational details
         "Wall time (s)": round(end_time - start_time, 3),
-        "Numba threads": config["numba_cores"],
-        "Number of control volumes": num_cells,
-        
-        # Mesh and boundary conditions
-        "Mesh type": "Structured" if "structured" in mesh_file.lower() else "Unstructured",
-        "Boundary conditions": bc_file,
         
         # Physical parameters
         "Reynolds number": Re,
+        
+        # Mesh and geometry
+        "Mesh type": "Structured Uniform" if "structuredUniform" in mesh_file else "Unstructured",
+        "Number of control volumes": num_cells,
+        "Boundary conditions": bc_file,
         
         # Algorithm settings
         "Algorithm": config["algorithm"]["type"],
         "Convection scheme": config["algorithm"]["convection_discretization"],
         "Limiter": config["algorithm"].get("limiter", "No limiter used"),
         "Convergence tolerance": config["algorithm"]["convergence_criteria"]["residual"],
-  
-        # Results
-        "Number of iterations": len(u_l2norm),
-        "Final u-residual": float(u_l2norm[-1]),
-        "Final v-residual": float(v_l2norm[-1]),
-        "Final continuity-residual": float(continuity_l2norm[-1]),
         
         # Relaxation factors
         "Momentum relaxation": config["algorithm"]["relaxation_factors"]["velocity"],
         "Pressure relaxation": config["algorithm"]["relaxation_factors"]["pressure"],
         
-        # Solver settings
+        # Momentum solver settings
+        "Momentum solver": config["linear_solvers"]["momentum"]["type"],
+        "Momentum solver preconditioner": config["linear_solvers"]["momentum"]["preconditioner"],
+        "Momentum solver tolerance": config["linear_solvers"]["momentum"]["tolerance"],
+        
+        # Pressure solver settings
         "Pressure solver": config["linear_solvers"]["pressure"]["type"],
         "Pressure solver preconditioner": config["linear_solvers"]["pressure"]["preconditioner"],
         "Pressure solver tolerance": config["linear_solvers"]["pressure"]["tolerance"],
-        "Momentum solver": config["linear_solvers"]["momentum"]["type"],
-        "Momentum solver preconditioner": config["linear_solvers"]["momentum"]["preconditioner"],
-        "Momentum solver tolerance": config["linear_solvers"]["momentum"]["tolerance"]
-      
+        "Non-orthogonal corrections": config["algorithm"]["non_orthogonal_corrections"],
+        
+        # Results and convergence
+        "Number of iterations": len(u_l2norm),
+        "Final u-residual": float(u_l2norm[-1]),
+        "Final v-residual": float(v_l2norm[-1]),
+        "Final continuity-residual": float(continuity_l2norm[-1]),
     }
     
-    # Convert numpy types and format floats
+     # Convert numpy types and format floats
     metadata = convert_numpy_types(metadata)
     metadata = format_floats(metadata)
     

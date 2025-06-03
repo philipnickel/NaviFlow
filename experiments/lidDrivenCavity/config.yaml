@@ -5,7 +5,7 @@ experiment: "lidDrivenCavity"
 
 domain:
   # Using the coarse structured mesh 
-  mesh: [uniform, coarse] # or uniform
+  mesh: [unstructured, coarse] # or uniform
   boundary_conditions: "shared_configs/domain/boundaries_lidDrivenCavity.yaml"
 
 
@@ -27,6 +27,7 @@ algorithm:
     residual: 1e-4
   convection_discretization: "Upwind" 
   limiter: None
+  non_orthogonal_corrections: 0
 
 # Linear solver settings (from PETSc)
 linear_solvers:

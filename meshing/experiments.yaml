@@ -104,7 +104,7 @@ channelFlow:
       medium:
         Lx: 5.0
         Ly: 1.0
-        n_cells: 10000
+        n_cells: 15000
         refinement_factors:
           boundaries:
             left: [1, 1]
@@ -119,7 +119,7 @@ channelFlow:
       fine:
         Lx: 5.0
         Ly: 1.0
-        n_cells: 20000
+        n_cells: 30000
         refinement_factors:
           boundaries:
             left: [1, 1]

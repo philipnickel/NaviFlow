@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 import signal
 from naviflow_collocated.mesh.mesh_loader import load_mesh  
-from naviflow_collocated.core.simple_algorithm import simple_algorithm  
+from naviflow_collocated.core.simple_algorithm import simple_algorithm, calculate_cylinder_forces  
 from naviflow_collocated.utils.logger import ResidualLogger
 from naviflow_collocated.utils.metadata import collect_metadata
 
@@ -109,6 +109,7 @@ tolerance = config["algorithm"]["convergence_criteria"]["residual"]
 scheme = config["algorithm"]["convection_discretization"]
 limiter = config["algorithm"].get("limiter", None)
 algorithm = config["algorithm"]["type"]
+n_nonortho_corrections = config["algorithm"].get("non_orthogonal_corrections", 0)  # Default to 2 if not specified
 
 # Get linear solver settings from config
 linear_solver_settings = {
@@ -153,8 +154,12 @@ if algorithm == "PISO":
 else:
     PISO = False
 
+# Initialize arrays to store force coefficients history
+cd_history = np.zeros(max_iter)
+cl_history = np.zeros(max_iter)
+
 print("Running SIMPLE solver...")
-U, p, continuity_field, u_l2norm, v_l2norm, continuity_l2norm, u_residual, v_residual, mdot_star = simple_algorithm(
+U, p, continuity_field, u_l2norm, v_l2norm, continuity_l2norm, u_residual, v_residual, mdot_star, cd_history, cl_history = simple_algorithm(
     mesh,
     alpha_uv, alpha_p,
     rho, mu,
@@ -163,7 +168,8 @@ U, p, continuity_field, u_l2norm, v_l2norm, continuity_l2norm, u_residual, v_res
     PISO=PISO,
     progress_callback=logger.update,
     interruption_flag=lambda: interrupted,
-    linear_solver_settings=linear_solver_settings
+    linear_solver_settings=linear_solver_settings,
+    n_nonortho_corrections=n_nonortho_corrections
 )
 logger.close()
 status = logger.status()
@@ -174,7 +180,15 @@ if status["diverging"]:
 if status["stalled"]:
     print("Residuals stalled — notify or flag post-analysis.")
 
-
+# Calculate final lift and drag coefficients
+U_inf = config["physical_properties"].get("characteristic_velocity", 1.0)
+cd, cl = calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D)
+print(f"DEBUG: cd type: {type(cd)}, shape: {getattr(cd, 'shape', 'scalar')}")
+print(f"DEBUG: cl type: {type(cl)}, shape: {getattr(cl, 'shape', 'scalar')}")
+cd = cd.item() if hasattr(cd, 'item') else float(cd)
+cl = cl.item() if hasattr(cl, 'item') else float(cl)
+print(f"Drag coefficient (Cd): {cd:.6f}")
+print(f"Lift coefficient (Cl): {cl:.6f}")
 
 end_time = time.time()
 wall_time_sec = end_time - start_time
@@ -183,7 +197,10 @@ print(f"SIMPLE solver completed in {wall_time_sec:.2f} seconds.")
 print("Saving final state...")
 
 # metadata
-metadata = collect_metadata(args, config, mesh, mesh_file,bc_file, results_dir, Re, rho, mu, u_l2norm=u_l2norm, v_l2norm=v_l2norm, continuity_l2norm=continuity_l2norm, start_time=start_time, end_time=end_time)
+metadata = collect_metadata(args, config, mesh, mesh_file, bc_file, results_dir, Re, rho, mu, 
+                          u_l2norm=u_l2norm, v_l2norm=v_l2norm, continuity_l2norm=continuity_l2norm,
+                          start_time=start_time, end_time=end_time,
+                          cd=cd, cl=cl)
 
 np.save(os.path.join(results_dir, "U_final.npy"), U)
 np.save(os.path.join(results_dir, "p_final.npy"), p)
@@ -192,13 +209,13 @@ np.savez(os.path.join(results_dir, "residuals.npz"),
 np.savez(os.path.join(results_dir, "cell_centers.npz"),
          x=mesh.cell_centers[:, 0],
          y=mesh.cell_centers[:, 1])
+np.savez(os.path.join(results_dir, "force_coefficients.npz"),
+         cd=cd_history, cl=cl_history)
 with open(os.path.join(results_dir, "metadata.yaml"), "w") as f:
     yaml.dump(metadata, f, sort_keys=False)
 
 np.save(os.path.join(results_dir, "u_residual.npy"), u_residual)
 np.save(os.path.join(results_dir, "v_residual.npy"), v_residual)
 np.save(os.path.join(results_dir, "continuity_field.npy"), continuity_field)
-
-
 
 print("State saved. Exiting.")
