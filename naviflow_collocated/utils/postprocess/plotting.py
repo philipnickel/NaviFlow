@@ -106,9 +106,9 @@ def plot_residuals(res, output_path, sim_id=None):
     ax.semilogy(res["v"][3:-3], label="v-momentum", color='tab:orange', linewidth=2)
     ax.semilogy(res["cont"][3:-3], label="continuity", color='tab:green', linewidth=2)
     title = "Residual History"
+    ax.set_title(title, fontsize=16, loc='center')
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title, fontsize=16)
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_xlabel("Iteration", fontsize=14)
     ax.set_ylabel("Residual", fontsize=14)
     ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.3)  # Explicitly add grid for this plot
@@ -178,7 +178,7 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
     ax = fig.add_subplot(111)
     
     # Create grid for streamlines
-    n_grid = 100
+    n_grid = 200
     xi = np.linspace(np.min(x), np.max(x), n_grid)
     yi = np.linspace(np.min(y), np.max(y), n_grid)
     Xg, Yg = np.meshgrid(xi, yi)
@@ -199,9 +199,9 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
     # Plot streamlines in solid blue
     strm = ax.streamplot(xi, yi, Ug, Vg, 
                         color='tab:blue',
-                        density=2.0,
-                        linewidth=0.5,
-                        arrowsize=0.3)
+                        density=4.0,
+                        linewidth=0.2,
+                        arrowsize=0.2)
     
     # Add horizontal colorbar for velocity magnitude
     divider = make_axes_locatable(ax)
@@ -213,9 +213,9 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
     
     # Set title and labels
     title = "Streamlines"
-    ax.set_title(title, fontsize=14)
+    ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_aspect('equal', 'box')
     
     # Remove axis labels and grid
@@ -285,9 +285,9 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "u-velocity"
-    ax.set_title(title, fontsize=14)
+    ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_aspect('equal', 'box')
     if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
@@ -309,9 +309,9 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "v-velocity"
-    ax.set_title(title, fontsize=14)
+    ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_aspect('equal', 'box')
     if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
@@ -333,9 +333,9 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "Velocity Magnitude"
-    ax.set_title(title, fontsize=14)
+    ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_aspect('equal', 'box')
     if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
@@ -357,9 +357,9 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "Pressure"
-    ax.set_title(title, fontsize=14)
+    ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_aspect('equal', 'box')
     if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
@@ -386,9 +386,9 @@ def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re,
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "U Residual"
-    ax.set_title(title, fontsize=14)
+    ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_aspect('equal', 'box')
     if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
@@ -408,9 +408,9 @@ def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re,
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "V Residual"
-    ax.set_title(title, fontsize=14)
+    ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_aspect('equal', 'box')
     if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
@@ -430,9 +430,9 @@ def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re,
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "Continuity Residual"
-    ax.set_title(title, fontsize=14)
+    ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_aspect('equal', 'box')
     if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
