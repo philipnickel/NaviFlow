@@ -17,7 +17,7 @@ def assemble_pressure_correction_matrix(mesh, rho):
     n_internal = mesh.internal_faces.shape[0]
     n_boundary = mesh.boundary_faces.shape[0]
 
-    max_entries = 4 * n_internal + 1
+    max_entries = 4 * n_internal + n_boundary
     row = np.zeros(max_entries, dtype=np.int32)
     col = np.zeros(max_entries, dtype=np.int32)
     data = np.zeros(max_entries, dtype=np.float64)
@@ -27,6 +27,10 @@ def assemble_pressure_correction_matrix(mesh, rho):
         f = mesh.internal_faces[i]
         P = mesh.owner_cells[f]
         N = mesh.neighbor_cells[f]
+
+        # Skip faces with invalid neighbors (boundary faces marked with -1)
+        if N == -1:
+            continue
 
         E_f = np.linalg.norm(mesh.vector_E_f[f])
         d_CF = np.linalg.norm(mesh.vector_d_CE[f]) #+ 1e-14
@@ -40,14 +44,13 @@ def assemble_pressure_correction_matrix(mesh, rho):
     for i in range(n_boundary):
         f = mesh.boundary_faces[i]
         P = mesh.owner_cells[f]
+        
+     
         E_f = np.linalg.norm(mesh.vector_E_f[f])
         d_CB = mesh.d_Cb[f]
         coeff = rho * E_f / d_CB
 
-
         row[idx] = P; col[idx] = P; data[idx] += coeff; idx += 1
-
-
 
     return row[:idx], col[:idx], data[:idx]
 

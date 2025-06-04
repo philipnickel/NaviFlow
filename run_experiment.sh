@@ -138,8 +138,8 @@ python main.py --config "$CONFIG_PATH"
 if [ "$POSTPROCESS" = true ]; then
     echo -e "\nRunning postprocessing..."
     if [ "$DEBUG" = true ]; then
-        python naviflow_collocated/utils/postprocess/postprocess.py --experiment "$EXPERIMENT/debugging" --all
+        PYTHONPATH=. python naviflow_collocated/utils/postprocess/postprocess.py --experiment "$EXPERIMENT/debugging" --all
     else
-        python naviflow_collocated/utils/postprocess/postprocess.py --experiment "$EXPERIMENT/ForReport/$MESH_TYPE/$MESH_SIZE/Re_$REYNOLDS" --all
+        PYTHONPATH=. python naviflow_collocated/utils/postprocess/postprocess.py --experiment "$EXPERIMENT/ForReport/$MESH_TYPE/$MESH_SIZE/Re_$REYNOLDS" --all
     fi
 fi 
