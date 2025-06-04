@@ -4,7 +4,7 @@ import numpy as np
 class ResidualLogger:
     def __init__(self, results_dir, log_file="residuals.log",
                  log_every=20, flush_every=100, print_every=100,
-                 divergence_factor=100.0, stagnation_window=50,
+                 divergence_factor=100000.0, stagnation_window=50,
                  allow_unsteady=False, convergence_tolerance=1e-4):
         
         self.log_every = log_every

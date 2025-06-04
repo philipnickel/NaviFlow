@@ -32,21 +32,19 @@ start_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 # CLI argument parsing
 # ----------------------------
 parser = argparse.ArgumentParser()
-parser.add_argument("--experiment", required=True)
+parser.add_argument("--config", required=True, help="Path to the config file")
 parser.add_argument("--max_iterations", type=int)
 parser.add_argument("--reynolds_number", type=float)
 parser.add_argument("--velocity_relaxation", type=float)
 parser.add_argument("--pressure_relaxation", type=float)
 parser.add_argument("--tolerance_exponent", type=int, help="Convergence tolerance as 10^-x (e.g., 4 for 1e-4)")
-parser.add_argument("--print_interval", type=int, default=100, help="Print residuals every N iterations")
+parser.add_argument("--print_interval", type=int, default=10, help="Print residuals every N iterations")
 args = parser.parse_args()
 
 # ----------------------------
-# Resolve experiment path and config
+# Load config
 # ----------------------------
-experiment_path = os.path.join("experiments", args.experiment)
-config_path = os.path.join(experiment_path, "config.yaml")
-
+config_path = args.config
 if not os.path.exists(config_path):
     raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -88,7 +86,7 @@ mesh = load_mesh(mesh_file, bc_file)
 # ----------------------------
 # Set up result output directory
 # ----------------------------
-results_dir = os.path.join(experiment_path, "results")
+results_dir = os.path.join(os.path.dirname(config_path), "results")
 os.makedirs(results_dir, exist_ok=True)
 print(f"Results will be saved to: {results_dir}")
 

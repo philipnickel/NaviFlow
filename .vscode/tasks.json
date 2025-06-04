@@ -7,7 +7,7 @@
         "command": "${command:python.interpreterPath}",
         "args": [
           "main.py",
-          "--experiment", "${input:experiment}",
+          "--config", "experiments/${input:experiment}/debugging/config.yaml",
           "--max_iterations", "${input:max_iter}",
           "--reynolds_number", "${input:reynolds_number}",
           "--velocity_relaxation", "${input:velocity_relaxation}",
@@ -31,7 +31,26 @@
         "command": "${command:python.interpreterPath}",
         "args": [
           "naviflow_collocated/utils/postprocess/postprocess.py",
-          "--experiment", "${input:experiment}",
+          "--experiment", "${input:experiment_path:experiments/}",
+          "--all"
+        ],
+        "options": {
+          "cwd": "${workspaceFolder}"
+        },
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "shared",
+          "reveal": "always",
+          "closeOnExit": false
+        }
+      },
+      {
+        "label": "POSTPROCESS Debug",
+        "type": "shell",
+        "command": "${command:python.interpreterPath}",
+        "args": [
+          "naviflow_collocated/utils/postprocess/postprocess.py",
+          "--experiment", "${input:experiment}/debugging",
           "--all"
         ],
         "options": {
@@ -79,9 +98,9 @@
         "type": "shell",
         "command": "open",
         "args": [
-          "${workspaceFolder}/experiments/${input:experiment}/results/residual_fields.pdf",
-          "${workspaceFolder}/experiments/${input:experiment}/results/flow_fields.pdf",
-          "${workspaceFolder}/experiments/${input:experiment}/results/residual_history.pdf",
+          "${workspaceFolder}/experiments/${input:experiment}/debugging/results/plots/residual_fields.pdf",
+          "${workspaceFolder}/experiments/${input:experiment}/debugging/results/plots/flow_fields.pdf",
+          "${workspaceFolder}/experiments/${input:experiment}/debugging/results/plots/residual_history.pdf"
         ],
         "presentation": {
           "reveal": "silent",
@@ -94,7 +113,7 @@
         "type": "shell",
         "command": "open",
         "args": [
-          "${workspaceFolder}/experiments/${input:experiment}/results"
+          "${workspaceFolder}/experiments/${input:experiment}/debugging/results/plots"
         ],
         "presentation": {
           "reveal": "silent",
@@ -180,13 +199,13 @@
           "-o",
           "${workspaceFolder}/experiments/${input:experiment}/profile_results.prof",
           "main.py",
-          "--experiment", "${input:experiment}",
+          "--config", "experiments/${input:experiment}/debugging/config.yaml",
           "--max_iterations", "${input:max_iter}",
-          "--reynolds_number", "100",
-          "--velocity_relaxation", "0.6",
-          "--pressure_relaxation", "0.4",
-          "--tolerance_exponent", "3",
-          "--print_interval", "10",
+          "--reynolds_number", "${input:reynolds_number}",
+          "--velocity_relaxation", "${input:velocity_relaxation}",
+          "--pressure_relaxation", "${input:pressure_relaxation}",
+          "--tolerance_exponent", "${input:tolerance_exponent}",
+          "--print_interval", "${input:print_interval}"
         ],
         "options": {
           "cwd": "${workspaceFolder}"
@@ -202,14 +221,14 @@
     "inputs": [
       {
         "id": "experiment",
-        "type": "pickString",
-        "description": "Choose experiment to run:",
-        "options": [
-          "lidDrivenCavity",
-          "cylinderFlow",
-          "channelFlow"
-        ],
-        "default": "lidDrivenCavity"
+        "description": "Experiment name",
+        "default": "lidDrivenCavity",
+        "type": "promptString"
+      },
+      {
+        "id": "experiment_path",
+        "description": "Full experiment path (e.g., experiments/lidDrivenCavity/ForReport/uniform/coarse/Re_100)",
+        "type": "promptString"
       },
       {
         "id": "max_iter",
@@ -227,7 +246,7 @@
         "id": "velocity_relaxation",
         "type": "promptString",
         "description": "Velocity relaxation factor",
-        "default": "0.8"
+        "default": "0.6"
       },
       {
         "id": "pressure_relaxation",
@@ -263,11 +282,11 @@
         "type": "pickString",
         "description": "Choose mesh type:",
         "options": [
-          "unstructured",
-          "structuredUniform"
+          "uniform",
+          "unstructured"
         ],
-        "default": "structuredUniform"
+        "default": "uniform"
       }
     ]
-  }
+}
   

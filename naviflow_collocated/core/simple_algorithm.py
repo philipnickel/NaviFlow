@@ -339,7 +339,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         accumulated_correction = np.zeros_like(rhs_p)
         grad_p_prime = compute_cell_gradients(mesh, np.ascontiguousarray(p_prime))
         grad_p_prime_face = interpolate_to_face(mesh, np.ascontiguousarray(grad_p_prime))
-        beta_nonortho = 0.75
+        beta_nonortho = 0.6
         
         for _ in range(n_nonortho_corrections):
 

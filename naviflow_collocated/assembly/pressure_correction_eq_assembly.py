@@ -36,7 +36,6 @@ def assemble_pressure_correction_matrix(mesh, rho):
         row[idx] = P; col[idx] = N; data[idx] = -coeff; idx += 1
         row[idx] = N; col[idx] = N; data[idx] =  coeff; idx += 1
         row[idx] = N; col[idx] = P; data[idx] = -coeff; idx += 1
-    """
     
     for i in range(n_boundary):
         f = mesh.boundary_faces[i]
@@ -47,7 +46,6 @@ def assemble_pressure_correction_matrix(mesh, rho):
 
 
         row[idx] = P; col[idx] = P; data[idx] += coeff; idx += 1
-    """
 
 
 
@@ -73,7 +71,6 @@ def pressure_correction_loop_term(mesh, rho, grad_p_prime_f):
         coeff = rho * np.dot(np.ascontiguousarray(grad_p_prime_f[f]), T_f)
         correction_term[P] += coeff
         correction_term[N] -= coeff
-    """
 
     for i in range(n_boundary):
         f = mesh.boundary_faces[i]
@@ -81,7 +78,6 @@ def pressure_correction_loop_term(mesh, rho, grad_p_prime_f):
         T_f = np.ascontiguousarray(mesh.vector_T_f[f])
         coeff = rho * np.dot(np.ascontiguousarray(grad_p_prime_f[f]), T_f)
         correction_term[P] += coeff
-    """
 
 
 

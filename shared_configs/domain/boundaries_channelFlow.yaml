@@ -16,9 +16,7 @@ boundaries:
       gradient: 0.0
 
   left:                      # inlet
-    velocity: 
-      bc: inlet
-      value: [1.0, 0.0]  # Constant inlet velocity
+    velocity: {bc: inlet, value: ["4.0* 1.0 * x[1]*(1.00-x[1])/(1.00*1.00)", "0.0"]}
     pressure:
       bc: neumann
       gradient: 0.0

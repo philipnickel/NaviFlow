@@ -40,6 +40,14 @@ def convert_numpy_types(obj):
         return obj.tolist()
     return obj
 
+def get_experiment_from_config_path(config_path):
+    """Extract experiment name from config file path."""
+    # Split path and get the experiment name (e.g., 'lidDrivenCavity' from 'experiments/lidDrivenCavity/debugging/config.yaml')
+    parts = config_path.split('/')
+    if len(parts) >= 2:
+        return parts[1]  # Return the experiment name
+    return "unknown"
+
 def collect_metadata(
     args,
     config,
@@ -73,10 +81,13 @@ def collect_metadata(
     num_faces = mesh.face_centers.shape[0]
     print(f"Mesh file: {mesh_file}")
 
+    # Get experiment name from config path
+    experiment = get_experiment_from_config_path(args.config)
+
     metadata = {
         # Simulation identification and tracking
         "Simulation id": run_id,
-        "Experiment": args.experiment,
+        "Experiment": experiment,
         "Git commit": git_commit,
         "Wall time (s)": round(end_time - start_time, 3),
         
