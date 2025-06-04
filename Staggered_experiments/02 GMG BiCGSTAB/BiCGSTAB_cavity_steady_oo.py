@@ -12,7 +12,7 @@ from naviflow_staggered.solver.Algorithms.simple import SimpleSolver
 from naviflow_staggered.solver.pressure_solver.matrix_free_BiCGSTAB import MatrixFreeBiCGSTABSolver
 from naviflow_staggered.solver.momentum_solver.jacobi_solver import JacobiMomentumSolver
 from naviflow_staggered.solver.momentum_solver.AMG_solver import AMGMomentumSolver
-from naviflow_staggered.solver.momentum_solver.BiCGSTAB_solver import BiCGSTABMomentumSolver
+from naviflow_staggered.solver.momentum_solver.BiCGSTAB_solver import MatrixMomentumSolver
 from naviflow_staggered.solver.momentum_solver.matrix_free_momentum import MatrixFreeMomentumSolver
 from naviflow_staggered.solver.velocity_solver.standard import StandardVelocityUpdater
 from naviflow_staggered.postprocessing.visualization import plot_final_residuals
@@ -67,7 +67,7 @@ pressure_solver = MatrixFreeBiCGSTABSolver(
     smoother_method_type='red_black'
 )
 #momentum_solver = AMGMomentumSolver(tolerance=1e-6, max_iterations=10000)
-#momentum_solver = BiCGSTABMomentumSolver(tolerance=1e-6, max_iterations=10000)
+#momentum_solver = MatrixMomentumSolver(tolerance=1e-6, max_iterations=10000)
 momentum_solver = MatrixFreeMomentumSolver(tolerance=1e-6, max_iterations=10000, solver_type='bicgstab')
 velocity_updater = StandardVelocityUpdater()
 
