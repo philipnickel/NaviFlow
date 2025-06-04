@@ -45,7 +45,7 @@ def get_obstacle_mask_from_msh(x, y, experiment):
     # Extract base experiment name (remove any path components)
     base_experiment = experiment.split('/')[-1]
     
-    if base_experiment == "cylinderFlow":
+    if base_experiment == "cylinderFlow" or "cylinderFlow" in experiment:
         # Cylinder center and radius from mesh generation
         center = np.array([0.2, 0.2])
         radius = 0.05

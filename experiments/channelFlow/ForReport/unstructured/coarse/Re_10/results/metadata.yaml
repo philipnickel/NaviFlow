@@ -1,0 +1,25 @@
+Simulation id: 2fafefd6
+Experiment: channelFlow
+Git commit: '8038575'
+Wall time (s): '80.51'
+Reynolds number: 10
+Mesh type: Unstructured
+Number of control volumes: 3518
+Boundary conditions: shared_configs/domain/boundaries_channelFlow.yaml
+Algorithm: SIMPLE
+Convection scheme: Upwind
+Limiter: None
+Convergence tolerance: 1e-4
+Momentum relaxation: '0.6'
+Pressure relaxation: '0.2'
+Momentum solver: bcgs
+Momentum solver preconditioner: hypre
+Momentum solver tolerance: 1e-7
+Pressure solver: bcgs
+Pressure solver preconditioner: hypre
+Pressure solver tolerance: 1e-10
+Non-orthogonal corrections: 1
+Number of iterations: 2301
+Final u-residual: '4.66e-5'
+Final v-residual: '6.41e-5'
+Final continuity-residual: '1.71e-3'

@@ -217,7 +217,10 @@ def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
         Simulation ID for plot annotation
     """
     # Get channel parameters from config
-    with open(os.path.join("experiments", "channelFlow", "config.yaml"), "r") as f:
+    # Construct path to config.yaml in the experiment directory
+    experiment_dir = os.path.dirname(os.path.dirname(os.path.dirname(output_path)))
+    config_path = os.path.join(experiment_dir, "config.yaml")
+    with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     u_inlet = config["physical_properties"]["characteristic_velocity"]  # Inlet velocity
     rho = config["physical_properties"]["rho"]

@@ -21,9 +21,9 @@ def get_obstacle_mask_from_msh(x, y, experiment):
     For 'cylinderFlow', use a geometric mask based on known center and radius.
     Returns a boolean mask where True means obstacle cell (physical tag 5 or inside obstacle geometry).
     """
-    if experiment == "cylinderFlow":
+    if experiment == "cylinderFlow" or "cylinderFlow" in experiment:
         # Cylinder center and radius from mesh generation
-        center = np.array([0.2, 0.2])
+        center = np.array([0.2, 0.2])  # Updated cylinder center
         radius = 0.05
         dist = np.sqrt((x - center[0])**2 + (y - center[1])**2)
         mask = dist < radius

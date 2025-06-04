@@ -1,25 +1,25 @@
-Simulation id: 87456c36
+Simulation id: 210dea53
 Experiment: cylinderFlow
-Git commit: 3553f0b
-Wall time (s): '2612.12'
+Git commit: '8038575'
+Wall time (s): '1101.86'
 Reynolds number: 5
 Mesh type: Unstructured
-Number of control volumes: 47119
+Number of control volumes: 30834
 Boundary conditions: shared_configs/domain/boundaries_cylinderFlow.yaml
 Algorithm: SIMPLE
-Convection scheme: Upwind
-Limiter: None
+Convection scheme: TVD
+Limiter: MUSCL
 Convergence tolerance: 1e-4
 Momentum relaxation: '0.6'
 Pressure relaxation: '0.2'
 Momentum solver: bcgs
 Momentum solver preconditioner: hypre
-Momentum solver tolerance: 1e-7
+Momentum solver tolerance: 1e-8
 Pressure solver: bcgs
 Pressure solver preconditioner: hypre
 Pressure solver tolerance: 1e-10
-Non-orthogonal corrections: 2
-Number of iterations: 5101
+Non-orthogonal corrections: 1
+Number of iterations: 5061
 Final u-residual: 0e0
 Final v-residual: 0e0
 Final continuity-residual: 0e0

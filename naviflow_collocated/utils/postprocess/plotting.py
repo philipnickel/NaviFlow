@@ -75,7 +75,7 @@ def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_p
         ax.set_ylim(ylim)
 
     # Overlay and fill obstacle boundary for cylinderFlow
-    if experiment == "cylinderFlow":
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         for ax in axes:
@@ -153,8 +153,8 @@ def plot_residual_fields(x, y, u_res, v_res, cont_res, output_path, sim_id=None,
     axes[2].set_title(titles[2])
     axes[2].set_aspect('equal', 'box')
 
-    # Overlay and fill obstacle boundary for cylinderFlow
-    if experiment == "cylinderFlow":
+    # Add cylinder for cylinderFlow cases
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         for ax in axes:
@@ -190,20 +190,6 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
     # Calculate velocity magnitude for coloring
     velocity_magnitude = np.sqrt(Ug**2 + Vg**2)
     
-    # Mask obstacle region in streamline generation for cylinderFlow
-    if experiment == "cylinderFlow":
-        center = np.array([0.2, 0.2])
-        radius = 0.05
-        dist = np.sqrt((Xg - center[0])**2 + (Yg - center[1])**2)
-        mask = dist < radius
-        Ug[mask] = np.nan
-        Vg[mask] = np.nan
-        velocity_magnitude[mask] = np.nan
-        
-        # Add cylinder
-        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
-        ax.add_patch(circle)
-    
     # Plot velocity magnitude as background
     im = ax.pcolormesh(Xg, Yg, velocity_magnitude, 
                        cmap='coolwarm',
@@ -215,7 +201,7 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
                         color='tab:blue',
                         density=2.0,
                         linewidth=0.5,
-                        arrowsize=0.3)  # Just the basic appearance parameters
+                        arrowsize=0.3)
     
     # Add horizontal colorbar for velocity magnitude
     divider = make_axes_locatable(ax)
@@ -227,9 +213,9 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
     
     # Set title and labels
     title = "Streamlines"
+    ax.set_title(title, fontsize=14)
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title)
+        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
     ax.set_aspect('equal', 'box')
     
     # Remove axis labels and grid
@@ -240,6 +226,13 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
     # Ensure the plot covers the entire domain
     ax.set_xlim(np.min(x), np.max(x))
     ax.set_ylim(np.min(y), np.max(y))
+    
+    # Add cylinder for cylinderFlow cases
+    if "cylinderFlow" in experiment:
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
     
     fig.tight_layout(pad=0.1)
     save_pdf(fig, output_path)
@@ -292,11 +285,11 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "u-velocity"
+    ax.set_title(title, fontsize=14)
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title)
+        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
     ax.set_aspect('equal', 'box')
-    if experiment == "cylinderFlow":
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
@@ -316,11 +309,11 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "v-velocity"
+    ax.set_title(title, fontsize=14)
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title)
+        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
     ax.set_aspect('equal', 'box')
-    if experiment == "cylinderFlow":
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
@@ -340,11 +333,11 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "Velocity Magnitude"
+    ax.set_title(title, fontsize=14)
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title)
+        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
     ax.set_aspect('equal', 'box')
-    if experiment == "cylinderFlow":
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
@@ -364,11 +357,11 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "Pressure"
+    ax.set_title(title, fontsize=14)
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title)
+        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
     ax.set_aspect('equal', 'box')
-    if experiment == "cylinderFlow":
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
@@ -383,24 +376,21 @@ def save_individual_field_plots(x, y, U, velocity_magnitude, p, experiment, Re, 
 def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re, sim_id, results_dir):
     plots_dir = os.path.join(results_dir, "plots")
     os.makedirs(plots_dir, exist_ok=True)
-    obstacle_mask = get_obstacle_mask_from_msh(x, y, experiment)
 
     # U residual
     fig, ax = plt.subplots(figsize=(8, 6))
     cf = ax.tricontourf(x, y, np.abs(u_res), levels=50, cmap='viridis')
-    if np.any(obstacle_mask):
-        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], np.abs(u_res[obstacle_mask]), levels=1, colors='gray', alpha=0.5)
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("bottom", size="5%", pad=0.3)
     cbar = fig.colorbar(cf, cax=cax, orientation='horizontal')
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "U Residual"
+    ax.set_title(title, fontsize=14)
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title)
+        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
     ax.set_aspect('equal', 'box')
-    if experiment == "cylinderFlow":
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
@@ -412,19 +402,17 @@ def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re,
     # V residual
     fig, ax = plt.subplots(figsize=(8, 6))
     cf = ax.tricontourf(x, y, np.abs(v_res), levels=50, cmap='viridis')
-    if np.any(obstacle_mask):
-        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], np.abs(v_res[obstacle_mask]), levels=1, colors='gray', alpha=0.5)
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("bottom", size="5%", pad=0.3)
     cbar = fig.colorbar(cf, cax=cax, orientation='horizontal')
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "V Residual"
+    ax.set_title(title, fontsize=14)
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title)
+        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
     ax.set_aspect('equal', 'box')
-    if experiment == "cylinderFlow":
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
@@ -436,19 +424,17 @@ def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re,
     # Continuity residual
     fig, ax = plt.subplots(figsize=(8, 6))
     cf = ax.tricontourf(x, y, np.abs(cont_res), levels=50, cmap='viridis')
-    if np.any(obstacle_mask):
-        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], np.abs(cont_res[obstacle_mask]), levels=1, colors='gray', alpha=0.5)
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("bottom", size="5%", pad=0.3)
     cbar = fig.colorbar(cf, cax=cax, orientation='horizontal')
     cbar.formatter.set_scientific(True)
     cbar.formatter.set_powerlimits((0, 0))
     title = "Continuity Residual"
+    ax.set_title(title, fontsize=14)
     if sim_id is not None:
-        title += f" | Simulation ID: {sim_id}"
-    ax.set_title(title)
+        ax.text(1.0, 1.0, f"Simulation ID: {sim_id}", transform=ax.transAxes, ha='left', va='top', fontsize=8, color='gray')
     ax.set_aspect('equal', 'box')
-    if experiment == "cylinderFlow":
+    if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
         radius = 0.05
         circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
