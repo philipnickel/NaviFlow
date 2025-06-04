@@ -1,7 +1,7 @@
-Simulation id: b1411540
+Simulation id: 4e3a4685
 Experiment: cylinderFlow
-Git commit: 32196fe
-Wall time (s): '788.62'
+Git commit: eaa02e5
+Wall time (s): '231.44'
 Reynolds number: 20
 Mesh type: Unstructured
 Number of control volumes: 30834
@@ -19,7 +19,7 @@ Pressure solver: bcgs
 Pressure solver preconditioner: hypre
 Pressure solver tolerance: 1e-10
 Non-orthogonal corrections: 1
-Number of iterations: 3901
-Final u-residual: '8.8e-5'
-Final v-residual: '6.73e-5'
-Final continuity-residual: '5.4e-4'
+Number of iterations: 1402
+Final u-residual: 0e0
+Final v-residual: 0e0
+Final continuity-residual: 0e0

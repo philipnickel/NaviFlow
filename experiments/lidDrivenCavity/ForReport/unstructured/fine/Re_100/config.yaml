@@ -18,7 +18,7 @@ algorithm:
   relaxation_factors:
     velocity: 0.6
     pressure: 0.3
-  max_iterations: 10000
+  max_iterations: 200
   convergence_criteria:
     residual: 1e-4
   convection_discretization: "Upwind" 

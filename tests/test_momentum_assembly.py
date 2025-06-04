@@ -408,4 +408,37 @@ if __name__ == "__main__":
     plt.savefig("tests/test_output/MMS_convergence/convergence_plot_unstructured.pdf", dpi=300)
     plt.close('all')
     
+    # Generate actual solution plots for coarse meshes
+    print("\nGenerating solution plots for coarse meshes...")
+    
+    for tag, expr in mms_cases.items():
+        mu = 0.1
+        rho = 0.0
+        scheme = "SOU"  # Use SOU scheme for solution plots
+        limiter = "MUSCL"
+        u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
+        bc_file = BC_files[tag]
+        
+        # Generate solution plot for structured coarse mesh
+        run_mms_test(
+            structured_uniform["coarse"],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_structured_coarse_{scheme}",
+            component_idx=0,
+            scheme=scheme,
+            limiter=limiter
+        )
+        
+        # Generate solution plot for unstructured coarse mesh
+        run_mms_test(
+            unstructured["coarse"],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_unstructured_coarse_{scheme}",
+            component_idx=0,
+            scheme=scheme,
+            limiter=limiter
+        )
+    
     print(f"Time taken: {time.time() - time_start:.2f} seconds")

@@ -129,7 +129,7 @@ if __name__ == "__main__":
     experiment = args.experiment
     # Remove experiments/ prefix if it exists
     if experiment.startswith("experiments/"):
-        experiment = experiment[11:]  # Remove "experiments/"
+        experiment = experiment[12:]  # Remove "experiments/" (12 characters, not 11)
     # Remove /debugging suffix if it exists
     if experiment.endswith("/debugging"):
         experiment = experiment[:-10]  # Remove "/debugging"

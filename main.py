@@ -10,6 +10,7 @@ from naviflow_collocated.mesh.mesh_loader import load_mesh
 from naviflow_collocated.core.simple_algorithm import simple_algorithm, calculate_cylinder_forces  
 from naviflow_collocated.utils.logger import ResidualLogger
 from naviflow_collocated.utils.metadata import collect_metadata
+from naviflow_collocated.discretization.gradient.leastSquares import compute_cell_gradients
 
 
 
@@ -180,9 +181,13 @@ if status["diverging"]:
 if status["stalled"]:
     print("Residuals stalled — notify or flag post-analysis.")
 
-# Calculate final lift and drag coefficients
+# Calculate final lift and drag coefficients - compute gradients first
+grad_p_final = compute_cell_gradients(mesh, p, weighted=True, weight_exponent=0.5, use_limiter=False)
+grad_u_final = compute_cell_gradients(mesh, U[:, 0], weighted=True, weight_exponent=0.5, use_limiter=True)
+grad_v_final = compute_cell_gradients(mesh, U[:, 1], weighted=True, weight_exponent=0.5, use_limiter=True)
+
 U_inf = config["physical_properties"].get("characteristic_velocity", 1.0)
-cd, cl = calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D)
+cd, cl = calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D, grad_p_final, grad_u_final, grad_v_final)
 print(f"DEBUG: cd type: {type(cd)}, shape: {getattr(cd, 'shape', 'scalar')}")
 print(f"DEBUG: cl type: {type(cl)}, shape: {getattr(cl, 'shape', 'scalar')}")
 cd = cd.item() if hasattr(cd, 'item') else float(cd)

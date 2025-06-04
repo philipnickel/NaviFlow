@@ -1,7 +1,7 @@
-Simulation id: faf37ba2
+Simulation id: c942b798
 Experiment: channelFlow
-Git commit: 3553f0b
-Wall time (s): '1038.96'
+Git commit: eaa02e5
+Wall time (s): '411.8'
 Reynolds number: 10
 Mesh type: Unstructured
 Number of control volumes: 14304
@@ -18,8 +18,8 @@ Momentum solver tolerance: 1e-7
 Pressure solver: bcgs
 Pressure solver preconditioner: hypre
 Pressure solver tolerance: 1e-10
-Non-orthogonal corrections: 2
-Number of iterations: 7001
-Final u-residual: '9.8e-5'
-Final v-residual: '7.53e-5'
-Final continuity-residual: '1.27e-3'
+Non-orthogonal corrections: 1
+Number of iterations: 5727
+Final u-residual: 0e0
+Final v-residual: 0e0
+Final continuity-residual: 0e0

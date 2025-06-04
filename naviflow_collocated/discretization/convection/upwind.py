@@ -20,7 +20,7 @@ def OSPRE(r):
 def H_Cui(r):
     return (3 * (r + abs(r))) / (2 * (r + 2 + 1e-12)) if r > 0 else 0.0
 
-@njit(inline="always")
+@njit(inline="always", cache=True, fastmath=True)
 def compute_convective_stencil(
     f, mesh, rho, mdot, u_field, grad_phi, component_idx,
     phi, scheme="Upwind", limiter=None
@@ -103,7 +103,7 @@ def compute_convective_stencil(
 
     return Flux_P_f, Flux_N_f, convDC
 
-@njit(inline="always")
+@njit(inline="always", cache=True, fastmath=True)
 def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, p_b, bc_type, bc_value, component_idx):
     """
     First-order upwind boundary convection flux for a specific velocity component.

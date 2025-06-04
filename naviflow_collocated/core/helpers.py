@@ -84,28 +84,71 @@ def compute_residual(data, indices, indptr, x, b, max_residual=None, norm_indice
     
     return L2_res, res_field
 
-@njit(cache=True)
+@njit(parallel=True, cache=True)
 def interpolate_to_face(mesh, quantity):
     """
-    Interpolate quantity to faces using face_interp_factors
-    Quantity may be vector or scalar
+    Optimized interpolation to faces with better memory access patterns.
+    Handles both scalar and vector quantities efficiently.
     """
     n_faces = mesh.face_areas.shape[0]
     n_internal = mesh.internal_faces.shape[0]
     n_boundary = mesh.boundary_faces.shape[0]
-    interpolated_quantity = np.zeros((n_faces, quantity.shape[1]), dtype=np.float64)
+    
+    if quantity.ndim == 1:
+        # Scalar field
+        interpolated_quantity = np.zeros((n_faces, 1), dtype=np.float64)
+        
+        # Process internal faces
+        for i in prange(n_internal):
+            f = mesh.internal_faces[i]
+            P = mesh.owner_cells[f]
+            N = mesh.neighbor_cells[f]
+            gf = mesh.face_interp_factors[f]
+            interpolated_quantity[f, 0] = gf * quantity[N] + (1.0 - gf) * quantity[P]
 
-    for i in prange(n_internal):
-        f = mesh.internal_faces[i]
-        P = mesh.owner_cells[f]
-        N = mesh.neighbor_cells[f]
-        gf = mesh.face_interp_factors[f]
-        interpolated_quantity[f] = gf * quantity[N] + (1.0 - gf) * quantity[P]
+        # Process boundary faces
+        for i in prange(n_boundary):
+            f = mesh.boundary_faces[i]
+            P = mesh.owner_cells[f]
+            interpolated_quantity[f, 0] = quantity[P]
+            
+    else:
+        # Vector field - optimized for common 2D case
+        n_components = quantity.shape[1]
+        interpolated_quantity = np.zeros((n_faces, n_components), dtype=np.float64)
+        
+        if n_components == 2:
+            # Optimized 2D vector case with manual unrolling
+            for i in prange(n_internal):
+                f = mesh.internal_faces[i]
+                P = mesh.owner_cells[f]
+                N = mesh.neighbor_cells[f]
+                gf = mesh.face_interp_factors[f]
+                
+                interpolated_quantity[f, 0] = gf * quantity[N, 0] + (1.0 - gf) * quantity[P, 0]
+                interpolated_quantity[f, 1] = gf * quantity[N, 1] + (1.0 - gf) * quantity[P, 1]
 
-    for i in prange(n_boundary):
-        f = mesh.boundary_faces[i]
-        P = mesh.owner_cells[f]
-        interpolated_quantity[f] = quantity[P]
+            for i in prange(n_boundary):
+                f = mesh.boundary_faces[i]
+                P = mesh.owner_cells[f]
+                interpolated_quantity[f, 0] = quantity[P, 0]
+                interpolated_quantity[f, 1] = quantity[P, 1]
+        else:
+            # General vector case
+            for i in prange(n_internal):
+                f = mesh.internal_faces[i]
+                P = mesh.owner_cells[f]
+                N = mesh.neighbor_cells[f]
+                gf = mesh.face_interp_factors[f]
+                
+                for c in range(n_components):
+                    interpolated_quantity[f, c] = gf * quantity[N, c] + (1.0 - gf) * quantity[P, c]
+
+            for i in prange(n_boundary):
+                f = mesh.boundary_faces[i]
+                P = mesh.owner_cells[f]
+                for c in range(n_components):
+                    interpolated_quantity[f, c] = quantity[P, c]
 
     return interpolated_quantity
 

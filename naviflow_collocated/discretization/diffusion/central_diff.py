@@ -13,43 +13,30 @@ BC_OBSTACLE = 4
 # ──────────────────────────────────────────────────────────────────────────────
 # Internal faces
 # ──────────────────────────────────────────────────────────────────────────────
-@njit(inline="always")
+@njit(inline="always", cache=True, fastmath=True)
 def compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu):
     """
     Over‑relaxed implicit conductance for one internal face.
-
-    Parameters
-    ----------
-    f : int
-        Face index.
-    mesh : MeshData2D
-        Pre‑computed geometric data (contains vector_E_f, vector_d_CE, etc.).
-    mu : float or array_like
-        Diffusion coefficient Γ.  If a scalar, assumed uniform; if an array, face‑based.
-
-    Returns
-    -------
-    P : int
-        Owner cell index.
-    N : int
-        Neighbour cell index (≥0 for internal faces).
-    D_f : float
-        Positive conductance that multiplies (φ_N − φ_P) in the matrix
-        stencil.  
+    Optimized with pre-fetched mesh data and manual norm calculations.
     """
-
-    P   = mesh.owner_cells[f]
-    N   = mesh.neighbor_cells[f]
+    # Pre-fetch connectivity and mesh data (better cache locality)
+    P = mesh.owner_cells[f]
+    N = mesh.neighbor_cells[f]
     mu_f = mu 
 
-    E_f  = mesh.vector_E_f[f]          # orthogonal implicit conductance
-    d_CE = mesh.vector_d_CE[f]
+    # Pre-fetch and cache vector components (single memory access per component)
+    vector_E_f = mesh.vector_E_f[f]
+    vector_d_CE = mesh.vector_d_CE[f]
+    E_f_0 = vector_E_f[0]
+    E_f_1 = vector_E_f[1]
+    d_CE_0 = vector_d_CE[0]
+    d_CE_1 = vector_d_CE[1]
 
-    E_mag = np.linalg.norm(E_f) 
-    d_mag = np.linalg.norm(d_CE) 
+    # Manual norm calculations (faster than np.linalg.norm)
+    E_mag = np.sqrt(E_f_0 * E_f_0 + E_f_1 * E_f_1)
+    d_mag = np.sqrt(d_CE_0 * d_CE_0 + d_CE_1 * d_CE_1)
 
-    # ---- over‑relaxed orthogonal conductance (Eq 8.58) --------------------
-    # |E_f|  = projection length of S_f on d_CE after over‑relaxed scaling
+    # Over‑relaxed orthogonal conductance (Eq 8.58)
     geoDiff = E_mag / d_mag
     Flux_P_f = mu_f * geoDiff
     Flux_N_f = -mu_f * geoDiff
@@ -57,30 +44,50 @@ def compute_diffusive_flux_matrix_entry(f, grad_phi, mesh, mu):
     return Flux_P_f, Flux_N_f
 
 
-@njit(inline="always")
+@njit(inline="always", cache=True, fastmath=True)
 def compute_diffusive_correction(f, grad_phi, mesh, mu):
+    """
+    Compute diffusive correction term with optimized memory access patterns.
+    """
+    # Pre-fetch connectivity
     P = mesh.owner_cells[f]
     N = mesh.neighbor_cells[f]
     muF = mu 
-    T_f = np.ascontiguousarray(mesh.vector_T_f[f])
+    
+    # Pre-fetch vector components (single array access each)
+    vector_T_f = mesh.vector_T_f[f]
+    vector_skewness = mesh.vector_skewness[f]
+    T_f_0 = vector_T_f[0]
+    T_f_1 = vector_T_f[1]
+    d_skew_0 = vector_skewness[0]
+    d_skew_1 = vector_skewness[1]
 
-    # Compute cross-diffusion term
-    grad_P = grad_phi[P]
-    grad_N = grad_phi[N]
+    # Pre-fetch gradient data (better cache locality)
+    grad_phi_P = grad_phi[P]
+    grad_phi_N = grad_phi[N]
+    gradC_0 = grad_phi_P[0]
+    gradC_1 = grad_phi_P[1]
+    gradN_0 = grad_phi_N[0]
+    gradN_1 = grad_phi_N[1]
+    
+    # Single access to interpolation factor
     g_f = mesh.face_interp_factors[f]
-    grad_f = (1 - g_f) * grad_P + g_f * grad_N
+    grad_f_0 = (1.0 - g_f) * gradC_0 + g_f * gradN_0
+    grad_f_1 = (1.0 - g_f) * gradC_1 + g_f * gradN_1
 
-    d_skew = np.ascontiguousarray(mesh.vector_skewness[f]) 
-    grad_f_mark = grad_f + np.dot(grad_f, d_skew) 
+    # Skewness correction with pre-fetched components
+    skew_dot = grad_f_0 * d_skew_0 + grad_f_1 * d_skew_1
+    grad_f_mark_0 = grad_f_0 + skew_dot * d_skew_0
+    grad_f_mark_1 = grad_f_1 + skew_dot * d_skew_1
 
-    # Moukalled 15.72
-    diffDC = -muF * np.dot(grad_f_mark, T_f)
+    # Manual dot product (Moukalled 15.72)
+    diffDC = -muF * (grad_f_mark_0 * T_f_0 + grad_f_mark_1 * T_f_1)
     return diffDC
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Boundary faces
 # ──────────────────────────────────────────────────────────────────────────────
-@njit(inline="always")
+@njit(inline="always", cache=True, fastmath=True)
 def compute_boundary_diffusive_correction(
         f,U, grad_phi, mesh, mu, p_b, bc_type, bc_val, component_idx):
     """

@@ -75,6 +75,11 @@ bash run_experiment.sh --experiment cylinderFlow --reynolds 5 --mesh-type unstru
 bash run_experiment.sh --experiment cylinderFlow --reynolds 20 --mesh-type unstructured --mesh-size medium --postprocess
 ```
 
+# profiling
+```bash
+python -m cProfile -o lidDrivenCavity.prof main.py --config experiments/lidDrivenCavity/ForReport/unstructured/fine/Re_100/config.yaml
+```
+
 ### Postprocessing
 You can also run postprocessing separately:
 ```bash

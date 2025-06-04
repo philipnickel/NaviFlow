@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import numpy.linalg as la
 from scipy.sparse import coo_matrix
 from naviflow_collocated.assembly.convection_diffusion_matrix import assemble_diffusion_convection_matrix
 from naviflow_collocated.discretization.gradient.leastSquares import compute_cell_gradients
@@ -14,6 +15,9 @@ from naviflow_collocated.core.helpers import bold_Dv_calculation, interpolate_to
 import time
 from numba import njit
 
+# Set up persistent Numba cache for faster subsequent runs
+os.environ['NUMBA_CACHE_DIR'] = os.path.expanduser('~/.numba_cache')
+os.makedirs(os.environ['NUMBA_CACHE_DIR'], exist_ok=True)
 
 def piso_corrector_loop(mesh, A_p, ksp, mdot_start, rho, bold_D, U_star_rc, U_star, p, alpha_p, num_corrections=1):
     """
@@ -67,7 +71,7 @@ def piso_corrector_loop(mesh, A_p, ksp, mdot_start, rho, bold_D, U_star_rc, U_st
         p_prime, _, _ = petsc_solver(A_p, -rhs_p)
 
         # Step 3: velocity correction
-        grad_p_prime = compute_cell_gradients(mesh, p_prime)
+        grad_p_prime = compute_cell_gradients(mesh, p_prime, weighted=True, weight_exponent=0.5, use_limiter=False)
         U_prime = velocity_correction(mesh, grad_p_prime, bold_D)
         U += U_prime
         U_faces = interpolate_to_face(mesh, U)
@@ -203,11 +207,11 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         #=============================================================================
         # PRECOMPUTE QUANTITIES
         #=============================================================================
-        grad_p = compute_cell_gradients(mesh, np.ascontiguousarray(p))
+        grad_p = compute_cell_gradients(mesh, np.ascontiguousarray(p), weighted=True, weight_exponent=0.5, use_limiter=False)
         grad_p_bar = interpolate_to_face(mesh, np.ascontiguousarray(grad_p))
         U_old_bar = interpolate_to_face(mesh, np.ascontiguousarray(U))
-        grad_u = compute_cell_gradients(mesh, np.ascontiguousarray(U[:,0]))
-        grad_v = compute_cell_gradients(mesh, np.ascontiguousarray(U[:,1]))
+        grad_u = compute_cell_gradients(mesh, np.ascontiguousarray(U[:,0]), weighted=True, weight_exponent=0.5, use_limiter=True)
+        grad_v = compute_cell_gradients(mesh, np.ascontiguousarray(U[:,1]), weighted=True, weight_exponent=0.5, use_limiter=True)
 
         #=============================================================================
         # ASSEMBLE and solve U-MOMENTUM EQUATIONS
@@ -337,7 +341,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
 
         # Initialize accumulated correction term
         accumulated_correction = np.zeros_like(rhs_p)
-        grad_p_prime = compute_cell_gradients(mesh, np.ascontiguousarray(p_prime))
+        grad_p_prime = compute_cell_gradients(mesh, np.ascontiguousarray(p_prime), weighted=True, weight_exponent=0.5, use_limiter=False)
         grad_p_prime_face = interpolate_to_face(mesh, np.ascontiguousarray(grad_p_prime))
         beta_nonortho = 0.6
         
@@ -359,7 +363,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
             p_prime = p_prime_new #(1 - beta_nonortho) * p_prime + beta_nonortho * p_prime_new
 
 
-            grad_p_prime = compute_cell_gradients(mesh, np.ascontiguousarray(p_prime))
+            grad_p_prime = compute_cell_gradients(mesh, np.ascontiguousarray(p_prime), weighted=True, weight_exponent=0.5, use_limiter=False)
             grad_p_prime_face = interpolate_to_face(mesh, np.ascontiguousarray(grad_p_prime))
 
 
@@ -396,8 +400,8 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
         U_old = U_2star
         mdot = mdot_2star
 
-        # Calculate force coefficients
-        cd, cl = calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf=0.2, D=0.1)  # Using correct U_inf from config
+        # Calculate force coefficients - reuse gradients from earlier
+        cd, cl = calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf=0.2, D=0.1, grad_p=grad_p, grad_u=grad_u, grad_v=grad_v)
         cd_history[i] = cd
         cl_history[i] = cl
 
@@ -430,7 +434,7 @@ def simple_algorithm(mesh, alpha_uv, alpha_p, rho, mu, max_iter, tol, convection
     return U, p, rhs_p, u_l2norm, v_l2norm, continuity_l2norm, u_residual, v_residual, mdot, cd_history, cl_history 
 
 @njit(cache=True)
-def calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D):
+def calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D, grad_p, grad_u, grad_v):
     """
     Calculate lift and drag coefficients for flow past a cylinder.
     
@@ -449,6 +453,12 @@ def calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D):
         Free stream velocity
     D : float
         Cylinder diameter
+    grad_p : ndarray
+        Pressure gradient at cell centers
+    grad_u : ndarray
+        Velocity gradient in x direction at cell centers
+    grad_v : ndarray
+        Velocity gradient in y direction at cell centers
         
     Returns
     -------
@@ -465,11 +475,6 @@ def calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D):
             cylinder_faces.append(f)
     
     cylinder_faces = np.array(cylinder_faces)
-    
-    # Precompute gradients (outside the loop)
-    grad_p = compute_cell_gradients(mesh, p)
-    grad_u = compute_cell_gradients(mesh, U[:, 0])
-    grad_v = compute_cell_gradients(mesh, U[:, 1])
     
     # Initialize force components
     Fx = 0.0  # Drag force

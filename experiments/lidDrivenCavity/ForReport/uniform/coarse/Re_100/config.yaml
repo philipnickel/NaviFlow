@@ -23,7 +23,7 @@ algorithm:
     pressure: 0.3
   max_iterations: 10000 # may be overwritten by command line arguments
   convergence_criteria:
-    residual: 1e-4
+    residual: 1e-5
   convection_discretization: "Upwind" 
   limiter: None
   non_orthogonal_corrections: 2

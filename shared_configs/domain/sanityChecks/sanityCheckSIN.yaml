@@ -1,7 +1,7 @@
 boundaries:
   left:
     velocity:
-      bc: wall 
+      bc: dirichlet
       value: ["np.cos(np.pi * x[1]) * np.sin(np.pi * x[0])",
               "-np.cos(np.pi * x[0]) * np.sin(np.pi * x[1])"]
     pressure:
@@ -10,7 +10,7 @@ boundaries:
 
   right:
     velocity:
-      bc: wall
+      bc: dirichlet
       value: ["np.cos(np.pi * x[1]) * np.sin(np.pi * x[0])",
               "-np.cos(np.pi * x[0]) * np.sin(np.pi * x[1])"]
     pressure:
@@ -19,7 +19,7 @@ boundaries:
 
   top:
     velocity:
-      bc: wall
+      bc: dirichlet
       value: ["np.cos(np.pi * x[1]) * np.sin(np.pi * x[0])",
               "-np.cos(np.pi * x[0]) * np.sin(np.pi * x[1])"]
     pressure:
@@ -28,7 +28,7 @@ boundaries:
 
   bottom:
     velocity:
-      bc: wall
+      bc: dirichlet
       value: ["np.cos(np.pi * x[1]) * np.sin(np.pi * x[0])",
               "-np.cos(np.pi * x[0]) * np.sin(np.pi * x[1])"]
     pressure:
