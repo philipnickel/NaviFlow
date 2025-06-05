@@ -1,40 +1,41 @@
-name: "cylinderFlow"
-description: "Unstructured medium mesh simulation for Cylinder flow at Re=20"
-tags: ["cylinderFlow", "unstructured", "medium", "Re20"]
-experiment: "cylinderFlow"
-
+name: cylinderFlow
+description: Unstructured medium mesh simulation for Cylinder flow at Re=20
+tags:
+- cylinderFlow
+- unstructured
+- medium
+- Re20
+experiment: cylinderFlow
 domain:
-  mesh: [unstructured, medium]  # Unstructured medium mesh
-  boundary_conditions: "shared_configs/domain/boundaries_cylinderFlow.yaml"
-
+  mesh:
+  - unstructured
+  - medium
+  boundary_conditions: shared_configs/domain/boundaries_cylinderFlow.yaml
 physical_properties:
-  rho: 1.0         # Density
+  rho: 1.0
   reynolds_number: 20
-  characteristic_length: 0.1  # Cylinder diameter
+  characteristic_length: 0.1
   characteristic_velocity: 1.0
-
 algorithm:
-  type: "SIMPLE"
+  type: SIMPLE
   relaxation_factors:
     velocity: 0.5
     pressure: 0.1
-  max_iterations: 100000
+  max_iterations: 20000
   convergence_criteria:
     residual: 1e-7
-  convection_discretization: "TVD"
+  convection_discretization: TVD
   limiter: MUSCL
   non_orthogonal_corrections: 1
-
 linear_solvers:
   momentum:
-    type: "bcgs"
-    preconditioner: "hypre"
+    type: bcgs
+    preconditioner: hypre
     tolerance: 1e-8
     max_iterations: 100000
   pressure:
-    type: "bcgs"
-    preconditioner: "hypre"
+    type: bcgs
+    preconditioner: hypre
     tolerance: 1e-10
     max_iterations: 100000
-
-numba_cores: 6 
+numba_cores: 6

@@ -412,7 +412,17 @@ def compare_experiments(experiment_paths, output_dir, title=None):
         if ghia is None:
             print(f"No Ghia data available for Re={Re}")
             continue
-        output_path = os.path.join(output_dir, f'lid_driven_cavity_comparison_Re_{Re}.pdf')
+        
+        # Create filename using title if provided
+        if title:
+            # Sanitize title for filename (replace special characters)
+            safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            safe_title = safe_title.replace(' ', '_')
+            filename = f'{safe_title}_Re_{Re}.pdf'
+        else:
+            filename = f'lid_driven_cavity_comparison_Re_{Re}.pdf'
+        
+        output_path = os.path.join(output_dir, filename)
         plot_comparison(exps, ghia, output_path, title)
         print(f"Saved comparison plot to {output_path}")
 

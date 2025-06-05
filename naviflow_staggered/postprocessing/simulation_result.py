@@ -333,29 +333,58 @@ class SimulationResult:
         """
         if not self.residuals:
             raise ValueError("No residuals available to plot")
-            
+        
+        # Apply stall detection and trimming
+        residual_dict = {
+            'total': self.residuals,
+            'momentum': self.momentum_residuals if self.momentum_residuals else [],
+            'pressure': self.pressure_residuals if self.pressure_residuals else []
+        }
+        
+        # Remove empty arrays
+        residual_dict = {k: v for k, v in residual_dict.items() if v}
+        
+        trimmed_residuals, stall_info = self._trim_stalled_residuals(residual_dict, keep_stalled_iterations=500)
+        
         plt.figure(figsize=(10, 6))
         
         # Plot total residuals
-        iterations = range(1, len(self.residuals) + 1)
-        plt.semilogy(iterations, self.residuals, 'b-', linewidth=2, label='Total Residual')
+        total_residuals = trimmed_residuals['total']
+        iterations = range(1, len(total_residuals) + 1)
+        plt.semilogy(iterations, total_residuals, 'b-', linewidth=2, label='Total Residual')
         
         # Plot component residuals if available
-        if self.momentum_residuals and len(self.momentum_residuals) == len(self.residuals):
-            plt.semilogy(iterations, self.momentum_residuals, 'r--', linewidth=1.5, label='Momentum Residual')
+        if 'momentum' in trimmed_residuals:
+            momentum_residuals = trimmed_residuals['momentum']
+            if len(momentum_residuals) == len(total_residuals):
+                plt.semilogy(iterations, momentum_residuals, 'r--', linewidth=1.5, label='Momentum Residual')
             
-        if self.pressure_residuals and len(self.pressure_residuals) == len(self.residuals):
-            plt.semilogy(iterations, self.pressure_residuals, 'g-.', linewidth=1.5, label='Pressure Residual')
+        if 'pressure' in trimmed_residuals:
+            pressure_residuals = trimmed_residuals['pressure']
+            if len(pressure_residuals) == len(total_residuals):
+                plt.semilogy(iterations, pressure_residuals, 'g-.', linewidth=1.5, label='Pressure Residual')
+        
+        # Add stall indicator if residuals were trimmed
+        if stall_info['stalled']:
+            stall_line_pos = stall_info['earliest_stall']
+            if 0 <= stall_line_pos < len(total_residuals):
+                plt.axvline(x=stall_line_pos, color='red', linestyle='--', alpha=0.7, 
+                           label=f'Stall detected (iter {stall_info["earliest_stall"]})')
         
         plt.grid(True, which="both", ls="--")
         plt.xlabel('Iteration')
         plt.ylabel('Residual')
         
+        # Update title to show trimming information
         if title:
-            plt.title(title)
+            plot_title = title
         else:
-            plt.title(f'Residual History (Re={self.reynolds})' if self.reynolds else 'Residual History')
+            plot_title = f'Residual History (Re={self.reynolds})' if self.reynolds else 'Residual History'
         
+        if stall_info['stalled']:
+            plot_title += f" (Trimmed: {stall_info['trimmed_length']}/{stall_info['original_length']} iterations)"
+        
+        plt.title(plot_title)
         plt.legend()
         plt.tight_layout()
         
@@ -368,4 +397,96 @@ class SimulationResult:
         else:
             plt.close()
             
-        return plt.gcf() 
+        return plt.gcf()
+    
+    def _detect_stalled_residuals(self, residual_array, stall_window=500, stall_threshold=1e-2):
+        """
+        Detect if residuals have stalled (stopped decreasing significantly).
+        
+        Parameters:
+        -----------
+        residual_array : array-like
+            Array of residual values
+        stall_window : int
+            Number of iterations to look back for stall detection
+        stall_threshold : float
+            Relative change threshold below which residuals are considered stalled
+            
+        Returns:
+        --------
+        stall_start : int or None
+            Index where stalling begins, or None if no stalling detected
+        """
+        if len(residual_array) < stall_window * 2:
+            return None
+        
+        # Look for stalling in the last part of the simulation
+        for i in range(stall_window, len(residual_array) - stall_window):
+            # Check if the relative change over stall_window iterations is small
+            window_start = residual_array[i]
+            window_end = residual_array[i + stall_window]
+            
+            # Avoid division by zero
+            if abs(window_start) < 1e-20:
+                continue
+                
+            relative_change = abs(window_end - window_start) / abs(window_start)
+            
+            # If change is very small, consider it stalled
+            if relative_change < stall_threshold:
+                return i
+        
+        return None
+
+    def _trim_stalled_residuals(self, residual_arrays, keep_stalled_iterations=500):
+        """
+        Trim stalled residuals from multiple residual arrays while keeping some stalled data.
+        
+        Parameters:
+        -----------
+        residual_arrays : dict
+            Dictionary of residual arrays (e.g., {'total': [...], 'momentum': [...], 'pressure': [...]})
+        keep_stalled_iterations : int
+            Number of stalled iterations to keep to show stalling behavior
+            
+        Returns:
+        --------
+        trimmed_arrays : dict
+            Dictionary of trimmed residual arrays
+        stall_info : dict
+            Information about detected stalling
+        """
+        stall_starts = {}
+        
+        # Detect stalling for each residual type
+        for key, residuals in residual_arrays.items():
+            if residuals:  # Only check non-empty arrays
+                stall_start = self._detect_stalled_residuals(residuals)
+                if stall_start is not None:
+                    stall_starts[key] = stall_start
+        
+        # If any residuals are stalled, find the earliest stall point
+        if stall_starts:
+            earliest_stall = min(stall_starts.values())
+            trim_point = earliest_stall + keep_stalled_iterations
+            
+            # Ensure we don't go beyond the array length
+            min_length = min(len(arr) for arr in residual_arrays.values() if arr)
+            trim_point = min(trim_point, min_length)
+            
+            # Trim all arrays to the same length
+            trimmed_arrays = {key: arr[:trim_point] if arr else [] for key, arr in residual_arrays.items()}
+            
+            stall_info = {
+                'stalled': True,
+                'stall_starts': stall_starts,
+                'earliest_stall': earliest_stall,
+                'trim_point': trim_point,
+                'original_length': min_length,
+                'trimmed_length': trim_point
+            }
+        else:
+            trimmed_arrays = residual_arrays.copy()
+            stall_info = {'stalled': False}
+        
+        return trimmed_arrays, stall_info 

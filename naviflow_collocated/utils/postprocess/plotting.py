@@ -98,20 +98,137 @@ def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_p
     else:
         plt.show()
 
+def detect_stalled_residuals(residual_array, stall_window=500, stall_threshold=1e-2):
+    """
+    Detect if residuals have stalled (stopped decreasing significantly).
+    
+    Parameters:
+    -----------
+    residual_array : array-like
+        Array of residual values
+    stall_window : int
+        Number of iterations to look back for stall detection
+    stall_threshold : float
+        Relative change threshold below which residuals are considered stalled
+        
+    Returns:
+    --------
+    stall_start : int or None
+        Index where stalling begins, or None if no stalling detected
+    """
+    if len(residual_array) < stall_window * 2:
+        return None
+    
+    # Look for stalling in the last part of the simulation
+    for i in range(stall_window, len(residual_array) - stall_window):
+        # Check if the relative change over stall_window iterations is small
+        window_start = residual_array[i]
+        window_end = residual_array[i + stall_window]
+        
+        # Avoid division by zero
+        if abs(window_start) < 1e-20:
+            continue
+            
+        relative_change = abs(window_end - window_start) / abs(window_start)
+        
+        # If change is very small, consider it stalled
+        if relative_change < stall_threshold:
+            return i
+    
+    return None
+
+def trim_stalled_residuals(residual_arrays, keep_stalled_iterations=500):
+    """
+    Trim stalled residuals from multiple residual arrays while keeping some stalled data.
+    
+    Parameters:
+    -----------
+    residual_arrays : dict or NpzFile
+        Dictionary or NpzFile of residual arrays (e.g., {'u': [...], 'v': [...], 'cont': [...]})
+    keep_stalled_iterations : int
+        Number of stalled iterations to keep to show stalling behavior
+        
+    Returns:
+    --------
+    trimmed_arrays : dict
+        Dictionary of trimmed residual arrays
+    stall_info : dict
+        Information about detected stalling
+    """
+    # Convert NpzFile to regular dictionary if needed
+    if hasattr(residual_arrays, 'files'):  # NpzFile has a 'files' attribute
+        res_dict = {key: residual_arrays[key] for key in residual_arrays.files}
+    else:
+        res_dict = residual_arrays
+    
+    stall_starts = {}
+    
+    # Detect stalling for each residual type
+    for key, residuals in res_dict.items():
+        stall_start = detect_stalled_residuals(residuals)
+        if stall_start is not None:
+            stall_starts[key] = stall_start
+    
+    # If any residuals are stalled, find the earliest stall point
+    if stall_starts:
+        earliest_stall = min(stall_starts.values())
+        trim_point = earliest_stall + keep_stalled_iterations
+        
+        # Ensure we don't go beyond the array length
+        min_length = min(len(arr) for arr in res_dict.values())
+        trim_point = min(trim_point, min_length)
+        
+        # Trim all arrays to the same length
+        trimmed_arrays = {key: arr[:trim_point] for key, arr in res_dict.items()}
+        
+        stall_info = {
+            'stalled': True,
+            'stall_starts': stall_starts,
+            'earliest_stall': earliest_stall,
+            'trim_point': trim_point,
+            'original_length': min_length,
+            'trimmed_length': trim_point
+        }
+    else:
+        trimmed_arrays = res_dict.copy()
+        stall_info = {'stalled': False}
+    
+    return trimmed_arrays, stall_info
+
 def plot_residuals(res, output_path, sim_id=None):
+    # First, trim stalled residuals
+    trimmed_res, stall_info = trim_stalled_residuals(res, keep_stalled_iterations=500)
+    
     fig = plt.figure(figsize=(8, 5))
     ax = fig.add_subplot(1, 1, 1)
-    # Slice arrays to exclude first and last iteration
-    ax.semilogy(res["u"][3:-3], label="u-momentum", color='tab:blue', linewidth=2)
-    ax.semilogy(res["v"][3:-3], label="v-momentum", color='tab:orange', linewidth=2)
-    ax.semilogy(res["cont"][3:-3], label="continuity", color='tab:green', linewidth=2)
-    title = "Residual History"
+    
+    # Slice arrays to exclude first and last iteration (but use trimmed data)
+    u_data = trimmed_res["u"][3:-3] if len(trimmed_res["u"]) > 6 else trimmed_res["u"]
+    v_data = trimmed_res["v"][3:-3] if len(trimmed_res["v"]) > 6 else trimmed_res["v"]
+    cont_data = trimmed_res["cont"][3:-3] if len(trimmed_res["cont"]) > 6 else trimmed_res["cont"]
+    
+    ax.semilogy(u_data, label="u-momentum", color='tab:blue', linewidth=2)
+    ax.semilogy(v_data, label="v-momentum", color='tab:orange', linewidth=2)
+    ax.semilogy(cont_data, label="continuity", color='tab:green', linewidth=2)
+    
+    # Update title to indicate if residuals were trimmed
+    if stall_info['stalled']:
+        title = f"Residual History (Trimmed: {stall_info['trimmed_length']}/{stall_info['original_length']} iterations)"
+        
+        # Add vertical line to show where stalling was detected
+        stall_line_pos = stall_info['earliest_stall'] - 3  # Account for the [3:-3] slicing
+        if 0 <= stall_line_pos < len(u_data):
+            ax.axvline(x=stall_line_pos, color='red', linestyle='--', alpha=0.7, 
+                      label=f'Stall detected (iter {stall_info["earliest_stall"]})')
+    else:
+        title = "Residual History"
+    
     ax.set_title(title, fontsize=16, loc='center')
     if sim_id is not None:
         ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
     ax.set_xlabel("Iteration", fontsize=14)
     ax.set_ylabel("Residual", fontsize=14)
-    ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.3)  # Explicitly add grid for this plot
+    ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.3)
     ax.legend(fontsize=12, loc='upper right', frameon=True)
     ax.tick_params(axis='both', which='major', labelsize=12)
     ax.tick_params(axis='both', which='minor', labelsize=10)

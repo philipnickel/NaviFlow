@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Grid Convergence Study for Lid-Driven Cavity CFD Simulations
+Grid Convergence Study for Lid-Driven Cavity CFD simulations (u-velocity centerline)
 
 This script performs grid convergence analysis by calculating L2 errors between
-numerical solutions and Ghia's benchmark data for velocity magnitude, then plots 
-the errors as a function of grid size to determine the order of accuracy.
+numerical solutions and Ghia's benchmark data for u-velocity along the vertical 
+centerline only, then plots the errors as a function of grid size to determine 
+the order of accuracy.
 
 Usage:
     python grid_convergence_study.py --config-list path/to/config_list.txt [--output-dir dir]
@@ -20,15 +21,14 @@ Example:
 
 The script will:
 1. Load data from each experiment in the config list
-2. Extract centerline velocity profiles (u at x=0.5, v at y=0.5)
+2. Extract u-velocity along vertical centerline (x=0.5)
 3. Interpolate to Ghia's reference points
-4. Calculate velocity magnitude from u and v components
-5. Calculate L2 errors for velocity magnitude against Ghia's data
-6. Estimate grid size (h = 1/sqrt(N) where N is number of cells)
-7. Create log-log plot showing error vs grid size
-8. Fit line to determine order of accuracy
-9. Display observed order of accuracy on the plot
-10. Save results as PDF plot and CSV data
+4. Calculate L2 errors for u-velocity against Ghia's data
+5. Estimate grid size (h = 1/sqrt(N) where N is number of cells)
+6. Create log-log plot showing error vs grid size
+7. Fit line to determine order of accuracy
+8. Display observed order of accuracy on the plot
+9. Save results as PDF plot and CSV data
 
 Requirements:
 - All experiments must be at the same Reynolds number
@@ -43,7 +43,6 @@ import yaml
 import argparse
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
-import pandas as pd
 
 # Import utilities from the comparison script
 from compare_lid_driven_cavity import (
@@ -97,45 +96,34 @@ def calculate_l2_error(numerical_values, reference_values):
     """
     return np.sqrt(np.mean((numerical_values - reference_values)**2))
 
-def calculate_velocity_magnitude_error(exp, ghia):
+def calculate_u_centerline_error(exp, ghia):
     """
-    Calculate combined L2 error for velocity components as an overall velocity error.
+    Calculate L2 error for u-velocity along vertical centerline only.
     
     Args:
         exp (dict): Experiment data dictionary
         ghia (dict): Ghia's benchmark data
         
     Returns:
-        float: Combined L2 error for velocity
+        float: L2 error for u-velocity centerline
     """
-    # Extract centerline profiles
+    # Extract u-velocity along vertical centerline (x=0.5)
     if exp['mesh_type'] == 'uniform':
         y_coords, u_profile = extract_centerline_uniform(
             exp['x'], exp['y'], exp['U'], direction='vertical'
-        )
-        x_coords, v_profile = extract_centerline_uniform(
-            exp['x'], exp['y'], exp['U'], direction='horizontal'
         )
     else:
         y_coords, u_profile = extract_centerline_unstructured(
             exp['x'], exp['y'], exp['U'], direction='vertical', n_points=100
         )
-        x_coords, v_profile = extract_centerline_unstructured(
-            exp['x'], exp['y'], exp['U'], direction='horizontal', n_points=100
-        )
     
     # Interpolate numerical solution to Ghia's points
     u_interp = interpolate_to_ghia_points(y_coords, u_profile, ghia['y'])
-    v_interp = interpolate_to_ghia_points(x_coords, v_profile, ghia['x'])
     
-    # Calculate individual L2 errors
+    # Calculate L2 error for u-velocity only
     l2_error_u = calculate_l2_error(u_interp, ghia['u'])
-    l2_error_v = calculate_l2_error(v_interp, ghia['v'])
     
-    # Combine as root-mean-square of the two errors for an overall velocity error
-    combined_error = np.sqrt((l2_error_u**2 + l2_error_v**2) / 2)
-    
-    return combined_error
+    return l2_error_u
 
 def estimate_grid_size(experiment):
     """
@@ -214,17 +202,17 @@ def perform_convergence_study(config_list_file, output_dir):
     results = {
         'n_cells': [],
         'grid_size': [],
-        'l2_error_velocity': [],
+        'l2_error_u_centerline': [],
         'scheme': [],
         'mesh_type': [],
         'sim_id': []
     }
     
-    print("\nCalculating L2 errors:")
+    print("\nCalculating L2 errors for u-velocity centerline:")
     
     for exp in experiments:
-        # Calculate velocity magnitude error
-        l2_error_velocity = calculate_velocity_magnitude_error(exp, ghia)
+        # Calculate u-velocity centerline error
+        l2_error_u = calculate_u_centerline_error(exp, ghia)
         
         # Estimate grid size
         h = estimate_grid_size(exp)
@@ -232,16 +220,16 @@ def perform_convergence_study(config_list_file, output_dir):
         # Store results
         results['n_cells'].append(exp['n_cells'])
         results['grid_size'].append(h)
-        results['l2_error_velocity'].append(l2_error_velocity)
+        results['l2_error_u_centerline'].append(l2_error_u)
         results['scheme'].append(exp['scheme'])
         results['mesh_type'].append(exp['mesh_type'])
         results['sim_id'].append(exp.get('sim_id', 'unknown'))
         
-        print(f"  {exp['n_cells']:6d} cells: h={h:.4f}, L2_velocity={l2_error_velocity:.2e}")
+        print(f"  {exp['n_cells']:6d} cells: h={h:.4f}, L2_u_centerline={l2_error_u:.2e}")
     
     # Convert to arrays for fitting
     h_array = np.array(results['grid_size'])
-    error_velocity_array = np.array(results['l2_error_velocity'])
+    error_u_array = np.array(results['l2_error_u_centerline'])
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -250,13 +238,12 @@ def perform_convergence_study(config_list_file, output_dir):
     title = os.path.splitext(os.path.basename(config_list_file))[0]
     
     # Create convergence plot
-    create_convergence_plot(h_array, error_velocity_array, 
+    create_convergence_plot(h_array, error_u_array, 
                           results, Re, title, output_dir)
     
-    # Save results to CSV
-    save_results_csv(results, Re, title, output_dir)
+    # Results saved as plot only - no CSV output needed
 
-def create_convergence_plot(h_array, error_velocity_array, 
+def create_convergence_plot(h_array, error_u_array, 
                           results, Re, title, output_dir):
     """Create and save grid convergence plot."""
     
@@ -272,26 +259,26 @@ def create_convergence_plot(h_array, error_velocity_array,
     markers = ['o', 's', '^', 'D', 'v', 'p', '*', 'h', 'H', 'X']
     
     # Fit power law and calculate order of accuracy
-    p_velocity = float('nan')  # Initialize with NaN
+    p_u = float('nan')  # Initialize with NaN
     try:
         if len(h_array) >= 2:  # Need at least 2 points for fitting
-            # Fit velocity magnitude using log-log linear regression for better stability
+            # Fit u-velocity using log-log linear regression for better stability
             # log(error) = log(A) + p * log(h) => p is the slope
             log_h = np.log(h_array)
-            log_error = np.log(error_velocity_array)
+            log_error = np.log(error_u_array)
             
             # Linear fit: log_error = slope * log_h + intercept
             # slope = p (order of accuracy)
             slope, intercept = np.polyfit(log_h, log_error, 1)
-            p_velocity = slope
+            p_u = slope
             
             print(f"\nOrder of accuracy:")
-            print(f"  velocity magnitude: {p_velocity:.2f}")
+            print(f"  u-velocity centerline: {p_u:.2f}")
             print(f"  (computed using log-log linear regression)")
             
     except Exception as e:
         print(f"Warning: Could not fit power law: {e}")
-        p_velocity = float('nan')
+        p_u = float('nan')
     
     # Group experiments by scheme for consistent coloring and legend
     schemes = list(set(results['scheme']))
@@ -306,8 +293,8 @@ def create_convergence_plot(h_array, error_velocity_array,
     # Plot data points grouped by scheme
     plotted_schemes = set()  # Track which schemes we've added to legend
     
-    for i, (h, error_velocity, n_cells, scheme, mesh_type) in enumerate(zip(
-        h_array, error_velocity_array, 
+    for i, (h, error_u, n_cells, scheme, mesh_type) in enumerate(zip(
+        h_array, error_u_array, 
         results['n_cells'], results['scheme'], results['mesh_type'])):
         
         color = scheme_colors[scheme]
@@ -316,8 +303,8 @@ def create_convergence_plot(h_array, error_velocity_array,
         # Only add to legend if this scheme hasn't been plotted yet
         if scheme not in plotted_schemes:
             # Include observed order in legend label
-            if not np.isnan(p_velocity):
-                legend_label = f"{scheme} (order: {p_velocity:.2f})"
+            if not np.isnan(p_u):
+                legend_label = f"{scheme} (order: {p_u:.2f})"
             else:
                 legend_label = scheme
             plotted_schemes.add(scheme)
@@ -325,7 +312,7 @@ def create_convergence_plot(h_array, error_velocity_array,
             legend_label = None  # Don't add duplicate entries to legend
         
         # Plot data points
-        ax.loglog(h, error_velocity, marker=marker, color=color, markersize=8, 
+        ax.loglog(h, error_u, marker=marker, color=color, markersize=8, 
                    linewidth=2, label=legend_label, markerfacecolor='white', 
                    markeredgewidth=1.5)
         
@@ -346,27 +333,27 @@ def create_convergence_plot(h_array, error_velocity_array,
         else:
             # Mixed schemes - use neutral color
             line_color = 'k'
-        ax.loglog(h_array, error_velocity_array, '-', color=line_color, 
+        ax.loglog(h_array, error_u_array, '-', color=line_color, 
                  alpha=0.6, linewidth=1.5, zorder=0)
     
     # Add reference slopes using the minimum error as reference
-    error_ref_velocity = np.min(error_velocity_array)
+    error_ref_u = np.min(error_u_array)
     
     # Create reference grid size range
     h_ref = np.array([h_array.min() * 0.8, h_array.max() * 1.2])
     
     # First order reference (O(h^1))
-    ref_1st_velocity = error_ref_velocity * 2 * (h_ref / h_ref[0])**1
-    ax.loglog(h_ref, ref_1st_velocity, 'k:', alpha=0.7, linewidth=1.5, label=r'$\mathcal{O}(h^1)$')
+    ref_1st_u = error_ref_u * 2 * (h_ref / h_ref[0])**1
+    ax.loglog(h_ref, ref_1st_u, 'k:', alpha=0.7, linewidth=1.5, label=r'$\mathcal{O}(h^1)$')
     
     # Second order reference (O(h^2))
-    ref_2nd_velocity = error_ref_velocity * 2 * (h_ref / h_ref[0])**2
-    ax.loglog(h_ref, ref_2nd_velocity, 'k--', alpha=0.7, linewidth=1.5, label=r'$\mathcal{O}(h^2)$')
+    ref_2nd_u = error_ref_u * 2 * (h_ref / h_ref[0])**2
+    ax.loglog(h_ref, ref_2nd_u, 'k--', alpha=0.7, linewidth=1.5, label=r'$\mathcal{O}(h^2)$')
     
     # Formatting with proper grid and mathematical notation
     ax.set_xlabel(r"Grid size $h$", fontsize=12)
     ax.set_ylabel(r"L2 Error", fontsize=12)
-    ax.set_title(r"Velocity Magnitude Convergence", fontsize=14)
+    ax.set_title(r"U-Velocity Centerline Convergence", fontsize=14)
     ax.legend(loc="lower right")
     ax.grid(True, which="both", alpha=0.3)
     
@@ -418,29 +405,9 @@ def create_convergence_plot(h_array, error_velocity_array,
     
     print(f"\nSaved convergence plot to: {output_path}")
 
-def save_results_csv(results, Re, title, output_dir):
-    """Save convergence study results to CSV file."""
-    
-    # Create DataFrame
-    df = pd.DataFrame(results)
-    
-    # Add Reynolds number
-    df['reynolds_number'] = Re
-    
-    # Calculate theoretical errors for comparison
-    h_array = np.array(results['grid_size'])
-    df['theoretical_1st_order'] = results['l2_error_velocity'][0] * (h_array / h_array[0])**1
-    df['theoretical_2nd_order'] = results['l2_error_velocity'][0] * (h_array / h_array[0])**2
-    
-    # Save to CSV
-    csv_path = os.path.join(output_dir, f'{title}_grid_convergence_Re_{Re}.csv')
-    df.to_csv(csv_path, index=False)
-    
-    print(f"Saved convergence data to: {csv_path}")
-
 def main():
     parser = argparse.ArgumentParser(
-        description='Grid convergence study for lid-driven cavity CFD simulations',
+        description='Grid convergence study for lid-driven cavity CFD simulations (u-velocity centerline)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

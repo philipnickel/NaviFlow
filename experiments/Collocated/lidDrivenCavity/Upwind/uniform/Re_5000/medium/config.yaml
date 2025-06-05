@@ -1,13 +1,13 @@
 algorithm:
   convection_discretization: Upwind
   convergence_criteria:
-    residual: 1e-7
+    residual: 1.0e-09
   limiter: null
-  max_iterations: 10000
+  max_iterations: 20000
   non_orthogonal_corrections: 2
   relaxation_factors:
-    pressure: 0.2
-    velocity: 0.5
+    pressure: 0.1
+    velocity: 0.3
   type: SIMPLE
 description: Upwind uniform medium mesh simulation for Lid driven cavity at Re=5000
 domain:
@@ -20,12 +20,12 @@ linear_solvers:
   momentum:
     max_iterations: 100000
     preconditioner: hypre
-    tolerance: 1e-8
+    tolerance: 1.0e-12
     type: bcgs
   pressure:
     max_iterations: 100000
     preconditioner: hypre
-    tolerance: 1e-10
+    tolerance: 1.0e-14
     type: bcgs
 name: lidDrivenCavity
 numba_cores: 6

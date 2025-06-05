@@ -1,8 +1,8 @@
 #!/bin/bash
-#BSUB -J collocated[1-55]              
+#BSUB -J collocated[1-30]              
 #BSUB -n 4                            
-#BSUB -R "rusage[mem=25GB]"
-#BSUB -W 03:00                        
+#BSUB -R "rusage[mem=5GB]"
+#BSUB -W 08:00                        
 #BSUB -o logs/collocated_%J_%I.out
 #BSUB -e logs/collocated_%J_%I.err
 #BSUB -q hpc

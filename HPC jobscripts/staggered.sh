@@ -1,8 +1,8 @@
 #!/bin/bash
-#BSUB -J staggered[1-6]              # One task per script
+#BSUB -J staggered[1-11]              # Updated to 11 tasks for all staggered experiments
 #BSUB -n 1                             # 1 core is likely enough
-#BSUB -R "rusage[mem=25GB]"
-#BSUB -W 05:00                         # Adjust as needed
+#BSUB -R "rusage[mem=5GB]"
+#BSUB -W 08:00                         # Adjust as needed
 #BSUB -o logs/staggered_%J_%I.out
 #BSUB -e logs/staggered_%J_%I.err
 #BSUB -q hpc

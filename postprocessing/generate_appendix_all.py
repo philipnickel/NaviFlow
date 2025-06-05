@@ -16,6 +16,7 @@ from pathlib import Path
 import concurrent.futures
 import threading
 from datetime import datetime
+import yaml
 
 # Set matplotlib backend before importing pyplot
 import matplotlib
@@ -83,8 +84,48 @@ def generate_experiment_figure(experiment, output_dir=None, thread_id=None):
         
         # Determine output path
         if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, f"thesis_figure_{experiment['name']}.pdf")
+            # Load config to extract experiment details for folder structure
+            with open(experiment['config'], 'r') as f:
+                config = yaml.safe_load(f)
+            
+            # Load metadata for simulation ID
+            metadata_path = os.path.join(experiment['results'], "metadata.yaml")
+            with open(metadata_path, 'r') as f:
+                metadata = yaml.safe_load(f)
+            
+            # Extract information for folder structure and filename
+            experiment_name = config.get('experiment', 'Unknown')
+            Re = config.get('physical_properties', {}).get('reynolds_number', 'Unknown')
+            
+            # Extract mesh information
+            domain_info = config.get('domain', {})
+            mesh_info = domain_info.get('mesh', ['unknown', 'unknown'])
+            if len(mesh_info) >= 2:
+                mesh_type = mesh_info[0]  # e.g., 'uniform' or 'unstructured'
+                mesh_resolution = mesh_info[1]  # e.g., 'medium', 'fine', 'coarse'
+            else:
+                mesh_type = 'unknown'
+                mesh_resolution = 'unknown'
+            
+            # Extract convection scheme and simulation ID
+            convection_scheme = config.get('algorithm', {}).get('convection_discretization', 'Unknown')
+            sim_id = metadata.get('Simulation id', 'unknown')
+            
+            # Create folder structure: experiment/Re_XXX/mesh_resolution/
+            experiment_folder = os.path.join(output_dir, experiment_name, f"Re_{Re}", mesh_resolution)
+            os.makedirs(experiment_folder, exist_ok=True)
+            
+            # Create filename using the title format: Experiment_Re_meshtype_meshResolution_ConvectionScheme_SimulationID
+            filename_parts = [
+                str(experiment_name),
+                f"Re{Re}",
+                str(mesh_type),
+                str(mesh_resolution),
+                str(convection_scheme),
+                str(sim_id)
+            ]
+            filename = "_".join(filename_parts) + ".pdf"
+            output_path = os.path.join(experiment_folder, filename)
         else:
             # Use default location in results directory
             output_path = None

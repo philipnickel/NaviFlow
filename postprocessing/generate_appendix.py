@@ -32,38 +32,67 @@ def find_mesh_visualization_pdf(config):
     mesh_info = domain_info.get('mesh', ['unknown', 'unknown'])
     
     if len(mesh_info) >= 2:
-        mesh_type = mesh_info[0]  # e.g., 'structured'
-        mesh_resolution = mesh_info[1]  # e.g., '63x63'
+        mesh_type = mesh_info[0]  # e.g., 'uniform' or 'unstructured'
+        mesh_resolution = mesh_info[1]  # e.g., 'medium', 'fine', 'coarse'
         
-        # Map resolution to mesh size category
-        if 'x' in str(mesh_resolution):
-            resolution_parts = str(mesh_resolution).split('x')
-            if len(resolution_parts) == 2:
-                n_cells = int(resolution_parts[0])
-                if n_cells <= 30:
-                    size_category = 'coarse'
-                elif n_cells <= 80:
-                    size_category = 'medium'
-                else:
-                    size_category = 'fine'
-            else:
-                size_category = 'medium'  # default
+        # Map mesh type to directory name
+        if mesh_type == 'uniform':
+            mesh_dir = 'structuredUniform'
+        elif mesh_type == 'unstructured':
+            mesh_dir = 'unstructured'
         else:
-            size_category = 'medium'  # default
+            mesh_dir = mesh_type  # Use as-is for other types
         
-        # Construct potential mesh PDF paths
+        # Construct potential mesh PDF paths in the meshing directory
         mesh_paths = [
-            f"meshing/experiments/{experiment}/structuredUniform/{size_category}/{experiment}_uniform_{size_category}.pdf",
-            f"meshing/experiments/{experiment}/unstructured/{size_category}/{experiment}_unstructured_{size_category}.pdf",
-            f"meshing/experiments/{experiment}/{experiment}_mesh.pdf"
+            f"meshing/experiments/{experiment}/{mesh_dir}/{mesh_resolution}/{experiment}_{mesh_type}_{mesh_resolution}.pdf",
+            f"meshing/experiments/{experiment}/{mesh_dir}/{mesh_resolution}/{experiment}_mesh.pdf"
         ]
         
         # Check which path exists
         for mesh_path in mesh_paths:
             if os.path.exists(mesh_path):
+                print(f"Found mesh visualization: {mesh_path}")
                 return mesh_path
     
     return None
+
+def generate_simple_mesh_visualization(config, output_path):
+    """Generate a simple mesh visualization using matplotlib if no mesh PDF exists."""
+    try:
+        # Get experiment info for title
+        experiment = config.get('experiment', 'Unknown')
+        domain_info = config.get('domain', {})
+        mesh_info = domain_info.get('mesh', ['unknown', 'unknown'])
+        
+        # Create a simple figure showing mesh information as text
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.axis('off')
+        
+        # Add mesh information text
+        info_text = f"Mesh Information\n\n"
+        info_text += f"Experiment: {experiment}\n"
+        if len(mesh_info) >= 2:
+            info_text += f"Type: {mesh_info[0]}\n"
+            info_text += f"Resolution: {mesh_info[1]}\n"
+        
+        info_text += f"\nNote: Detailed mesh visualization\nnot available"
+        
+        ax.text(0.5, 0.5, info_text, transform=ax.transAxes, 
+                fontsize=14, ha='center', va='center',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8))
+        
+        # Save as PDF
+        with PdfPages(output_path) as pdf:
+            pdf.savefig(fig, bbox_inches='tight')
+        
+        plt.close(fig)
+        print(f"Generated simple mesh visualization: {output_path}")
+        return output_path
+        
+    except Exception as e:
+        print(f"Error generating simple mesh visualization: {e}")
+        return None
 
 def collect_pdf_files(config_path):
     """Collect relevant PDF files for the single-page overview."""
@@ -82,7 +111,7 @@ def collect_pdf_files(config_path):
     
     # All 11 files requested for thesis figure
     desired_files = {
-        "mesh": ("mesh_visualization", None),  # Will be found separately
+        "mesh": ("mesh_visualization", "mesh_visualization.pdf"),  # Look for mesh in plots dir first
         "validation": ("ghia_comparison", "ghia_comparison.pdf"),
         "metadata": ("metadata", "metadata.pdf"),
         "velocity_magnitude": ("velocity_magnitude", "velocity_magnitude.pdf"),
@@ -97,22 +126,33 @@ def collect_pdf_files(config_path):
     
     pdf_files = {}
     
-    # Collect existing PDF files
+    # Collect existing PDF files from plots directory
     for key, (internal_key, filename) in desired_files.items():
-        if filename:  # Regular plot files
+        if key == "mesh":  # Special handling for mesh visualization
+            # First, try to find existing mesh PDF in plots directory
+            filepath = os.path.join(plots_dir, filename)
+            if os.path.exists(filepath):
+                pdf_files[key] = filepath
+                print(f"Found mesh visualization in plots: {filepath}")
+            else:
+                # Try to find mesh PDF in meshing directory
+                mesh_pdf = find_mesh_visualization_pdf(config)
+                if mesh_pdf and os.path.exists(mesh_pdf):
+                    pdf_files[key] = mesh_pdf
+                else:
+                    # Generate a simple mesh visualization
+                    mesh_output_path = os.path.join(plots_dir, "mesh_visualization.pdf")
+                    generated_mesh = generate_simple_mesh_visualization(config, mesh_output_path)
+                    if generated_mesh:
+                        pdf_files[key] = generated_mesh
+                    else:
+                        print(f"Warning: Could not generate mesh visualization")
+        else:
             filepath = os.path.join(plots_dir, filename)
             if os.path.exists(filepath):
                 pdf_files[key] = filepath
             else:
                 print(f"Warning: {filename} not found in {plots_dir}")
-    
-    # Add mesh visualization if available
-    mesh_pdf = find_mesh_visualization_pdf(config)
-    if mesh_pdf and os.path.exists(mesh_pdf):
-        pdf_files["mesh"] = mesh_pdf
-        print(f"Found mesh visualization: {mesh_pdf}")
-    else:
-        print("Warning: Mesh visualization PDF not found")
     
     return pdf_files, config, metadata
 
@@ -148,21 +188,43 @@ def pdf_to_image_matplotlib(pdf_path):
 def create_thesis_figure_pdf(pdf_files, config, metadata, output_path):
     """Create a single-page vertical thesis figure from existing PDF files."""
     
-    # Get experiment info
+    # Extract information for the new title format (for reference, but not displayed)
     experiment_name = config.get('experiment', 'Unknown')
     sim_id = metadata.get('Simulation id', 'unknown')
     Re = config.get('physical_properties', {}).get('reynolds_number', 'Unknown')
     
+    # Extract mesh information
+    domain_info = config.get('domain', {})
+    mesh_info = domain_info.get('mesh', ['unknown', 'unknown'])
+    if len(mesh_info) >= 2:
+        mesh_type = mesh_info[0]  # e.g., 'uniform' or 'unstructured'
+        mesh_resolution = mesh_info[1]  # e.g., 'medium', 'fine', 'coarse'
+    else:
+        mesh_type = 'unknown'
+        mesh_resolution = 'unknown'
+    
+    # Extract convection scheme
+    convection_scheme = config.get('algorithm', {}).get('convection_discretization', 'Unknown')
+    
+    # Create title in the requested format for reference (not displayed)
+    title_parts = [
+        str(experiment_name),
+        f"Re{Re}",
+        str(mesh_type),
+        str(mesh_resolution),
+        str(convection_scheme),
+        str(sim_id)
+    ]
+    main_title = "_".join(title_parts)
+    
     # Create vertical figure for full-page thesis inclusion
     fig = plt.figure(figsize=(10, 14))  # Vertical format: wider than tall ratio inverted
     
-    # Create main title
-    main_title = f"{experiment_name.replace('_', ' ').title()} - {sim_id}"
-    fig.suptitle(main_title, fontsize=16, fontweight='bold', y=0.97)
+    # No title since it's now in the filename - adjust grid to use more space
     
-    # Create grid layout with tighter spacing
+    # Create grid layout with tighter spacing and more vertical space since no title
     gs = GridSpec(4, 6, figure=fig, hspace=0.10, wspace=0.05, 
-                  left=0.02, right=0.98, top=0.94, bottom=0.02)
+                  left=0.02, right=0.98, top=0.98, bottom=0.02)
     
     # Define plot positions - reorganized with validation and residual_history larger in last row
     plot_positions = [

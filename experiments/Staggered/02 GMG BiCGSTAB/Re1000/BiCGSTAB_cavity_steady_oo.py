@@ -23,10 +23,10 @@ from naviflow_staggered.postprocessing.visualization import plot_final_residuals
 
 start_time = time.time()
 # 1. Set up simulation parameters
-nx, ny = 2**8-1, 2**8-1 # Grid size
+nx, ny = 2**7-1, 2**7-1 # Grid size
 reynolds = 1000             # Reynolds number
-alpha_p = 0.3              # Pressure relaxation factor
-alpha_u = 0.6         # Velocity relaxation factor
+alpha_p = 0.2              # Pressure relaxation factor
+alpha_u = 0.5         # Velocity relaxation factor
 max_iterations = 20000     # Maximum number of iterations
 tolerance = 1e-7
 h = 1/nx 

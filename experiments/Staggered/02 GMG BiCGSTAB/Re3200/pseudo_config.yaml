@@ -3,7 +3,7 @@ algorithm:
 domain:
   mesh:
   - structured
-  - 255x255
+  - 127x127
 experiment: lidDrivenCavity
 physical_properties:
   reynolds_number: 3200
