@@ -4,7 +4,7 @@ tags: ["cylinderFlow", "unstructured", "medium", "Re20"]
 experiment: "cylinderFlow"
 
 domain:
-  mesh: [unstructured, medium]  # Unstructured medium mesh
+  mesh: [unstructured, fine]  # Unstructured medium mesh
   boundary_conditions: "shared_configs/domain/boundaries_cylinderFlow.yaml"
 
 physical_properties:
@@ -18,9 +18,9 @@ algorithm:
   relaxation_factors:
     velocity: 0.5
     pressure: 0.1
-  max_iterations: 10000
+  max_iterations: 100000
   convergence_criteria:
-    residual: 1e-4
+    residual: 1e-7
   convection_discretization: "TVD"
   limiter: MUSCL
   non_orthogonal_corrections: 1

@@ -1,16 +1,16 @@
-name: "channelFlow"
-description: "Unstructured medium mesh simulation for Channel flow at Re=10"
-tags: ["channelFlow", "unstructured", "medium", "Re10"]
-experiment: "channelFlow"
+name: "cylinderFlow"
+description: "Unstructured medium mesh simulation for Cylinder flow at Re=5"
+tags: ["cylinderFlow", "unstructured", "medium", "Re5"]
+experiment: "cylinderFlow"
 
 domain:
-  mesh: [unstructured, medium]  # Unstructured medium mesh
-  boundary_conditions: "shared_configs/domain/boundaries_channelFlow.yaml"
+  mesh: [unstructured, fine]  # Unstructured medium mesh
+  boundary_conditions: "shared_configs/domain/boundaries_cylinderFlow.yaml"
 
 physical_properties:
   rho: 1.0         # Density
-  reynolds_number: 10
-  characteristic_length: 1.0
+  reynolds_number: 5
+  characteristic_length: 0.1  # Cylinder diameter
   characteristic_velocity: 1.0
 
 algorithm:
@@ -18,9 +18,9 @@ algorithm:
   relaxation_factors:
     velocity: 0.6
     pressure: 0.2
-  max_iterations: 20000
+  max_iterations: 100000
   convergence_criteria:
-    residual: 1e-6
+    residual: 1e-7
   convection_discretization: "TVD"
   limiter: MUSCL
   non_orthogonal_corrections: 1
