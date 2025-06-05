@@ -1,8 +1,8 @@
 #!/bin/bash
-#BSUB -J staggered[1-4]              # One task per script
-#BSUB -n 1                             # 1 core is likely enough
-#BSUB -R "rusage[mem=2GB]"
-#BSUB -W 00:20                         # Adjust as needed
+#BSUB -J staggered[1-6]              # One task per script
+#BSUB -n 4                             # 1 core is likely enough
+#BSUB -R "rusage[mem=5GB]"
+#BSUB -W 02:00                         # Adjust as needed
 #BSUB -o logs/staggered_%J_%I.out
 #BSUB -e logs/staggered_%J_%I.err
 
