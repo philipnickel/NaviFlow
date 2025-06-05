@@ -17,7 +17,7 @@ def postprocess_config(config_path):
     try:
         subprocess.run([
             "python",
-            "postprocess.py",
+            "postprocessing/postprocess.py",
             "--config", config_path,
             "--all"
         ], check=True)
