@@ -1,0 +1,9 @@
+algorithm:
+  convection_discretization: Power Law
+domain:
+  mesh:
+  - structured
+  - 63x63
+experiment: lidDrivenCavity
+physical_properties:
+  reynolds_number: 100

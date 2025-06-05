@@ -1,0 +1,5 @@
+# Grid convergence study for Re=100 lid-driven cavity
+# Comparing different mesh resolutions for Upwind scheme
+
+../experiments/Collocated/lidDrivenCavity/ForReport/uniform/coarse/Re_100/config.yaml
+../experiments/Collocated/lidDrivenCavity/ForReport/uniform/medium/Re_100/config.yaml 

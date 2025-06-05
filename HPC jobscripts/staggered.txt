@@ -1,0 +1,6 @@
+experiments/Staggered/02 GMG BiCGSTAB/Re400/BiCGSTAB_cavity_steady_oo.py
+experiments/Staggered/02 GMG BiCGSTAB/Re1000/BiCGSTAB_cavity_steady_oo.py
+experiments/Staggered/02 GMG BiCGSTAB/Re3200/BiCGSTAB_cavity_steady_oo.py
+experiments/Staggered/02 GMG BiCGSTAB/Re5000/BiCGSTAB_cavity_steady_oo.py
+experiments/Staggered/02 GMG BiCGSTAB/Re100/medium/BiCGSTAB_cavity_steady_oo.py
+experiments/Staggered/02 GMG BiCGSTAB/Re100/fine/BiCGSTAB_cavity_steady_oo.py

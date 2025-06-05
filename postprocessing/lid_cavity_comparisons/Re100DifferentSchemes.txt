@@ -1,0 +1,4 @@
+# Re=100 Different Schemes Comparison
+# Comparing different discretization schemes for lid-driven cavity at Re=100
+experiments/Collocated/lidDrivenCavity/ForReport/uniform/medium/Re_100/config.yaml
+experiments/Staggered/02 GMG BiCGSTAB/pseudo_config.yaml 

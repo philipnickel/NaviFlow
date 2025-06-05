@@ -1,0 +1,20 @@
+#!/bin/bash
+#BSUB -J staggered[1-4]              # One task per script
+#BSUB -n 1                             # 1 core is likely enough
+#BSUB -R "rusage[mem=2GB]"
+#BSUB -W 00:20                         # Adjust as needed
+#BSUB -o logs/staggered_%J_%I.out
+#BSUB -e logs/staggered_%J_%I.err
+
+# Load modules or activate your environment
+source ~/.bashrc
+conda activate petsc_gpu_env
+
+# Change to project directory (assuming NaviFlow contains all scripts)
+cd ~/NaviFlow
+
+# Fetch the script path from the task file
+SCRIPT=$(sed -n "${LSB_JOBINDEX}p" staggered.txt)
+
+echo "▶ Running: PYTHONPATH=$(pwd) python $SCRIPT"
+PYTHONPATH=$(pwd) python "$SCRIPT"
