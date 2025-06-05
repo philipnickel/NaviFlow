@@ -1,0 +1,25 @@
+Simulation id: 04f0d594
+Experiment: Collocated
+Git commit: 27a9f9d
+Wall time (s): '1595.73'
+Reynolds number: 400
+Mesh type: Structured Uniform
+Number of control volumes: 16129
+Boundary conditions: shared_configs/domain/boundaries_lidDrivenCavity.yaml
+Algorithm: SIMPLE
+Convection scheme: Upwind
+Limiter: null
+Convergence tolerance: 1e-7
+Momentum relaxation: '0.5'
+Pressure relaxation: '0.2'
+Momentum solver: bcgs
+Momentum solver preconditioner: hypre
+Momentum solver tolerance: 1e-8
+Pressure solver: bcgs
+Pressure solver preconditioner: hypre
+Pressure solver tolerance: 1e-10
+Non-orthogonal corrections: 2
+Number of iterations: 10000
+Final u-residual: '1.39e-7'
+Final v-residual: '7.88e-8'
+Final continuity-residual: '6.27e-5'
