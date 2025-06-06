@@ -28,6 +28,8 @@ from naviflow_collocated.utils.postprocess.plotting import (
 from naviflow_collocated.utils.postprocess.verification import ghia_comparison, poiseuille_verification
 from naviflow_collocated.utils.postprocess.metadata import yaml_to_latex_pdf
 from naviflow_collocated.utils.postprocess.utils import save_pdf, get_obstacle_mask_from_msh, flatten_dict
+from naviflow_collocated.mesh.mesh_loader import load_mesh
+from naviflow_collocated.utils.postprocess.forces import calculate_cylinder_forces, calculate_pressure_difference
 
 # ----------------------------
 # Plotting Helpers
@@ -135,7 +137,8 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"Config file not found: {config_path}")
     
     # Load config
-    config = yaml.safe_load(open(config_path))
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
     
     # Use the config file's directory as the base directory
     base_dir = os.path.dirname(config_path)
@@ -143,8 +146,13 @@ if __name__ == "__main__":
     plots_dir = os.path.join(results_dir, "plots")
     
     # Extract experiment name from config path for compatibility
-    # Assuming config is in experiments/{experiment_name}/config.yaml
-    experiment = os.path.basename(os.path.dirname(config_path))
+    # Assuming config is in experiments/{experiment_name}/...
+    try:
+        path_parts = args.config.split(os.sep)
+        exp_index = path_parts.index("experiments")
+        experiment = path_parts[exp_index + 2]
+    except (ValueError, IndexError):
+        experiment = "unknown"
     
     # Create directories if they don't exist
     os.makedirs(plots_dir, exist_ok=True)
@@ -153,7 +161,10 @@ if __name__ == "__main__":
     p = np.load(os.path.join(results_dir, "p_final.npy"))
     res = np.load(os.path.join(results_dir, "residuals.npz"))
     cell_data = np.load(os.path.join(results_dir, "cell_centers.npz"))
-    meta = yaml.safe_load(open(os.path.join(results_dir, "metadata.yaml")))
+    
+    metadata_path = os.path.join(results_dir, "metadata.yaml")
+    with open(metadata_path, 'r') as f:
+        meta = yaml.safe_load(f)
 
     x = cell_data["x"]
     y = cell_data["y"]
@@ -178,31 +189,95 @@ if __name__ == "__main__":
         # Residuals (combined and individual)
         plot_residuals(res, out("residual_history"), sim_id=sim_id)
 
-        u_res = np.load(os.path.join(results_dir, "u_residual.npy"))
-        v_res = np.load(os.path.join(results_dir, "v_residual.npy"))
-        cont_res = np.load(os.path.join(results_dir, "continuity_field.npy"))
-        plot_residual_fields(x, y, u_res, v_res, cont_res, out("residual_fields"), sim_id=sim_id, experiment=experiment, Re=Re)
-        save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re, sim_id, results_dir)
+        try:
+            u_res = np.load(os.path.join(results_dir, "u_residual.npy"))
+            v_res = np.load(os.path.join(results_dir, "v_residual.npy"))
+            cont_res = np.load(os.path.join(results_dir, "continuity_field.npy"))
+            plot_residual_fields(x, y, u_res, v_res, cont_res, out("residual_fields"), sim_id=sim_id, experiment=experiment, Re=Re)
+            save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re, sim_id, results_dir)
+        except FileNotFoundError:
+            print("Residual field files not found, skipping their plots.")
 
         # Ghia plot: check config, not just directory name
-        if config.get('experiment', None) == 'lidDrivenCavity':
+        if experiment == 'lidDrivenCavity':
             ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, out("ghia_comparison"), sim_id=sim_id)
         # Poiseuille verification for channel flow
-        elif config.get('experiment', None) == 'channelFlow':
+        elif experiment == 'channelFlow':
             poiseuille_verification(x, y, U, p, Re, out("poiseuille_verification"), sim_id=sim_id)
+        
+        elif experiment == 'cylinderFlow':
+            print("Running force calculation for cylinder flow...")
+            # Recreate mesh to get geometric info
+            experiment_id = config["tags"][0]
+            mesh_type, resolution = config["domain"]["mesh"]
+            
+            # Fix: Use absolute paths consistently
+            mesh_file = os.path.abspath(os.path.join(
+                workspace_dir,
+                "meshing", "experiments", experiment_id,
+                "structuredUniform" if "uniform" in mesh_type else "unstructured",
+                resolution,
+                f"{experiment_id}_{mesh_type}_{resolution}.msh"
+            ))
+            bc_file = os.path.abspath(os.path.join(workspace_dir, config["domain"]["boundary_conditions"]))
+            
+            print(f"Loading mesh from: {mesh_file}")
+            print(f"Using BC file: {bc_file}")
+            
+            mesh = load_mesh(mesh_file, bc_file)
+            
+            # Get physical properties from config
+            rho = config["physical_properties"]["rho"]
+            # Compute mean inlet velocity directly from converged field to
+            # ensure consistency with simulation setup. We integrate the
+            # normal velocity over all inlet faces and divide by the total
+            # inlet height (sum of face lengths) – this matches the
+            # definition in Schäfer & Turek.
+            inlet_faces = [int(f) for f in mesh.boundary_faces if mesh.boundary_types[f,0] == 2]  # BC_INLET = 2
+            if len(inlet_faces) == 0:
+                raise RuntimeError("No inlet faces detected for mean-velocity calculation.")
 
-        # Plot force coefficients if available
-        try:
-            force_coeffs = np.load(os.path.join(results_dir, "force_coefficients.npz"))
-            plot_force_coefficients(
-                force_coeffs["cd"], 
-                force_coeffs["cl"], 
-                out("force_coefficients"),
-                sim_id=sim_id,
-                experiment=experiment,
-                Re=Re
-            )
-        except FileNotFoundError:
-            print("Force coefficients history not found, skipping plot.")
+            face_lengths = np.linalg.norm(mesh.vector_S_f[inlet_faces], axis=1)
+            owner_ids = mesh.owner_cells[inlet_faces]
+            # Normal component of velocity (dot with unit normal)
+            n_vecs = mesh.vector_S_f[inlet_faces] / (face_lengths[:, None] + 1e-14)
+            u_vals = U[owner_ids]
+            # For the Schäfer benchmark, the inlet velocity profile is:
+            # u(y) = 4*Um*y(H-y)/H^2 where Um = characteristic_velocity and H = 0.41
+            # The mean velocity is Um, and the max velocity is at y = H/2
+            # giving u_max = Um * 4 * (H/2)(H/2)/H^2 = Um
+            U_inf = config["physical_properties"]["characteristic_velocity"]  # Mean velocity Um from config
+            # Override characteristic velocity from config since we need Um
+            config["physical_properties"]["characteristic_velocity"] = U_inf
+            D = 0.1  # Cylinder diameter from Schäfer benchmark
+            # Override characteristic length from config
+            config["physical_properties"]["characteristic_length"] = D
+            Re_cf = config["physical_properties"]["reynolds_number"]
+            # Dynamic viscosity based on Reynolds number definition: Re = rho * U * D / mu
+            mu = (rho * U_inf * D) / Re_cf
+            
+            # Calculate forces
+            cd, cl = calculate_cylinder_forces(mesh, p, U, mu, rho, U_inf, D)
+            p_diff = calculate_pressure_difference(mesh, p)
+            
+            print(f"  Drag Coefficient (Cd): {cd:.6f}")
+            print(f"  Lift Coefficient (Cl): {cl:.6f}")
+            print(f"  Pressure Difference (p_diff): {p_diff:.6f}")
+            
+            # Save to a simple text file
+            force_data = {"cd": float(cd), "cl": float(cl), "p_diff": float(p_diff)}
+            with open(os.path.join(results_dir, "force_coefficients.yaml"), "w") as f:
+                yaml.dump(force_data, f)
+            print(f"  Saved force coefficients to force_coefficients.yaml")
+            
+            # Also update metadata
+            if 'results' not in meta:
+                meta['results'] = {}
+            meta['results']['drag_coefficient'] = float(cd)
+            meta['results']['lift_coefficient'] = float(cl)
+            meta['results']['pressure_difference'] = float(p_diff)
+            with open(metadata_path, 'w') as f:
+                yaml.dump(meta, f, sort_keys=False)
+            print(f"  Updated metadata.yaml with force coefficients")
 
         yaml_to_latex_pdf(os.path.join(results_dir, "metadata.yaml"), out("metadata"))

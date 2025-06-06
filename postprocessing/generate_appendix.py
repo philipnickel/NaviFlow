@@ -293,11 +293,42 @@ def generate_appendix_pdf(config_path, output_path=None):
         print("Error: No PDF files found to include")
         return None
     
-    # Determine output path
+    # Determine output path - save to AppendixPlots directory
     if output_path is None:
-        base_dir = os.path.dirname(config_path)
+        # Extract experiment information for AppendixPlots structure
+        experiment_name = config.get('experiment', 'Unknown')
         sim_id = metadata.get('Simulation id', 'unknown')
-        output_path = os.path.join(base_dir, 'results', f'thesis_figure_{sim_id}.pdf')
+        Re = config.get('physical_properties', {}).get('reynolds_number', 'Unknown')
+        
+        # Extract mesh information
+        domain_info = config.get('domain', {})
+        mesh_info = domain_info.get('mesh', ['unknown', 'unknown'])
+        if len(mesh_info) >= 2:
+            mesh_type = mesh_info[0]  # e.g., 'uniform' or 'unstructured'
+            mesh_resolution = mesh_info[1]  # e.g., 'medium', 'fine', 'coarse'
+        else:
+            mesh_type = 'unknown'
+            mesh_resolution = 'unknown'
+        
+        # Extract convection scheme
+        convection_scheme = config.get('algorithm', {}).get('convection_discretization', 'Unknown')
+        
+        # Create filename in the format: experiment_ReXXX_meshtype_resolution_scheme_simid.pdf
+        filename_parts = [
+            str(experiment_name),
+            f"Re{Re}",
+            str(mesh_type),
+            str(mesh_resolution),
+            str(convection_scheme),
+            str(sim_id)
+        ]
+        filename = "_".join(filename_parts) + ".pdf"
+        
+        # Create AppendixPlots directory structure: AppendixPlots/{experiment}/Re_{reynolds}/{resolution}/
+        appendix_dir = os.path.join("AppendixPlots", experiment_name, f"Re_{Re}", mesh_resolution)
+        os.makedirs(appendix_dir, exist_ok=True)
+        
+        output_path = os.path.join(appendix_dir, filename)
     
     print(f"Creating single-page thesis figure from {len(pdf_files)} PDF files...")
     for key, path in pdf_files.items():

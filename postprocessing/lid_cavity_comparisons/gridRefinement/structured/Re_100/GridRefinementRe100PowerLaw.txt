@@ -1,0 +1,3 @@
+experiments/Staggered/02 GMG BiCGSTAB/Re100/coarse/pseudo_config.yaml
+experiments/Staggered/02 GMG BiCGSTAB/Re100/medium/pseudo_config.yaml
+experiments/Staggered/02 GMG BiCGSTAB/Re100/fine/pseudo_config.yaml 

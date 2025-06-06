@@ -1,0 +1,3 @@
+experiments/Collocated/lidDrivenCavity/QUICK/uniform/Re_1000/coarse/config.yaml
+experiments/Collocated/lidDrivenCavity/QUICK/uniform/Re_1000/medium/config.yaml
+experiments/Collocated/lidDrivenCavity/QUICK/uniform/Re_1000/fine/config.yaml 

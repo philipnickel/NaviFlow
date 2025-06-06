@@ -1,0 +1,29 @@
+Simulation id: 27494c5a
+Experiment: Collocated
+Git commit: 853765c
+Wall time (s): '662.08'
+Reynolds number: 20
+Mesh type: Unstructured
+Number of control volumes: 30834
+Boundary conditions: shared_configs/domain/boundaries_cylinderFlow.yaml
+Algorithm: SIMPLE
+Convection scheme: TVD
+Limiter: MUSCL
+Convergence tolerance: 1e-7
+Momentum relaxation: '0.3'
+Pressure relaxation: '0.05'
+Momentum solver: bcgs
+Momentum solver preconditioner: hypre
+Momentum solver tolerance: 1e-8
+Pressure solver: bcgs
+Pressure solver preconditioner: hypre
+Pressure solver tolerance: 1e-10
+Non-orthogonal corrections: 1
+Number of iterations: 20000
+Final u-residual: '6.54e-5'
+Final v-residual: '6.95e-6'
+Final continuity-residual: '1.65e-3'
+results:
+  drag_coefficient: 5.900020067561296
+  lift_coefficient: 0.015174946852137564
+  pressure_difference: 0.12729414729399607

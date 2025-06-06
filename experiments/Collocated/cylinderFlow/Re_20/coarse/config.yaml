@@ -1,0 +1,39 @@
+name: cylinderFlow
+description: Unstructured coarse mesh simulation for Cylinder flow at Re=20
+tags:
+- cylinderFlow
+- unstructured
+- coarse
+- Re20
+experiment: cylinderFlow
+domain:
+  mesh: [unstructured, coarse]
+  boundary_conditions: shared_configs/domain/boundaries_cylinderFlow.yaml
+physical_properties:
+  rho: 1.0
+  reynolds_number: 20
+  characteristic_length: 0.1
+  characteristic_velocity: 0.2  # Mean velocity Ū for Re=20 (centerline velocity will be 0.3)
+algorithm:
+  type: SIMPLE
+  relaxation_factors:
+    velocity: 0.3
+    pressure: 0.05
+  max_iterations: 4000
+  convergence_criteria:
+    residual: 1e-6
+  convection_discretization: TVD
+  limiter: MUSCL
+  non_orthogonal_corrections: 1
+linear_solvers:
+  momentum:
+    type: bcgs
+    preconditioner: hypre
+    tolerance: 1e-8
+    max_iterations: 100000
+  pressure:
+    type: bcgs
+    preconditioner: hypre
+    tolerance: 1e-10
+    max_iterations: 100000
+numba_cores: 6

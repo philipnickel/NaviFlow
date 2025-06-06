@@ -1,201 +1,136 @@
-# Postprocessing Utilities
+# Postprocessing Scripts
 
-Comprehensive CFD postprocessing tools for analysis, visualization, and validation.
+This directory contains the essential postprocessing scripts for NaviFlow CFD simulations.
 
-## 🚀 Quick Reference
+## Directory Structure
 
-| Script | Purpose | Example |
-|--------|---------|---------|
-| `postprocess.py` | Individual plots | `python postprocessing/postprocess.py --config path/to/config.yaml --all` |
-| `generate_appendix.py` | Single-page summary | `python postprocessing/generate_appendix.py --config path/to/config.yaml` |
-| `generate_appendix_all.py` | Batch appendix generation | `python postprocessing/generate_appendix_all.py --experiments-dir experiments` |
-| `postprocess_all.py` | Comprehensive batch processing | `python postprocessing/postprocess_all.py --experiments-dir experiments` |
-| `compare_lid_driven_cavity.py` | Multi-experiment comparison | `python postprocessing/compare_lid_driven_cavity.py --config-list configs.txt` |
-| `grid_convergence_study.py` | Grid convergence analysis | `python postprocessing/grid_convergence_study.py --config-list mesh_study.txt` |
-| `run_all_analysis.py` | Unified comparison & convergence | `python postprocessing/run_all_analysis.py --directory experiments` |
-| `run_all_lid_cavity_comparisons.py` | Parallel lid cavity comparisons | `python postprocessing/run_all_lid_cavity_comparisons.py` |
-| `run_all_grid_convergence_studies.py` | Parallel grid convergence studies | `python postprocessing/run_all_grid_convergence_studies.py` |
-
-## 📋 Command Details
-
-### `postprocess.py` - Individual Experiment Plots
-```bash
-python postprocessing/postprocess.py --config experiments/example/config.yaml --all
 ```
-**Arguments:**
-- `--config PATH`: Path to config.yaml file (required)
-- `--all`: Generate all standard plots (recommended)
-
-**Output:** Individual field plots, residuals, validation plots in `results/plots/`
-
----
-
-### `generate_appendix.py` - Single-Page Summary
-```bash
-python postprocessing/generate_appendix.py --config experiments/example/config.yaml
+postprocessing/
+├── master_postprocess.py              # Master script for all postprocessing tasks
+├── run_grid_convergence_analysis.py   # Grid convergence analysis for all txt files
+├── postprocess.py                     # Core postprocessing (plots, verification)
+├── compare_lid_driven_cavity.py       # Ghia benchmark comparison for LDC
+├── generate_appendix.py               # Generate thesis figures for AppendixPlots
+├── generate_latex_appendix.py         # Generate LaTeX code from AppendixPlots
+├── lid_cavity_comparisons/            # Output directory for Ghia comparisons
+├── reynolds_convergence_studies/       # Convergence analysis results
+└── README.md                          # This file
 ```
-**Arguments:**
-- `--config PATH`: Path to config.yaml file (required)
-- `--output FILE`: Custom output PDF path (optional)
 
-**Output:** Professional single-page PDF with metadata, validation, and flow fields
+## Master Script Usage
 
----
+The `master_postprocess.py` script provides a unified interface for all postprocessing tasks:
 
-### `generate_appendix_all.py` - Batch Appendix Generation
+### Basic Usage
+
 ```bash
-python postprocessing/generate_appendix_all.py --experiments-dir experiments --max-workers 4
+# Process everything in experiments directory
+python postprocessing/master_postprocess.py
+
+# Process specific experiment directory
+python postprocessing/master_postprocess.py --experiment-dir experiments/Collocated/lidDrivenCavity
+
+# Postprocess only (no appendix generation)
+python postprocessing/master_postprocess.py --postprocess-only
+
+# Appendix only (thesis figures + LaTeX, no standard postprocessing)
+python postprocessing/master_postprocess.py --appendix-only
+
+# Include grid convergence analysis
+python postprocessing/master_postprocess.py --include-convergence
 ```
-**Arguments:**
-- `--experiments-dir DIR`: Directory containing experiments (default: experiments)
-- `--output-dir DIR`: Output directory for all figures (optional)
-- `--max-workers N`: Parallel workers (default: 4)
-- `--dry-run`: Preview without generating (optional)
 
-**Output:** Thesis figures for all valid experiments
+### What the Master Script Does
 
----
+1. **Standard Postprocessing** (unless `--appendix-only`):
+   - Runs `postprocess.py --all` for each experiment
+   - Creates plots in `results/plots/` directory
+   - Generates verification plots (Ghia comparison for LDC)
+   - Creates convergence analysis plots
 
-### `postprocess_all.py` - Comprehensive Batch Processing
+2. **Ghia Comparison** (unless `--appendix-only`):
+   - Automatically runs comparison for all lid-driven cavity experiments
+   - Saves results to `postprocessing/lid_cavity_comparisons/`
+
+3. **Grid Convergence Analysis** (if `--include-convergence`):
+   - Runs convergence analysis for all txt files in `lid_cavity_comparisons/`
+   - Saves plots in the same directory as each txt file
+
+4. **Appendix Generation** (unless `--postprocess-only`):
+   - Creates thesis figures in `AppendixPlots/` directory
+   - Generates LaTeX code for the appendix
+
+## Individual Scripts
+
+### Core Postprocessing
+
 ```bash
-python postprocessing/postprocess_all.py --experiments-dir experiments --max-workers 4
+# Run for single experiment
+python postprocessing/postprocess.py --config experiments/path/to/config.yaml --all
 ```
-**Arguments:**
-- `--experiments-dir DIR`: Directory containing experiments (default: experiments)
-- `--output-dir DIR`: Output directory for thesis figures (optional)
-- `--max-workers N`: Parallel workers (default: CPU count, capped at 8)
-- `--postprocess-only`: Run only individual postprocessing (optional)
-- `--appendix-only`: Run only thesis figure generation (optional)
-- `--dry-run`: Preview without running (optional)
 
-**Output:** Both individual plots and thesis figures for all experiments
+**Note**: During standard postprocessing, no "thesis figures" are created in the results directories. Individual plots are saved to `results/plots/` only.
 
----
+### Ghia Benchmark Comparison
 
-### `compare_lid_driven_cavity.py` - Multi-Experiment Comparison
 ```bash
 # Create config list file
-echo "experiments/Re_100/coarse/config.yaml" > configs.txt
-echo "experiments/Re_100/medium/config.yaml" >> configs.txt
+echo "experiments/lidDrivenCavity/Re_100/config.yaml" > configs.txt
+echo "experiments/lidDrivenCavity/Re_400/config.yaml" >> configs.txt
 
-python postprocessing/compare_lid_driven_cavity.py --config-list configs.txt
+# Run comparison
+python postprocessing/compare_lid_driven_cavity.py --config-list configs.txt --output-dir comparison_plots
 ```
-**Arguments:**
-- `--config-list FILE`: Text file with config paths (recommended)
-- `--experiments DIR1 DIR2...`: Direct experiment paths (legacy)
-- `--output-dir DIR`: Output directory (default: postprocessing/lid_cavity_comparisons)
 
-**Output:** Comparison plots grouped by Reynolds number with Ghia benchmark
+### Grid Convergence Analysis
 
----
-
-### `grid_convergence_study.py` - Grid Convergence Analysis
 ```bash
-# Create mesh study file
-echo "experiments/coarse/config.yaml" > mesh_study.txt
-echo "experiments/medium/config.yaml" >> mesh_study.txt
-echo "experiments/fine/config.yaml" >> mesh_study.txt
+# Run convergence analysis for all txt files in lid_cavity_comparisons
+python postprocessing/run_grid_convergence_analysis.py --max-workers 6
 
-python postprocessing/grid_convergence_study.py --config-list mesh_study.txt
+# Run for specific directory only
+python postprocessing/run_grid_convergence_analysis.py --base-dir postprocessing/lid_cavity_comparisons/gridRefinement
 ```
-**Arguments:**
-- `--config-list FILE`: Text file with config paths (required)
-- `--output-dir DIR`: Output directory (default: postprocessing/convergence_studies)
 
-**Output:** Convergence plots and CSV data showing order of accuracy
+**Note**: This script automatically finds all `.txt` files in the lid_cavity_comparisons directory and runs `compare_lid_driven_cavity.py` for each one individually, saving the results in the same directory as the respective txt file.
 
----
+### Appendix Generation
 
-### `run_all_analysis.py` - Unified Comparison & Convergence
 ```bash
-python postprocessing/run_all_analysis.py --directory experiments --max-workers 4
-```
-**Arguments:**
-- `--directory DIR`: Directory to analyze (default: experiments)
-- `--max-workers N`: Parallel workers (default: CPU count)
-- `--comparison-only`: Run only comparisons (optional)
-- `--convergence-only`: Run only grid convergence (optional)
-- `--dry-run`: Preview without running (optional)
+# Generate thesis figure for single experiment
+python postprocessing/generate_appendix.py --config experiments/path/to/config.yaml
 
-**Output:** Automatically categorizes .txt files and runs appropriate analysis
-
----
-
-### `run_all_lid_cavity_comparisons.py` - Parallel Lid Cavity Comparisons
-```bash
-python postprocessing/run_all_lid_cavity_comparisons.py --max-workers 4
-```
-**Arguments:**
-- `--max-workers N`: Parallel workers (default: CPU count)
-
-**Output:** Processes all .txt files in lid_cavity_comparisons directory
-
----
-
-### `run_all_grid_convergence_studies.py` - Parallel Grid Convergence Studies
-```bash
-python postprocessing/run_all_grid_convergence_studies.py --max-workers 4
-```
-**Arguments:**
-- `--max-workers N`: Parallel workers (default: CPU count)
-
-**Output:** Processes all .txt files in gridRefinement directory
-
-## 📁 Input Requirements
-
-**Data Files (in experiment's `results/` directory):**
-- `U_final.npy`, `p_final.npy`: Final velocity and pressure fields
-- `cell_centers.npz`: Cell center coordinates
-- `residuals.npz`: Residual history
-- `metadata.yaml`: Simulation metadata
-
-**Config Files:**
-- `config.yaml`: Standard collocated experiments
-- `pseudo_config.yaml`: Staggered experiments (legacy)
-
-## 🎯 Common Workflows
-
-**Single Experiment Analysis:**
-```bash
-python postprocessing/postprocess.py --config experiment/config.yaml --all
-python postprocessing/generate_appendix.py --config experiment/config.yaml
+# Generate LaTeX code from AppendixPlots
+python postprocessing/generate_latex_appendix.py --output appendix.tex --plots-dir AppendixPlots
 ```
 
-**Batch Processing All Experiments:**
-```bash
-python postprocessing/postprocess_all.py
-```
+## Output Locations
 
-**Lid-Driven Cavity Study:**
-```bash
-# Create comparison file
-echo "exp1/config.yaml" > study.txt
-echo "exp2/config.yaml" >> study.txt
+- **Standard plots**: `experiments/{experiment}/results/plots/`
+- **Thesis figures**: `AppendixPlots/{experiment}/Re_{reynolds}/{resolution}/`
+- **Ghia comparisons**: `postprocessing/lid_cavity_comparisons/`
+- **LaTeX code**: `AppendixPlots/appendix.tex`
 
-# Compare experiments
-python postprocessing/compare_lid_driven_cavity.py --config-list study.txt
+## Key Features
 
-# Grid convergence analysis
-python postprocessing/grid_convergence_study.py --config-list study.txt
-```
+- **Mesh-agnostic**: Works with structured, unstructured, and adaptive meshes
+- **Experiment-aware**: Automatically detects experiment type for appropriate verification
+- **Modular**: Can run individual components or everything together
+- **Error handling**: Continues processing even if individual experiments fail
+- **Professional plots**: Uses science-style matplotlib formatting throughout
 
-**Comprehensive Analysis:**
-```bash
-python postprocessing/run_all_analysis.py --directory experiments
-```
+## Requirements
 
-## 📊 Output Structure
+All required files must be present in `results/` directory:
+- `U_final.npy`
+- `p_final.npy`
+- `residuals.npz`
+- `cell_centers.npz`
+- `metadata.yaml`
 
-```
-experiments/
-├── experiment1/
-│   └── results/
-│       ├── plots/              # Individual plots
-│       └── thesis_figure_*.pdf # Appendix
-└── experiment2/...
+## Verification and Validation
 
-postprocessing/
-├── lid_cavity_comparisons/     # Comparison plots
-├── convergence_studies/        # Grid convergence plots
-└── README.md
-```
+- **Lid-driven cavity**: Automatic comparison with Ghia benchmark data
+- **Channel flow**: Poiseuille flow verification (if available)
+- **Convergence analysis**: Residual history and field plots
+- **Force coefficients**: Automatic plotting if available (e.g., cylinder flow)
