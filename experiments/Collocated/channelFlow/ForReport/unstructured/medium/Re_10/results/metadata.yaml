@@ -1,7 +1,7 @@
-Simulation id: da7eeea1
+Simulation id: 13e4d8a0
 Experiment: Collocated
-Git commit: 27a9f9d
-Wall time (s): '3761.09'
+Git commit: 78bd749
+Wall time (s): '3292.92'
 Reynolds number: 10
 Mesh type: Unstructured
 Number of control volumes: 14304

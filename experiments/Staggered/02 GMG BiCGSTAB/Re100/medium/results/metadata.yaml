@@ -6,7 +6,7 @@ Experiment: lidDrivenCavity
 Final continuity-residual: '8.46e-08'
 Final u-residual: '4.86e-06'
 Final v-residual: '2.61e-06'
-Git commit: 27a9f9d
+Git commit: 78bd749
 Mesh type: Structured
 Momentum relaxation: '0.6'
 Momentum solver: bcgs
@@ -24,5 +24,5 @@ Pressure solver: bcgs
 Pressure solver preconditioner: geometric multigrid
 Pressure solver tolerance: 1e-10
 Reynolds number: 100
-Simulation id: b52ca407
-Wall time (s): '7177.53'
+Simulation id: 57cb700a
+Wall time (s): '7244.14'

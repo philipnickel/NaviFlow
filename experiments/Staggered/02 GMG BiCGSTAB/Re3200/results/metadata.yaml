@@ -3,10 +3,10 @@ Boundary conditions: staggered_cavity_boundaries
 Convection scheme: Power Law
 Convergence tolerance: 1.0e-07
 Experiment: lidDrivenCavity
-Final continuity-residual: '1.29e-07'
-Final u-residual: '3.23e-07'
-Final v-residual: '4.10e-07'
-Git commit: d884c25
+Final continuity-residual: '1.50e-07'
+Final u-residual: '3.92e-07'
+Final v-residual: '5.20e-07'
+Git commit: 78bd749
 Mesh type: Structured
 Momentum relaxation: '0.5'
 Momentum solver: bcgs
@@ -18,11 +18,11 @@ Multigrid pre-smoothing steps: 1
 Multigrid smoother: red-black Gauss-Seidel
 Multigrid smoother relaxation: 1.5
 Number of control volumes: 16129
-Number of iterations: 5321
+Number of iterations: 20000
 Pressure relaxation: '0.2'
 Pressure solver: bcgs
 Pressure solver preconditioner: geometric multigrid
 Pressure solver tolerance: 1e-10
 Reynolds number: 3200
-Simulation id: d13a67ea
-Wall time (s): '1880.77'
+Simulation id: '26841532'
+Wall time (s): '13694.36'
