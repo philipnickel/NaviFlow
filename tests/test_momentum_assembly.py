@@ -13,26 +13,6 @@ from naviflow_collocated.discretization.gradient.leastSquares import compute_cel
 from petsc4py import PETSc
 from naviflow_collocated.assembly.rhie_chow import compute_face_fluxes, compute_face_velocities
 
-def plot_field(mesh, field, ax=None, title=None):
-    if ax is None:
-        fig, ax = plt.subplots()
-    x = mesh.cell_centers[:, 0]
-    y = mesh.cell_centers[:, 1]
-    try:
-        import matplotlib.tri as tri
-        triang = tri.Triangulation(x, y)
-        cs = ax.tricontourf(triang, field, levels=30, cmap="viridis")
-        plt.colorbar(cs, ax=ax, shrink=0.75)
-        if title:
-            ax.set_title(title)
-    except Exception as e:
-        print(f"Failed to plot tricontourf: {e}")
-        sc = ax.scatter(x, y, c=field, cmap="viridis", s=30, edgecolor="k", linewidth=0.3)
-        plt.colorbar(sc, ax=ax, shrink=0.75)
-        if title:
-            ax.set_title(title)
-    ax.set_aspect("equal")
-
 def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None):
     mesh = load_mesh(mesh_file, bc_file)
      # Get the exact solution and ensure it has the right shape
@@ -97,19 +77,8 @@ def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, rho, tag_p
 
     err = np.abs(phi_numeric - phi_exact)
     max_err, l2_err = np.max(err), np.sqrt(np.mean(err ** 2))
-    print(f"[{tag_prefix}] Max error: {max_err:.2e}, L2 error: {l2_err:.2e}, Flux inbalance: {flux_imbalance:.2e}")
 
-    fig, axs = plt.subplots(2, 2, figsize=(11, 10))
-    fig.suptitle(f"MMS Solution Fields - {tag_prefix}", fontsize=20)
-    plot_field(mesh, phi_numeric, ax=axs[0, 0], title=r"$\phi_{\mathrm{num}}$")
-    plot_field(mesh, phi_exact, ax=axs[0, 1], title=r"$\phi_{\mathrm{exact}}$") 
-    plot_field(mesh, err, ax=axs[1, 0], title=r"$|\phi_{\mathrm{num}} - \phi_{\mathrm{exact}}|$")
-    plot_field(mesh, residual, ax=axs[1, 1], title=r"$\mathbf{A}\phi_{\mathrm{exact}} - \mathbf{rhs_{\mathrm{MMS}}} - \mathbf{b}_{\mathrm{corr}}$")
-    plt.tight_layout()
-    outdir = Path("tests/test_output/MMS_solutions")
-    outdir.mkdir(parents=True, exist_ok=True)
-    plt.savefig(outdir / f"mms_{tag_prefix}.png", dpi=300)
-    plt.close()
+    return l2_err
 
 
 # The following test follows the Method of Manufactured Solutions (MMS) approach
@@ -177,8 +146,6 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, 
         l2_err = np.sqrt(np.mean(err**2))
         errors.append(l2_err)
 
-        print(f"[{tag_prefix} - {scheme}] h = {h:.4f}, L2 error = {l2_err:.3e}, Flux imbalance = {flux_imbalance:.3e}")
-
     hs = np.array(hs)
     errors = np.array(errors)
     from numpy.linalg import lstsq
@@ -187,10 +154,10 @@ def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, 
     y = np.log(errors)
     (p, _), *_ = lstsq(X, y, rcond=None)
 
-    print(f"\nObserved convergence rate (global fit): {tag_prefix} --> p ≈ {p:.2f}")
+    print(f"Momentum {scheme} ({tag_prefix}): observed order = {p:.2f}")
 
     if ax is not None:
-        ax.loglog(hs, errors, label=f"{scheme} - observed order: {p:.2f}", marker=marker)
+        ax.loglog(hs, errors, label=f"{scheme} - observed order: {p:.2f}", marker=marker, linewidth=2.0, markersize=8)
     return errors
 
 
@@ -242,6 +209,8 @@ def generate_mms_functions(expr_str, mu, rho):
 
 # === Run Tests ===
 if __name__ == "__main__":
+    print("Running momentum assembly convergence study...")
+    
     structured_uniform = {
         "coarse": "meshing/experiments/lidDrivenCavity/structuredUniform/coarse/lidDrivenCavity_uniform_coarse.msh",
         "medium": "meshing/experiments/lidDrivenCavity/structuredUniform/medium/lidDrivenCavity_uniform_medium.msh",
@@ -369,7 +338,7 @@ if __name__ == "__main__":
             marker=next(marker_cycle)
         )
 
-    # Add reference slopes to both plots
+    # Calculate grid sizes for both mesh types
     hs_structured = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
         structured_uniform["coarse"],
         structured_uniform["medium"],
@@ -381,24 +350,41 @@ if __name__ == "__main__":
         unstructured["fine"]
     ]])
 
-    ref_slope_structured = np.min(errors_structured)*2 * (hs_structured / hs_structured[0])**2
-    ref_slope_unstructured = np.min(errors_unstructured)*2 * (hs_unstructured / hs_unstructured[0])**2
+    # Add reference slopes using the minimum error as reference (following postprocessing pattern)
+    error_ref_u = np.min(errors_structured) if len(errors_structured) > 0 else 1e-4
+    error_ref_unstruct = np.min(errors_unstructured) if len(errors_unstructured) > 0 else 1e-4
+    
+    # Create reference grid size range
+    h_ref_struct = np.array([hs_structured.min() * 0.8, hs_structured.max() * 1.2])
+    h_ref_unstruct = np.array([hs_unstructured.min() * 0.8, hs_unstructured.max() * 1.2])
+    
+    # First order reference (O(h^1)) - structured
+    ref_1st_struct = error_ref_u * 2 * (h_ref_struct / h_ref_struct[0])**1
+    # Second order reference (O(h^2)) - structured
+    ref_2nd_struct = error_ref_u * 2 * (h_ref_struct / h_ref_struct[0])**2
+    
+    # First order reference (O(h^1)) - unstructured
+    ref_1st_unstruct = error_ref_unstruct * 2 * (h_ref_unstruct / h_ref_unstruct[0])**1
+    # Second order reference (O(h^2)) - unstructured
+    ref_2nd_unstruct = error_ref_unstruct * 2 * (h_ref_unstruct / h_ref_unstruct[0])**2
 
     # Configure structured mesh plot
-    ax_structured.loglog(hs_structured, ref_slope_structured, 'k--', label=r'$\mathcal{O}(h^2)$')
-    ax_structured.grid(True, which="both")
-    ax_structured.set_xlabel(r"Grid size $h$")
-    ax_structured.set_ylabel(r"L2 Error")
-    ax_structured.set_title("Order of Accuracy Convection-Diffusion Equation - Structured Mesh", fontsize=14)
-    ax_structured.legend(loc="lower right")
+    ax_structured.loglog(h_ref_struct, ref_1st_struct, color='black', linestyle=':', alpha=0.6, linewidth=1.2, label=r'$\mathcal{O}(h^1)$')
+    ax_structured.loglog(h_ref_struct, ref_2nd_struct, color='black', linestyle='--', alpha=0.6, linewidth=1.2, label=r'$\mathcal{O}(h^2)$')
+    ax_structured.grid(True, which="both", alpha=0.3)
+    ax_structured.set_xlabel(r"Grid size $h$", fontsize=12)
+    ax_structured.set_ylabel(r"L2 Error", fontsize=12)
+    ax_structured.set_title("Order of Accuracy: Convection-Diffusion Equation\nStructured Mesh", fontsize=14, pad=20)
+    ax_structured.legend(loc="lower right", frameon=True, fancybox=True, shadow=True)
 
     # Configure unstructured mesh plot
-    ax_unstructured.loglog(hs_unstructured, ref_slope_unstructured, 'k--', label=r'$\mathcal{O}(h^2)$')
-    ax_unstructured.grid(True, which="both")
-    ax_unstructured.set_xlabel(r"Grid size $h$")
-    ax_unstructured.set_ylabel(r"L2 Error")
-    ax_unstructured.set_title("Order of Accuracy Convection-Diffusion Equation - Unstructured Mesh", fontsize=14)
-    ax_unstructured.legend(loc="lower right")
+    ax_unstructured.loglog(h_ref_unstruct, ref_1st_unstruct, color='black', linestyle=':', alpha=0.6, linewidth=1.2, label=r'$\mathcal{O}(h^1)$')
+    ax_unstructured.loglog(h_ref_unstruct, ref_2nd_unstruct, color='black', linestyle='--', alpha=0.6, linewidth=1.2, label=r'$\mathcal{O}(h^2)$')
+    ax_unstructured.grid(True, which="both", alpha=0.3)
+    ax_unstructured.set_xlabel(r"Grid size $h$", fontsize=12)
+    ax_unstructured.set_ylabel(r"L2 Error", fontsize=12)
+    ax_unstructured.set_title("Order of Accuracy: Convection-Diffusion Equation\nUnstructured Mesh", fontsize=14, pad=20)
+    ax_unstructured.legend(loc="lower right", frameon=True, fancybox=True, shadow=True)
 
     # Save both plots
     Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
@@ -408,37 +394,4 @@ if __name__ == "__main__":
     plt.savefig("tests/test_output/MMS_convergence/convergence_plot_unstructured.pdf", dpi=300)
     plt.close('all')
     
-    # Generate actual solution plots for coarse meshes
-    print("\nGenerating solution plots for coarse meshes...")
-    
-    for tag, expr in mms_cases.items():
-        mu = 0.1
-        rho = 0.0
-        scheme = "SOU"  # Use SOU scheme for solution plots
-        limiter = "MUSCL"
-        u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
-        bc_file = BC_files[tag]
-        
-        # Generate solution plot for structured coarse mesh
-        run_mms_test(
-            structured_uniform["coarse"],
-            bc_file,
-            u_fn, rhs_fn, grad_fn, mu, rho,
-            tag_prefix=f"{tag}_structured_coarse_{scheme}",
-            component_idx=0,
-            scheme=scheme,
-            limiter=limiter
-        )
-        
-        # Generate solution plot for unstructured coarse mesh
-        run_mms_test(
-            unstructured["coarse"],
-            bc_file,
-            u_fn, rhs_fn, grad_fn, mu, rho,
-            tag_prefix=f"{tag}_unstructured_coarse_{scheme}",
-            component_idx=0,
-            scheme=scheme,
-            limiter=limiter
-        )
-    
-    print(f"Time taken: {time.time() - time_start:.2f} seconds")
+    print(f"Momentum convergence study completed in {time.time() - time_start:.1f} seconds. Results saved to tests/test_output/MMS_convergence/")

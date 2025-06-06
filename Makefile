@@ -1,5 +1,5 @@
 # Run everything: lint, format, static checks, tests
-all: lint format check test
+all: lint format check all
 
 # Run full test suite with verbose output and generate HTML report
 test:
@@ -25,10 +25,6 @@ clean:
 	find . -type d -name '.numba_cache' -exec rm -r {} + ;\
 	find . -type d -name '.mypy_cache' -exec rm -r {} + ;\
 	rm -rf .pytest_cache .ruff_cache .coverage report.html
-
-# Export current conda environment (without build info or machine-specific paths)
-env:
-	conda env export --no-builds | grep -v "prefix:" > environment.yaml
 
 # Mark targets as phony (not real files)
 .PHONY: all test test-nv lint format check clean env
