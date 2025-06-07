@@ -62,36 +62,36 @@ def abbreviate_experiment(experiment):
 def abbreviate_mesh_type(mesh_type):
     """Convert mesh type to abbreviation."""
     abbrevs = {
-        'uniform': 'Uni',
-        'unstructured': 'Uns',
-        'structured': 'Str',
-        'adaptive': 'Adp'
+        'uniform': 'unif',
+        'unstructured': 'unstruct',
+        'structured': 'struct',
+        'adaptive': 'adapt'
     }
-    return abbrevs.get(mesh_type, mesh_type[:3])
+    return abbrevs.get(mesh_type, mesh_type[:4])
 
 
 def abbreviate_resolution(resolution):
     """Convert resolution to abbreviation."""
     abbrevs = {
-        'coarse': 'c',
-        'medium': 'm',
-        'fine': 'f',
-        'extra_fine': 'xf',
-        'ultra_fine': 'uf'
+        'coarse': 'coarse',
+        'medium': 'med',
+        'fine': 'fine',
+        'extra_fine': 'xfine',
+        'ultra_fine': 'ufine'
     }
-    return abbrevs.get(resolution, resolution[:1])
+    return abbrevs.get(resolution, resolution[:4])
 
 
 def abbreviate_scheme(scheme):
     """Convert scheme to abbreviation."""
     abbrevs = {
-        'QUICK': 'Q',
-        'Upwind': 'U',
-        'TVD': 'T',
-        'Central': 'C',
-        'PowerLaw': 'P'
+        'QUICK': 'quick',
+        'Upwind': 'upwind',
+        'TVD': 'tvd',
+        'Central': 'central',
+        'PowerLaw': 'plaw'
     }
-    return abbrevs.get(scheme, scheme[:1])
+    return abbrevs.get(scheme, scheme[:4])
 
 
 def generate_label(parsed_info):
@@ -101,10 +101,8 @@ def generate_label(parsed_info):
     res_abbrev = abbreviate_resolution(parsed_info['resolution'])
     scheme_abbrev = abbreviate_scheme(parsed_info['scheme'])
     
-    # Use first 8 characters of sim_id
-    sim_id_short = parsed_info['sim_id'][:8]
-    
-    label = f"sim:{exp_abbrev}_{parsed_info['reynolds']}_{mesh_abbrev}_{res_abbrev}_{scheme_abbrev}_{sim_id_short}"
+    # Create label with clear separators but no prefixes
+    label = f"sim.{exp_abbrev}.re{parsed_info['reynolds']}.{mesh_abbrev}.{res_abbrev}.{scheme_abbrev}"
     return label.lower()
 
 
