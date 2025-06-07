@@ -1,0 +1,28 @@
+Algorithm: SIMPLE
+Boundary conditions: staggered_cavity_boundaries
+Convection scheme: Power Law
+Convergence tolerance: 1.0e-08
+Experiment: lidDrivenCavity
+Final continuity-residual: '2.31e-04'
+Final u-residual: '6.45e-02'
+Final v-residual: '3.16e-01'
+Git commit: 430d9d1
+Mesh type: Structured
+Momentum relaxation: '0.7'
+Momentum solver: bcgs
+Momentum solver preconditioner: none
+Momentum solver tolerance: 1e-12
+Multigrid cycle type: fmg-cycle
+Multigrid post-smoothing steps: 3
+Multigrid pre-smoothing steps: 3
+Multigrid smoother: red_black Gauss-Seidel
+Multigrid smoother relaxation: 1.5
+Number of control volumes: 3969
+Number of iterations: 10
+Pressure relaxation: '0.3'
+Pressure solver: geometric multigrid
+Pressure solver preconditioner: gauss-seidel smoother
+Pressure solver tolerance: 1e-08
+Reynolds number: 100
+Simulation id: 25ffc2f1
+Wall time (s): '0.50'

@@ -34,7 +34,8 @@ class MultiGridSolver(PressureSolver):
                  max_cycles_buildup=1,
                  restriction_method='restrict_full_weighting',
                  interpolation_method='interpolate_linear',
-                 coarsest_grid_size=7):
+                 coarsest_grid_size=7,
+                 verbose=False):
         """
         Initialize the multigrid solver.
         
@@ -64,6 +65,8 @@ class MultiGridSolver(PressureSolver):
             Method for interpolation: 'interpolate_linear' or 'interpolate_cubic'
         coarsest_grid_size : int
             Size of the coarsest grid (must be odd and >= 3)
+        verbose : bool
+            If True, prints convergence information.
         """
         super().__init__(max_iterations=max_iterations, tolerance=tolerance)
         self.smoother = smoother
@@ -104,6 +107,7 @@ class MultiGridSolver(PressureSolver):
             
         self.restriction_method = restriction_method
         self.interpolation_method = interpolation_method
+        self.verbose = verbose
         
         self.residual_history = []
         self.vcycle_data = []
@@ -163,6 +167,7 @@ class MultiGridSolver(PressureSolver):
         
         # Initial guess
         x = np.zeros_like(b)
+        initial_residual_norm = np.linalg.norm(b, 2)
         
         # Apply the appropriate cycle based on cycle_type
         if self.cycle_type == 'fmg':
@@ -170,33 +175,48 @@ class MultiGridSolver(PressureSolver):
             nx_finest, ny_finest = mesh.get_dimensions()
             dx_finest, dy_finest = mesh.get_cell_sizes()
             x = self._fmg_cycle(b, mesh, d_u, d_v, nx_finest, ny_finest, dx_finest, dy_finest)
-            #print(f"scales of solution: min: {np.min(x)}, max: {np.max(x)}, mean: {np.mean(x)}")
+            
+            # Compute final residual after FMG
+            Ax = compute_Ap_product(x, nx, ny, dx, dy, self.rho, d_u, d_v)
+            r = b - Ax
+            r_norm = np.linalg.norm(r, 2)
+            b_norm = np.linalg.norm(b, 2)
+            res_norm = r_norm / b_norm if b_norm > 0 else r_norm
+            self.residual_history.append(res_norm)
+            
+            if self.verbose:
+                print(f"FMG cycle completed. Final relative residual: {res_norm:.2e}")
+
             # Optionally, perform final V/W cycles after FMG
             if self.cycle_type_final:
-                #print(f"Final {self.cycle_type_final}-cycle iteration {k+1} of {self.max_iterations}")
-                if self.cycle_type_final == 'v':
-                        x = self._v_cycle(x, b, mesh, self.rho, d_u, d_v, self.smoother_omega,
-                                        self.pre_smoothing, self.post_smoothing, level=0)
-                elif self.cycle_type_final == 'w':
-                        x = self._w_cycle(x, b, mesh, self.rho, d_u, d_v, self.smoother_omega,
-                                        self.pre_smoothing, self.post_smoothing, level=0)
+                for k in range(self.max_iterations):
+                    if self.cycle_type_final == 'v':
+                            x = self._v_cycle(x, b, mesh, self.rho, d_u, d_v, self.smoother_omega,
+                                            self.pre_smoothing, self.post_smoothing, level=0)
+                    elif self.cycle_type_final == 'w':
+                            x = self._w_cycle(x, b, mesh, self.rho, d_u, d_v, self.smoother_omega,
+                                            self.pre_smoothing, self.post_smoothing, level=0)
 
-                # Compute residual: r = b - A*x
-                Ax = compute_Ap_product(x, nx, ny, dx, dy, self.rho, d_u, d_v)
-                r = b - Ax
-                r_norm = np.linalg.norm(r, 2)
-                b_norm = np.linalg.norm(b, 2)
-                res_norm = r_norm / b_norm if b_norm > 0 else r_norm
-                self.residual_history.append(res_norm)
-            else:
-                 # Compute final residual after FMG if no final cycles run
-                 Ax = compute_Ap_product(x, nx, ny, dx, dy, self.rho, d_u, d_v)
-                 r = b - Ax
-                 r_norm = np.linalg.norm(r, 2)
-                 b_norm = np.linalg.norm(b, 2)
-                 res_norm = r_norm / b_norm if b_norm > 0 else r_norm
-                 self.residual_history.append(res_norm)
-                 print(f"FMG cycle completed. Final relative residual: {res_norm:.2e}")
+                    # Compute residual: r = b - A*x
+                    Ax = compute_Ap_product(x, nx, ny, dx, dy, self.rho, d_u, d_v)
+                    r = b - Ax
+                    r_norm = np.linalg.norm(r, 2)
+                    b_norm = np.linalg.norm(b, 2)
+                    res_norm = r_norm / b_norm if b_norm > 0 else r_norm
+                    self.residual_history.append(res_norm)
+                    
+                    if res_norm < self.tolerance:
+                        if self.verbose and len(self.residual_history) > 1:
+                            final_residual_norm = self.residual_history[-1]
+                            num_iterations = k + 1
+                            if initial_residual_norm > 1e-12 and final_residual_norm > 1e-12:
+                                conv_rate = (final_residual_norm / initial_residual_norm)**(1/num_iterations)
+                                print(f"MultiGrid FMG final cycles converged in {num_iterations} iterations with a rate of {conv_rate:.4f}. Final relative residual: {res_norm:.2e}")
+                            else:
+                                print(f"MultiGrid FMG final cycles converged in {num_iterations} iterations. Final relative residual: {res_norm:.2e}")
+                        break
+                if k == self.max_iterations - 1 and res_norm >= self.tolerance and self.verbose:
+                    print(f"MultiGrid FMG final cycles reached max iterations ({self.max_iterations}) without converging. Final relative residual: {res_norm:.2e}")
 
         else: # V or W cycles
             for k in range(self.max_iterations):
@@ -222,24 +242,18 @@ class MultiGridSolver(PressureSolver):
 
                 # Check convergence
                 if res_norm < self.tolerance:
-                    # Calculate convergence rate
-                    conv_rates = []
-                    if len(self.residual_history) > 1:
-                        for i in range(1, len(self.residual_history)):
-                            prev_res = self.residual_history[i-1]
-                            if prev_res > 1e-12:  # Avoid division by very small values
-                                rate = self.residual_history[i] / prev_res
-                                if not np.isnan(rate) and not np.isinf(rate) and abs(rate) < 1.0:
-                                    conv_rates.append(rate)
-                    
-                    if conv_rates:
-                        overall_conv_rate = np.power(np.prod(conv_rates), 1.0 / len(conv_rates))
-                        print(f"Convergence rate: {overall_conv_rate:.4f}, iterations: {k+1} {self.cycle_type}-cycles, residual: {res_norm:.2e}")
-                    else:
-                        print(f"No convergence rate, iterations: {k+1}, residual: {res_norm:.2e}")
+                    if self.verbose and len(self.residual_history) > 1:
+                        final_residual_norm = self.residual_history[-1]
+                        num_iterations = k + 1
+                        # Avoid division by zero and log of zero
+                        if initial_residual_norm > 1e-12 and final_residual_norm > 1e-12:
+                            conv_rate = (final_residual_norm / initial_residual_norm)**(1/num_iterations)
+                            print(f"MultiGrid converged in {num_iterations} iterations with a rate of {conv_rate:.4f}. Final relative residual: {res_norm:.2e}")
+                        else:
+                            print(f"MultiGrid converged in {num_iterations} iterations. Final relative residual: {res_norm:.2e}")
                     break
-                #print(f"multigrid residual: {res_norm:.2e}")
-                #print(f"No convergence, iterations: {k+1}, residual: {res_norm:.2e}")
+            if k == self.max_iterations - 1 and res_norm >= self.tolerance and self.verbose:
+                print(f"MultiGrid reached max iterations ({self.max_iterations}) without converging. Final relative residual: {res_norm:.2e}")
         
         # Reshape to 2D with Fortran ordering
         p_prime = x.reshape((nx, ny), order='F')
