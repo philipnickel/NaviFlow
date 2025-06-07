@@ -230,13 +230,16 @@ def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
     h = H/2  # Half height
 
     # Calculate channel length from domain coordinates
-    L = 5.0
+    L = np.max(x) - np.min(x)
     
-    # Create figure
-    fig = plt.figure(figsize=(8, 6))
+    # Calculate viscosity from Reynolds number
+    mu = rho * u_inlet * H / Re
+    
+    # Create figure with two subplots
+    fig = plt.figure(figsize=(12, 5))
     
     # Velocity Profile Plot (at x=L/2)
-    ax = fig.add_subplot(111)
+    ax1 = fig.add_subplot(121)
     
     # Extract numerical solution at x=L/2 using griddata
     points = np.column_stack((x, y))
@@ -261,18 +264,55 @@ def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
     # u(y) = (3/2) * u_inlet * (1 - (y/h)^2)
     r = np.linspace(-h, h, len(u_numerical))
     u_analytical = u_inlet * (1 - (r**2/h**2))  # Use actual measured inlet velocity
-    y = np.linspace(0, 1, len(u_analytical))
+    y_norm = np.linspace(0, 1, len(u_analytical))
     
-    # Plot both solutions
-    ax.plot(y, u_numerical, 'o-', color='tab:blue', label="Numerical", markersize=2, alpha=0.6)
-    ax.plot(y, u_analytical, '--', color='tab:orange', label="Analytical", linewidth=2)
+    # Plot velocity profiles
+    ax1.plot(y_norm, u_numerical, 'o-', color='tab:blue', label="Numerical", markersize=2, alpha=0.6)
+    ax1.plot(y_norm, u_analytical, '--', color='tab:orange', label="Analytical", linewidth=2)
     
-    ax.set_title(f"Velocity Profile at x=L/2", fontsize=12, pad=10)
-    ax.set_xlabel("y/h", fontsize=10)
-    ax.set_ylabel("u/u_inlet", fontsize=10)
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=10, loc='upper right')
-    ax.tick_params(axis='both', which='major', labelsize=9)
+    ax1.set_title("Velocity Profile at x=L/2", fontsize=12, pad=10)
+    ax1.set_xlabel("y/H", fontsize=10)
+    ax1.set_ylabel("u/U_max", fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=10, loc='upper right')
+    ax1.tick_params(axis='both', which='major', labelsize=9)
+
+    # Pressure Drop Plot
+    ax2 = fig.add_subplot(122)
+    
+    # Extract pressure along channel centerline
+    y_center = H/2
+    centerline_mask = np.abs(y - y_center) < 1e-6
+    x_centerline = x[centerline_mask]
+    p_centerline = p[centerline_mask]
+    
+    # Sort by x-coordinate
+    sort_idx = np.argsort(x_centerline)
+    x_centerline = x_centerline[sort_idx]
+    p_centerline = p_centerline[sort_idx]
+    
+    # Calculate analytical pressure drop
+    # dp/dx = -12μU/(H^2)
+    dp_dx_analytical = -12 * mu * u_inlet / (H * H)
+    x_norm = (x_centerline - x_inlet) / L
+    p_analytical = dp_dx_analytical * L * x_norm
+    
+    # Plot pressure profiles
+    ax2.plot(x_norm, p_centerline - p_centerline[0], 'o-', color='tab:blue', 
+             label="Numerical", markersize=2, alpha=0.6)
+    ax2.plot(x_norm, p_analytical - p_analytical[0], '--', color='tab:orange', 
+             label="Analytical", linewidth=2)
+    
+    ax2.set_title("Pressure Drop Along Channel", fontsize=12, pad=10)
+    ax2.set_xlabel("x/L", fontsize=10)
+    ax2.set_ylabel("Δp", fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=10, loc='upper right')
+    ax2.tick_params(axis='both', which='major', labelsize=9)
+    
+    # Calculate error metrics
+    velocity_error = np.max(np.abs(u_numerical - u_analytical)) / u_inlet
+    pressure_gradient_error = np.abs((p_centerline[-1] - p_centerline[0])/(L) - dp_dx_analytical) / abs(dp_dx_analytical)
     
     # Add flow parameters to plot
     param_text = (
@@ -280,7 +320,9 @@ def poiseuille_verification(x, y, U, p, Re, output_path, sim_id=None):
         f"Height (H): {H:.3f} m\n"
         f"Length (L): {L:.3f} m\n"
         f"Inlet velocity: {u_inlet:.3f} m/s\n"
-        f"Reynolds number: {Re}"
+        f"Reynolds number: {Re}\n"
+        f"Max velocity error: {velocity_error:.2%}\n"
+        f"Pressure gradient error: {pressure_gradient_error:.2%}"
     )
     fig.text(0.02, 0.02, param_text, 
              bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray', boxstyle='round,pad=0.5'),

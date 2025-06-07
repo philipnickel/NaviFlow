@@ -290,7 +290,7 @@ def plot_residual_fields(x, y, u_res, v_res, cont_res, output_path, sim_id=None,
     save_pdf(fig, output_path)
 
 def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None):
-    """Create a standalone streamlines plot."""
+    """Create a standalone streamlines plot with object-aware adaptive density."""
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111)
     
@@ -307,18 +307,133 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
     # Calculate velocity magnitude for coloring
     velocity_magnitude = np.sqrt(Ug**2 + Vg**2)
     
+    # Detect obstacles using the same method as LIC (but more conservative)
+    obstacle_mask = np.zeros_like(Xg, dtype=bool)
+    
+    if "cylinderFlow" in experiment:
+        # Use data-driven detection but with a higher threshold to be more conservative
+        threshold = 0.01  # Increased from 0.005 to be more conservative
+        low_vel_mask = velocity_magnitude < threshold
+        
+        from scipy import ndimage
+        labeled_array, num_features = ndimage.label(low_vel_mask)
+        
+        if num_features > 0:
+            # Find the component closest to expected cylinder center
+            center_x_idx = Xg.shape[1] // 10  # Roughly x=0.2 in domain [0, 2.2]
+            center_y_idx = Xg.shape[0] // 2   # Roughly y=0.2 in domain [0, 0.4]
+            
+            min_dist = float('inf')
+            best_label = 0
+            
+            for label in range(1, num_features + 1):
+                component = (labeled_array == label)
+                if np.sum(component) < 30:  # Reduced from 50 to be more conservative
+                    continue
+                
+                # Find center of mass of this component
+                y_indices, x_indices = np.where(component)
+                com_y = np.mean(y_indices)
+                com_x = np.mean(x_indices)
+                
+                # Distance to expected cylinder center
+                dist = np.sqrt((com_x - center_x_idx)**2 + (com_y - center_y_idx)**2)
+                
+                if dist < min_dist:
+                    min_dist = dist
+                    best_label = label
+            
+            if best_label > 0:
+                obstacle_mask = (labeled_array == best_label)
+        
+        # Fallback to geometric definition if detection fails
+        if not np.any(obstacle_mask):
+            center = (0.2, 0.2)
+            radius = 0.04  # Slightly smaller than actual to be conservative
+            dist = np.sqrt((Xg - center[0])**2 + (Yg - center[1])**2)
+            obstacle_mask = dist <= radius
+    
     # Plot velocity magnitude as background
     im = ax.pcolormesh(Xg, Yg, velocity_magnitude, 
                        cmap='coolwarm',
                        shading='auto',
                        alpha=0.3)  # Semi-transparent background
     
-    # Plot streamlines in solid blue
-    strm = ax.streamplot(xi, yi, Ug, Vg, 
-                        color='tab:blue',
-                        density=4.0,
-                        linewidth=0.2,
-                        arrowsize=0.2)
+    # Only mask velocity inside the very core of obstacles (conservative masking)
+    Ug_plot = Ug.copy()
+    Vg_plot = Vg.copy()
+    Ug_plot[obstacle_mask] = 0
+    Vg_plot[obstacle_mask] = 0
+    
+    # Plot streamlines with much higher base density
+    base_density = 4.0  # Increased from 1.5
+    
+    if "cylinderFlow" in experiment:
+        # First plot base streamlines everywhere
+        strm_base = ax.streamplot(xi, yi, Ug_plot, Vg_plot, 
+                                color='tab:blue',
+                                density=base_density,
+                                linewidth=0.15,
+                                arrowsize=0.15)
+        
+        # Add extra high-density streamlines around the cylinder (especially wake region)
+        center = (0.2, 0.2)
+        radius = 0.05
+        
+        # Create additional seed points around the cylinder for extra detail
+        # Focus on wake region and sides where vortices form
+        theta = np.linspace(0, 2*np.pi, 24)  # 24 points around cylinder
+        
+        # Seed points at multiple radii for wake detail
+        for r_mult in [1.2, 1.5, 2.0, 2.5]:  # Multiple rings around cylinder
+            seed_x = center[0] + r_mult * radius * np.cos(theta)
+            seed_y = center[1] + r_mult * radius * np.sin(theta)
+            
+            # Filter out points that are outside domain
+            valid_seeds = ((seed_x >= np.min(xi)) & (seed_x <= np.max(xi)) & 
+                          (seed_y >= np.min(yi)) & (seed_y <= np.max(yi)))
+            
+            if np.any(valid_seeds):
+                seed_points = np.column_stack((seed_x[valid_seeds], seed_y[valid_seeds]))
+                
+                # Plot additional streamlines from these seed points
+                try:
+                    strm_seeds = ax.streamplot(xi, yi, Ug_plot, Vg_plot,
+                                             start_points=seed_points,
+                                             color='tab:blue',
+                                             linewidth=0.1,
+                                             arrowsize=0.1,
+                                             density=100)  # High density for seed-based lines
+                except:
+                    pass  # Skip if streamplot fails for any reason
+                    
+        # Add extra focus on wake region (downstream of cylinder)
+        wake_x = np.linspace(center[0] + radius, center[0] + 4*radius, 8)
+        wake_y = np.linspace(center[1] - 2*radius, center[1] + 2*radius, 8)
+        wake_X, wake_Y = np.meshgrid(wake_x, wake_y)
+        wake_points = np.column_stack((wake_X.flatten(), wake_Y.flatten()))
+        
+        # Filter wake points to domain
+        valid_wake = ((wake_points[:, 0] >= np.min(xi)) & (wake_points[:, 0] <= np.max(xi)) & 
+                     (wake_points[:, 1] >= np.min(yi)) & (wake_points[:, 1] <= np.max(yi)))
+        
+        if np.any(valid_wake):
+            try:
+                strm_wake = ax.streamplot(xi, yi, Ug_plot, Vg_plot,
+                                        start_points=wake_points[valid_wake],
+                                        color='tab:blue',
+                                        linewidth=0.1,
+                                        arrowsize=0.1,
+                                        density=100)
+            except:
+                pass
+    else:
+        # Standard uniform density for non-cylinderFlow cases
+        strm = ax.streamplot(xi, yi, Ug_plot, Vg_plot, 
+                            color='tab:blue',
+                            density=base_density,
+                            linewidth=0.2,
+                            arrowsize=0.2)
     
     # Add horizontal colorbar for velocity magnitude
     divider = make_axes_locatable(ax)
@@ -344,11 +459,12 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
     ax.set_xlim(np.min(x), np.max(x))
     ax.set_ylim(np.min(y), np.max(y))
     
-    # Add cylinder for cylinderFlow cases
+    # Add clean gray cylinder for cylinderFlow cases (consistent with LIC)
     if "cylinderFlow" in experiment:
         center = (0.2, 0.2)
-        radius = 0.05
-        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        radius = 0.05375  # Same as LIC - slightly larger for visual polish
+        circle = mpatches.Circle(center, radius, facecolor='gray', edgecolor='none',
+                               alpha=0.8, zorder=10)
         ax.add_patch(circle)
     
     fig.tight_layout(pad=0.1)
