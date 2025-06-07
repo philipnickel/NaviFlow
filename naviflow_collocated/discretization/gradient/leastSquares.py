@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit, prange
+from naviflow_collocated.core.helpers import BC_NEUMANN
 
 EPS = 1e-20
 
@@ -13,6 +14,8 @@ def compute_cell_gradients(mesh, u, pinned_idx=0, weighted=True, weight_exponent
     owner_cells    = mesh.owner_cells
     neighbor_cells = mesh.neighbor_cells
     cc             = mesh.cell_centers
+    face_centers   = mesh.face_centers
+    boundary_types = mesh.boundary_types
 
     for c in prange(n_cells):
         if c == pinned_idx:
@@ -29,7 +32,7 @@ def compute_cell_gradients(mesh, u, pinned_idx=0, weighted=True, weight_exponent
         umin = u_c
         umax = u_c
 
-        # First pass: compute gradient matrix elements
+        # First pass: compute gradient matrix elements using only internal faces
         for f in cell_faces[c]:
             if f < 0:
                 break
@@ -37,7 +40,7 @@ def compute_cell_gradients(mesh, u, pinned_idx=0, weighted=True, weight_exponent
             P = owner_cells[f]
             N = neighbor_cells[f]
 
-            if N >= 0:
+            if N >= 0:  # Only use internal faces
                 other = N if c == P else P
                 if other == pinned_idx:
                     continue
@@ -56,30 +59,28 @@ def compute_cell_gradients(mesh, u, pinned_idx=0, weighted=True, weight_exponent
                         umin = other_u
                     if other_u > umax:
                         umax = other_u
-            else:
-                continue  # boundary face
 
-            r2 = vec0 * vec0 + vec1 * vec1
-            if r2 < EPS:
-                continue
-                
-            # Distance-weighted least squares (default weight_exponent=1.0)
-            if weighted:
-                if weight_exponent == 1.0:
-                    w = 1.0 / r2  # Optimized for common case
+                r2 = vec0 * vec0 + vec1 * vec1
+                if r2 < EPS:
+                    continue
+                    
+                # Distance-weighted least squares
+                if weighted:
+                    if weight_exponent == 1.0:
+                        w = 1.0 / r2  # Optimized for common case
+                    else:
+                        w = 1.0 / (r2 ** weight_exponent)
                 else:
-                    w = 1.0 / (r2 ** weight_exponent)
-            else:
-                w = 1.0 / r2
+                    w = 1.0 / r2
 
-            w_vec0 = w * vec0
-            w_vec1 = w * vec1
-            
-            A00 += w_vec0 * vec0
-            A01 += w_vec0 * vec1  
-            A11 += w_vec1 * vec1
-            b0  += w_vec0 * du
-            b1  += w_vec1 * du
+                w_vec0 = w * vec0
+                w_vec1 = w * vec1
+                
+                A00 += w_vec0 * vec0
+                A01 += w_vec0 * vec1  
+                A11 += w_vec1 * vec1
+                b0  += w_vec0 * du
+                b1  += w_vec1 * du
 
         denom = A00 * A11 - A01 * A01
         if abs(denom) > EPS:
@@ -87,7 +88,7 @@ def compute_cell_gradients(mesh, u, pinned_idx=0, weighted=True, weight_exponent
             gx = (A11 * b0 - A01 * b1) * inv_denom
             gy = (A00 * b1 - A01 * b0) * inv_denom
 
-            # Apply Barth–Jespersen limiter only if enabled
+            # Apply Barth–Jespersen limiter only if enabled and only using internal faces
             phi = 1.0
             if use_limiter and (umax > u_c or umin < u_c):  # Skip if no variation
                 for f in cell_faces[c]:
@@ -96,21 +97,19 @@ def compute_cell_gradients(mesh, u, pinned_idx=0, weighted=True, weight_exponent
 
                     P = owner_cells[f]
                     N = neighbor_cells[f]
-                    if N >= 0:
+                    if N >= 0:  # Only use internal faces for limiting
                         other = N if c == P else P
                         if other == pinned_idx:
                             continue
-                    else:
-                        continue
 
-                    dx = cc[other, 0] - x_Px
-                    dy = cc[other, 1] - x_Py
-                    delta_u = gx * dx + gy * dy
+                        dx = cc[other, 0] - x_Px
+                        dy = cc[other, 1] - x_Py
+                        delta_u = gx * dx + gy * dy
 
-                    if delta_u > EPS:
-                        phi = min(phi, (umax - u_c) / delta_u)
-                    elif delta_u < -EPS:
-                        phi = min(phi, (umin - u_c) / delta_u)
+                        if delta_u > EPS:
+                            phi = min(phi, (umax - u_c) / delta_u)
+                        elif delta_u < -EPS:
+                            phi = min(phi, (umin - u_c) / delta_u)
 
             grad[c, 0] = phi * gx
             grad[c, 1] = phi * gy

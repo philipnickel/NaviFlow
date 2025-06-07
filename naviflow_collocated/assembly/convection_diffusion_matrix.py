@@ -33,6 +33,8 @@ def assemble_diffusion_convection_matrix(
     limiter=None,
     pressure_field = None,
     grad_pressure_field = None,
+    dt=0.0,
+    transient=False,
 ):
     """Assemble sparse matrix and RHS for a collocated FV discretisation.
     
@@ -44,7 +46,7 @@ def assemble_diffusion_convection_matrix(
     n_boundary  = mesh.boundary_faces.shape[0]
 
     # ––– pessimistic non-zero count ––––––––––––––––––––––––––––––––––––––––
-    max_nnz = 8 * n_internal + 3 * n_boundary
+    max_nnz = 8 * n_internal + 3 * n_boundary + n_cells
     row  = np.zeros(max_nnz, dtype=np.int64)
     col  = np.zeros(max_nnz, dtype=np.int64)
     data = np.zeros(max_nnz, dtype=np.float64)
@@ -128,6 +130,13 @@ def assemble_diffusion_convection_matrix(
             continue
 
         b[P] -= diffFlux_N_b + convFlux_N_b
+
+    if transient and dt > 0:
+        # This loop adds the transient term contribution to the diagonal and source term
+        for i in range(n_cells):
+            transient_term_coeff = rho * mesh.cell_volumes[i] / dt
+            row[idx] = i; col[idx] = i; data[idx] = transient_term_coeff; idx += 1
+            b[i] += transient_term_coeff * phi[i]
 
     # ––– trim overallocation –––––––––––––––––––––––––––––––––––––––––––––––
     return row[:idx], col[:idx], data[:idx], b

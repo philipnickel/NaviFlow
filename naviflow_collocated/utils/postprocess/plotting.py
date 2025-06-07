@@ -7,11 +7,12 @@ from naviflow_collocated.utils.postprocess.utils import get_obstacle_mask_from_m
 import matplotlib.pyplot as plt
 from naviflow_collocated.utils.postprocess.plot_style import plt  # This will apply the style
 import scienceplots
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 # Set the style for all plots
 plt.style.use(['science', 'grid'])
 
-def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_path=None, experiment=None, Re=None):
+def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_path=None, experiment=None, Re=None, return_as_array=False, time_val=None):
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     titles = ["Velocity Magnitude", "Pressure", "Streamlines"]
 
@@ -91,8 +92,21 @@ def plot_fields_single_row(x, y, U, velocity_magnitude, p, sim_id=None, output_p
     fig.suptitle(suptitle)
 
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    
+    # Add consistent, styled annotations
+    if time_val is not None:
+        fig.text(0.02, 0.98, f"Time = {time_val:.4f}s", ha='left', va='top', fontsize=8, color='gray')
     if sim_id is not None:
-        fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
+        fig.text(0.98, 0.98, f"Sim ID: {sim_id}", ha='right', va='top', fontsize=8, color='gray')
+
+    if return_as_array:
+        canvas = FigureCanvasAgg(fig)
+        canvas.draw()
+        image_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
+        image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        plt.close(fig)
+        return image_array
+
     if output_path:
         save_pdf(fig, output_path)
     else:
@@ -196,32 +210,27 @@ def trim_stalled_residuals(residual_arrays, keep_stalled_iterations=500):
     return trimmed_arrays, stall_info
 
 def plot_residuals(res, output_path, sim_id=None):
-    # First, trim stalled residuals
-    trimmed_res, stall_info = trim_stalled_residuals(res, keep_stalled_iterations=500)
+    # Use the full residual data without trimming
+    # Convert NpzFile to regular dictionary if needed
+    if hasattr(res, 'files'):  # NpzFile has a 'files' attribute
+        res_dict = {key: res[key] for key in res.files}
+    else:
+        res_dict = res
     
     fig = plt.figure(figsize=(8, 5))
     ax = fig.add_subplot(1, 1, 1)
     
-    # Slice arrays to exclude first and last iteration (but use trimmed data)
-    u_data = trimmed_res["u"][3:-3] if len(trimmed_res["u"]) > 6 else trimmed_res["u"]
-    v_data = trimmed_res["v"][3:-3] if len(trimmed_res["v"]) > 6 else trimmed_res["v"]
-    cont_data = trimmed_res["cont"][3:-3] if len(trimmed_res["cont"]) > 6 else trimmed_res["cont"]
+    # Use full residual arrays without any trimming
+    u_data = res_dict["u"]
+    v_data = res_dict["v"]
+    cont_data = res_dict["cont"]
     
     ax.semilogy(u_data, label="u-momentum", color='tab:blue', linewidth=2)
     ax.semilogy(v_data, label="v-momentum", color='tab:orange', linewidth=2)
     ax.semilogy(cont_data, label="continuity", color='tab:green', linewidth=2)
     
-    # Update title to indicate if residuals were trimmed
-    if stall_info['stalled']:
-        title = f"Residual History (Trimmed: {stall_info['trimmed_length']}/{stall_info['original_length']} iterations)"
-        
-        # Add vertical line to show where stalling was detected
-        stall_line_pos = stall_info['earliest_stall'] - 3  # Account for the [3:-3] slicing
-        if 0 <= stall_line_pos < len(u_data):
-            ax.axvline(x=stall_line_pos, color='red', linestyle='--', alpha=0.7, 
-                      label=f'Stall detected (iter {stall_info["earliest_stall"]})')
-    else:
-        title = "Residual History"
+    # Simple title without trimming information
+    title = "Residual History"
     
     ax.set_title(title, fontsize=16, loc='center')
     if sim_id is not None:
@@ -289,7 +298,7 @@ def plot_residual_fields(x, y, u_res, v_res, cont_res, output_path, sim_id=None,
         fig.text(0.5, 0.01, f"Simulation ID: {sim_id}", ha='center', va='bottom', fontsize=6, color='gray', alpha=0.7)
     save_pdf(fig, output_path)
 
-def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None):
+def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None, return_as_array=False, time_val=None, hide_colorbar=False):
     """Create a standalone streamlines plot."""
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111)
@@ -320,19 +329,22 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
                         linewidth=0.2,
                         arrowsize=0.2)
     
-    # Add horizontal colorbar for velocity magnitude
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("bottom", size="5%", pad=0.3)
-    cbar = fig.colorbar(im, cax=cax, orientation='horizontal')
-    cbar.set_label('Velocity Magnitude')
-    cbar.formatter.set_scientific(True)
-    cbar.formatter.set_powerlimits((0, 0))
+    if not hide_colorbar:
+        # Add horizontal colorbar for velocity magnitude
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("bottom", size="5%", pad=0.3)
+        cbar = fig.colorbar(im, cax=cax, orientation='horizontal')
+        cbar.set_label('Velocity Magnitude')
+        cbar.formatter.set_scientific(True)
+        cbar.formatter.set_powerlimits((0, 0))
     
     # Set title and labels
     title = "Streamlines"
     ax.set_title(title, fontsize=14, loc='center')
     if sim_id is not None:
-        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
+        ax.set_title(f"Sim ID: {sim_id}", fontsize=8, color='gray', loc='right')
+    if time_val is not None:
+        ax.set_title(f"Time = {time_val:.4f}s", fontsize=8, color='gray', loc='left')
     ax.set_aspect('equal', 'box')
     
     # Remove axis labels and grid
@@ -352,6 +364,15 @@ def plot_streamlines(x, y, U, output_path, experiment=None, Re=None, sim_id=None
         ax.add_patch(circle)
     
     fig.tight_layout(pad=0.1)
+
+    if return_as_array:
+        canvas = FigureCanvasAgg(fig)
+        canvas.draw()
+        image_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
+        image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        plt.close(fig)
+        return image_array
+        
     save_pdf(fig, output_path)
 
 def plot_force_coefficients(cd_history, cl_history, output_path, sim_id=None, experiment=None, Re=None):
@@ -558,4 +579,51 @@ def save_individual_residual_plots(x, y, u_res, v_res, cont_res, experiment, Re,
         ax.add_patch(circle)
     fig.tight_layout(pad=0.1)
     plt.savefig(os.path.join(plots_dir, "continuity_residual.pdf"))
-    plt.close(fig) 
+    plt.close(fig)
+
+def plot_velocity_magnitude(x, y, velocity_magnitude, output_path, experiment=None, Re=None, sim_id=None, time_val=None, return_as_array=False, vmin=None, vmax=None, hide_colorbar=False):
+    """Create a standalone velocity magnitude plot."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+    obstacle_mask = get_obstacle_mask_from_msh(x, y, experiment)
+    
+    # Use global vmin/vmax if provided to keep color scale consistent
+    cf = ax.tricontourf(x, y, velocity_magnitude, levels=50, cmap='coolwarm', vmin=vmin, vmax=vmax)
+    if np.any(obstacle_mask):
+        ax.tricontourf(x[obstacle_mask], y[obstacle_mask], velocity_magnitude[obstacle_mask], levels=1, colors='gray', alpha=0.5)
+        
+    if not hide_colorbar:
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("bottom", size="5%", pad=0.3)
+        cbar = fig.colorbar(cf, cax=cax, orientation='horizontal')
+        cbar.formatter.set_scientific(True)
+        cbar.formatter.set_powerlimits((0, 0))
+        cbar.set_label('Velocity Magnitude')
+
+    title = "Velocity Magnitude"
+    ax.set_title(title, fontsize=14, loc='center')
+    if sim_id is not None:
+        ax.set_title(f"Simulation ID: {sim_id}", fontsize=8, color='gray', loc='right')
+    if time_val is not None:
+        ax.set_title(f"Time = {time_val:.4f}s", fontsize=8, color='gray', loc='left')
+
+    ax.set_aspect('equal', 'box')
+    ax.set_xlim(np.min(x), np.max(x))
+    ax.set_ylim(np.min(y), np.max(y))
+    
+    if "cylinderFlow" in experiment:
+        center = (0.2, 0.2)
+        radius = 0.05
+        circle = mpatches.Circle(center, radius, edgecolor='grey', facecolor='grey', alpha=1.0, linewidth=0, zorder=10)
+        ax.add_patch(circle)
+        
+    fig.tight_layout(pad=0.1)
+    
+    if return_as_array:
+        canvas = FigureCanvasAgg(fig)
+        canvas.draw()
+        image_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
+        image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        plt.close(fig)
+        return image_array
+
+    save_pdf(fig, output_path) 

@@ -74,7 +74,6 @@ class ResidualLogger:
         s_c = log_slope(self.history["cont"])
 
         if max(abs(s_u), abs(s_v), abs(s_c)) < 0.0001:
-            print(f"Residuals appear stalled (avg slope < 0.0001) — monitor for potential issues.")
             self.stalled = True
     
     def _check_convergence(self):
@@ -84,7 +83,7 @@ class ResidualLogger:
 
         # Check if momentum residuals are below tolerance
         if max(u_res, v_res) < self.convergence_tolerance:
-            print(f"Solution converged: momentum residuals below tolerance {self.convergence_tolerance:.1e}")
+            #print(f"Solution converged: momentum residuals below tolerance {self.convergence_tolerance:.1e}")
             self.converged = True
             return True
         return False

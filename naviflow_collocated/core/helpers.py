@@ -209,21 +209,28 @@ BC_DIRICHLET = 1
 BC_INLET = 2
 BC_OUTLET = 4
 BC_NEUMANN = 3
+BC_OBSTACLE = 4  # Same as wall for our purposes
 
 def set_pressure_boundaries(mesh, p): 
     n_boundary = mesh.boundary_faces.shape[0]
     for i in prange(n_boundary):
         f = mesh.boundary_faces[i]
-        if mesh.boundary_types[f,0] == BC_OUTLET:
-            p[f] = p[mesh.owner_cells[f]]
-        #elif mesh.boundary_types[f,0] == BC_INLET:
-            #p[f] = p[mesh.owner_cells[f]]
-        #elif mesh.boundary_types[f,0] == BC_WALL:
-            #p[f] = p[mesh.owner_cells[f]]
-        #elif mesh.boundary_types[f,0] == BC_DIRICHLET:
-            #p[f] = p[mesh.owner_cells[f]]
-        #elif mesh.boundary_types[f,0] == BC_NEUMANN:
-            #p[f] = p[mesh.owner_cells[f]]
+        bc_type = mesh.boundary_types[f,0]
+        P = mesh.owner_cells[f]
+        
+        if bc_type == BC_OUTLET:
+            # Fixed pressure at outlet
+            p[f] = mesh.boundary_values[f]
+        elif bc_type == BC_WALL or bc_type == BC_OBSTACLE:
+            # Zero normal gradient at wall: extrapolate from cell center
+            # p_b = p_P + (∇p)_P · d_Cb = p_P since (∇p)_P · n = 0
+            p[f] = p[P]
+        elif bc_type == BC_INLET:
+            # Zero normal gradient at inlet
+            p[f] = p[P]
+        elif bc_type == BC_NEUMANN:
+            # General zero gradient condition
+            p[f] = p[P]
     return p
 
 def get_unique_cells_from_faces(mesh, face_indices):

@@ -120,12 +120,13 @@ def compute_boundary_convective_flux(f, mesh, rho, mdot, u_field, phi, p_b, bc_t
     Flux_C_b = max(mdot[f], 0)
     Flux_N_b = -max(-mdot[f],0) # ghost cell 
 
-    if bc_type == BC_DIRICHLET:
-        return 0.0, 0.0
+    if bc_type == BC_DIRICHLET or bc_type == BC_INLET:
+        # For a Dirichlet/Inlet condition, the face value is known (bc_value).
+        # The flux is simply the mass flux times this known value.
+        # This contribution goes entirely to the source term.
+        return mdot[f], -mdot[f] * bc_value
     elif bc_type == BC_OBSTACLE:
         return 0.0, 0.0
-    elif bc_type == BC_INLET:
-        return Flux_C_b, Flux_N_b * (2*phi_P-bc_value) 
     elif bc_type == BC_OUTLET:
         grad_v_b = compute_velocity_gradient_least_squares(mesh, u_field, u_field, mesh.face_centers[f], u_field[P], P, f)
         v_b = u_field[P] + np.dot(grad_v_b, d_Cb_vec)

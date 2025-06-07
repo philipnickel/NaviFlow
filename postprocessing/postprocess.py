@@ -15,6 +15,8 @@ import re
 import matplotlib.patches as mpatches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.pyplot as plt
+import imageio
+from datetime import datetime
 
 from naviflow_collocated.utils.postprocess.plotting import (
     plot_fields_single_row,
@@ -23,7 +25,8 @@ from naviflow_collocated.utils.postprocess.plotting import (
     plot_streamlines,
     plot_force_coefficients,
     save_individual_field_plots,
-    save_individual_residual_plots
+    save_individual_residual_plots,
+    plot_velocity_magnitude
 )
 from naviflow_collocated.utils.postprocess.verification import ghia_comparison, poiseuille_verification
 from naviflow_collocated.utils.postprocess.metadata import yaml_to_latex_pdf
@@ -123,7 +126,9 @@ def flatten_dict(d, parent_key='', sep='.'):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Relative path to the config.yaml file")
-    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--all", action="store_true", help="Generate all possible plots and analyses.")
+    parser.add_argument("--animate", action="store_true", help="Generate animations from transient data.")
+    parser.add_argument("--animate-step", type=int, default=1, help="Process every Nth saved frame for animation.")
     args = parser.parse_args()
 
     # Get the workspace directory
@@ -145,17 +150,132 @@ if __name__ == "__main__":
     results_dir = os.path.join(base_dir, "results")
     plots_dir = os.path.join(results_dir, "plots")
     
-    # Extract experiment name from config path for compatibility
-    # Assuming config is in experiments/{experiment_name}/...
-    try:
-        path_parts = args.config.split(os.sep)
-        exp_index = path_parts.index("experiments")
-        experiment = path_parts[exp_index + 2]
-    except (ValueError, IndexError):
-        experiment = "unknown"
+    # Get experiment name directly from the config for robustness
+    experiment = config.get("experiment", "unknown")
     
     # Create directories if they don't exist
     os.makedirs(plots_dir, exist_ok=True)
+
+    # If --animate flag is used, process each time step
+    if args.animate:
+        # Load metadata once to get sim_id and dt
+        metadata_path = os.path.join(results_dir, "metadata.yaml")
+        if not os.path.exists(metadata_path):
+            print(f"Error: metadata.yaml not found in {results_dir}")
+            exit(1)
+            
+        with open(metadata_path, 'r') as f:
+            meta = yaml.safe_load(f)
+        sim_id = meta.get("Simulation id", "N/A")
+        
+        # Correctly parse nested config to get dt, ensuring it's a float
+        config_data = meta.get("Config", {})
+        dt_str = config_data.get("algorithm", {}).get("dt", "0.0")
+        try:
+            dt = float(dt_str)
+        except (ValueError, TypeError):
+            print(f"Warning: Could not convert dt '{dt_str}' to float. Time in animations will be incorrect.")
+            dt = 0.0
+        
+        if dt == 0.0 and "transient" in config_data.get("algorithm", {}):
+            print("Warning: dt is 0.0, time in animations will be incorrect.")
+
+        transient_base_dir = os.path.join(results_dir, "transient_data")
+        U_dir = os.path.join(transient_base_dir, "U")
+        p_dir = os.path.join(transient_base_dir, "p")
+
+        if not os.path.isdir(U_dir) or not os.path.isdir(p_dir):
+            print(f"Error: 'transient_data/U' or 'transient_data/p' directory not found in {results_dir}")
+            exit(1)
+
+        u_files = sorted([f for f in os.listdir(U_dir) if f.endswith('.npy') and f.startswith('U_')])
+        
+        if args.animate_step > 1:
+            print(f"Animating every {args.animate_step}-th frame.")
+            u_files = u_files[::args.animate_step]
+            
+        # Pre-scan to find global velocity magnitude range for consistent color scaling
+        global_vmin, global_vmax = np.inf, -np.inf
+        print("Pre-scanning data to determine global color range...")
+        for u_file in u_files:
+            u_path = os.path.join(U_dir, u_file)
+            U = np.load(u_path)
+            velocity_magnitude = np.linalg.norm(U, axis=1)
+            global_vmin = min(global_vmin, np.min(velocity_magnitude))
+            global_vmax = max(global_vmax, np.max(velocity_magnitude))
+        print(f"Global velocity range: [{global_vmin:.4f}, {global_vmax:.4f}]")
+
+        streamline_frames = []
+        velocity_magnitude_frames = []
+        
+        for u_file in u_files:
+            time_step_str = u_file.split('_')[-1].split('.')[0]
+            p_file = f"p_{time_step_str}.npy"
+            p_path = os.path.join(p_dir, p_file)
+            u_path = os.path.join(U_dir, u_file)
+
+            print(f"Processing frame for time step: {time_step_str}")
+
+            if not os.path.exists(p_path):
+                print(f"  > Corresponding pressure file {p_file} not found, skipping.")
+                continue
+
+            U = np.load(u_path)
+            p = np.load(p_path)
+
+            velocity_magnitude = np.linalg.norm(U, axis=1)
+            cell_data = np.load(os.path.join(results_dir, "cell_centers.npz"))
+            x = cell_data["x"]
+            y = cell_data["y"]
+            time_val = int(time_step_str) * dt
+            
+            # Generate frame for standalone streamlines
+            streamline_frame = plot_streamlines(
+                x, y, U,
+                output_path=None,
+                sim_id=sim_id,
+                experiment=experiment,
+                return_as_array=True,
+                time_val=time_val,
+                hide_colorbar=True
+            )
+            streamline_frames.append(streamline_frame)
+
+            # Generate frame for standalone velocity magnitude
+            velocity_magnitude_frame = plot_velocity_magnitude(
+                x, y, velocity_magnitude,
+                output_path=None,
+                sim_id=sim_id,
+                experiment=experiment,
+                Re=config["physical_properties"]["reynolds_number"],
+                return_as_array=True,
+                time_val=time_val,
+                vmin=global_vmin,
+                vmax=global_vmax,
+                hide_colorbar=True
+            )
+            velocity_magnitude_frames.append(velocity_magnitude_frame)
+
+        # Create animations from the in-memory frames
+        if streamline_frames:
+            print(f"\nCreating streamline animations...")
+            gif_path = os.path.join(plots_dir, "streamlines.gif")
+            mp4_path = os.path.join(plots_dir, "streamlines.mp4")
+            imageio.mimsave(gif_path, streamline_frames, fps=5)
+            imageio.mimsave(mp4_path, streamline_frames, fps=5)
+            print(f"Saved streamline animations to {plots_dir}")
+
+        if velocity_magnitude_frames:
+            print(f"\nCreating velocity magnitude animations...")
+            gif_path = os.path.join(plots_dir, "velocity_magnitude.gif")
+            mp4_path = os.path.join(plots_dir, "velocity_magnitude.mp4")
+            imageio.mimsave(gif_path, velocity_magnitude_frames, fps=5)
+            imageio.mimsave(mp4_path, velocity_magnitude_frames, fps=5)
+            print(f"Saved velocity magnitude animations to {plots_dir}")
+
+        print("\nFinished processing transient data. Continuing to standard post-processing...")
+        # If --animate was passed, we assume --all for the final state
+        args.all = True
 
     U = np.load(os.path.join(results_dir, "U_final.npy"))
     p = np.load(os.path.join(results_dir, "p_final.npy"))
@@ -198,17 +318,17 @@ if __name__ == "__main__":
         except FileNotFoundError:
             print("Residual field files not found, skipping their plots.")
 
-        # Ghia plot: check config, not just directory name
-        if experiment == 'lidDrivenCavity':
+        # Ghia plot: check config for experiment name
+        if 'lidDrivenCavity' in experiment:
             ghia_comparison(x, y, U, Re, n_cells, scheme, mesh_type, out("ghia_comparison"), sim_id=sim_id)
         # Poiseuille verification for channel flow
         elif experiment == 'channelFlow':
             poiseuille_verification(x, y, U, p, Re, out("poiseuille_verification"), sim_id=sim_id)
         
-        elif experiment == 'cylinderFlow':
+        elif 'cylinderFlow' in experiment:
             print("Running force calculation for cylinder flow...")
             # Recreate mesh to get geometric info
-            experiment_id = config["tags"][0]
+            experiment_id = config.get("experiment", "unknown")
             mesh_type, resolution = config["domain"]["mesh"]
             
             # Fix: Use absolute paths consistently

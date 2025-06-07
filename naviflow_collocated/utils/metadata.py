@@ -22,10 +22,18 @@ def format_floats(data):
             # Use scientific notation for very small or large numbers
             mantissa, exponent = f"{data:.2e}".split('e')
             mantissa = mantissa.rstrip('0').rstrip('.')
+            if mantissa == "":
+                mantissa = "0"
             return f"{mantissa}e{int(exponent)}"
         else:
             # Use regular decimal notation for numbers between 0.01 and 100
             return f"{data:.2f}".rstrip('0').rstrip('.')
+    elif isinstance(data, str):
+        try:
+            # Try to convert string to float and format it
+            return format_floats(float(data))
+        except (ValueError, TypeError):
+            return data
     else:
         return data
 
@@ -84,6 +92,40 @@ def collect_metadata(
     # Get experiment name from config path
     experiment = get_experiment_from_config_path(args.config)
 
+    # Read the last residuals from residuals.log
+    residuals_log = os.path.join(results_dir, "residuals.log")
+    u_res = v_res = cont_res = 0.0
+    
+    if os.path.exists(residuals_log):
+        try:
+            with open(residuals_log, 'r') as f:
+                # Skip header
+                next(f)
+                # Read all lines and get the last one
+                last_line = None
+                for line in f:
+                    if line.strip():  # Only consider non-empty lines
+                        last_line = line
+                if last_line:
+                    # Parse the last line
+                    _, u_res_str, v_res_str, cont_res_str = last_line.strip().split(',')
+                    u_res = float(u_res_str)
+                    v_res = float(v_res_str)
+                    cont_res = float(cont_res_str)
+                    print(f"Read residuals from log: u={u_res}, v={v_res}, cont={cont_res}")
+        except Exception as e:
+            print(f"Warning: Failed to read residuals from log: {e}")
+            # Fallback to solver residuals
+            u_res = float(u_l2norm[-1]) if len(u_l2norm) > 0 else 0.0
+            v_res = float(v_l2norm[-1]) if len(v_l2norm) > 0 else 0.0
+            cont_res = float(continuity_l2norm[-1]) if len(continuity_l2norm) > 0 else 0.0
+    else:
+        print("Warning: residuals.log not found")
+        # Fallback to solver residuals
+        u_res = float(u_l2norm[-1]) if len(u_l2norm) > 0 else 0.0
+        v_res = float(v_l2norm[-1]) if len(v_l2norm) > 0 else 0.0
+        cont_res = float(continuity_l2norm[-1]) if len(continuity_l2norm) > 0 else 0.0
+
     metadata = {
         # Simulation identification and tracking
         "Simulation id": run_id,
@@ -122,12 +164,22 @@ def collect_metadata(
         
         # Results and convergence
         "Number of iterations": len(u_l2norm),
-        "Final u-residual": float(u_l2norm[-1]),
-        "Final v-residual": float(v_l2norm[-1]),
-        "Final continuity-residual": float(continuity_l2norm[-1]),
+        "Final u-residual": u_res,
+        "Final v-residual": v_res,
+        "Final continuity-residual": cont_res,
+        
+        # Add the full config for complete reproducibility
+        "Config": config,
     }
     
-     # Convert numpy types and format floats
+    # Add force coefficients if available
+    if cd is not None and cl is not None:
+        metadata["results"] = {
+            "drag_coefficient": cd,
+            "lift_coefficient": cl
+        }
+    
+    # Convert numpy types and format floats
     metadata = convert_numpy_types(metadata)
     metadata = format_floats(metadata)
     
