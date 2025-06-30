@@ -1,0 +1,42 @@
+algorithm:
+  convection_discretization: TVD
+  convergence_criteria:
+    residual: 1.0e-08
+  limiter: MUSCL
+  max_iterations: 20000
+  non_orthogonal_corrections: 2
+  relaxation_factors:
+    pressure: 0.1
+    velocity: 0.3
+  type: SIMPLE
+description: TVD uniform fine mesh simulation for Lid driven cavity at Re=1000
+domain:
+  boundary_conditions: shared_configs/domain/boundaries_lidDrivenCavity.yaml
+  mesh:
+  - uniform
+  - fine
+experiment: lidDrivenCavity
+linear_solvers:
+  momentum:
+    max_iterations: 100000
+    preconditioner: hypre
+    tolerance: 1.0e-10
+    type: bcgs
+  pressure:
+    max_iterations: 100000
+    preconditioner: hypre
+    tolerance: 1.0e-12
+    type: bcgs
+name: lidDrivenCavity
+numba_cores: 6
+physical_properties:
+  characteristic_length: 1.0
+  characteristic_velocity: 1.0
+  reynolds_number: 1000
+  rho: 1.0
+tags:
+- lidDrivenCavity
+- TVD
+- uniform
+- fine
+- Re1000

@@ -1,0 +1,397 @@
+import os
+import sympy as sp
+from sympy.utilities.lambdify import lambdify
+import numpy as np
+from utils.plot_style import plt
+from pathlib import Path
+from scipy.sparse import coo_matrix
+from scipy.sparse.linalg import spsolve
+import time
+from naviflow_collocated.mesh.mesh_loader import load_mesh
+from naviflow_collocated.assembly.convection_diffusion_matrix import assemble_diffusion_convection_matrix
+from naviflow_collocated.discretization.gradient.leastSquares import compute_cell_gradients
+from petsc4py import PETSc
+from naviflow_collocated.assembly.rhie_chow import compute_face_fluxes, compute_face_velocities
+
+def run_mms_test(mesh_file, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None):
+    mesh = load_mesh(mesh_file, bc_file)
+     # Get the exact solution and ensure it has the right shape
+    phi_exact = u_exact_fn[component_idx](mesh.cell_centers)
+    if np.isscalar(phi_exact) or phi_exact.size == 1:
+        # If it's a scalar value, broadcast to all cells
+        phi_exact = np.full(mesh.cell_centers.shape[0], float(phi_exact))
+    phi_exact = np.atleast_1d(np.asarray(phi_exact).ravel())
+    phi_exact = np.ascontiguousarray(phi_exact)
+    
+    u_field_x = u_exact_fn[0](mesh.cell_centers)
+    u_field_y = u_exact_fn[1](mesh.cell_centers)
+    u_field = np.column_stack([u_field_x, u_field_y])
+    u_field = np.ascontiguousarray(u_field)
+    #grad_phi = np.ascontiguousarray(compute_cell_gradients(mesh, phi_exact), dtype=np.float64)
+    grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
+    #grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
+    face_velocities = compute_face_velocities(mesh, u_field[:, 0], u_field[:, 1])
+    mdot = compute_face_fluxes(mesh, face_velocities, rho)
+    dummy_pressure = np.zeros(mesh.cell_centers.shape[0])
+    dummy_grad_p = compute_cell_gradients(mesh, dummy_pressure)
+
+
+    row, col, data, b_correction = assemble_diffusion_convection_matrix(
+        mesh, mdot, grad_phi, u_field, 
+        rho, mu, component_idx, phi_exact, scheme, limiter,
+        dummy_pressure, dummy_grad_p
+    )
+
+    A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
+    """
+
+    # Plot sparsity pattern of matrix A
+    fig_spy, ax_spy = plt.subplots(figsize=(6, 6))
+    ax_spy.spy(A, markersize=0.5)
+    ax_spy.set_title("Sparsity pattern of matrix A")
+    plt.tight_layout()
+    outdir = Path("tests/test_output/MMS_solutions")
+    outdir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(outdir / f"sparsity_{tag_prefix}.png", dpi=300)
+    plt.close()
+    """
+
+    rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
+
+    b_petsc = PETSc.Vec().createWithArray(rhs)
+    x_petsc = PETSc.Vec().createSeq(A.shape[0])
+    A_petsc = PETSc.Mat().createAIJ(size=A.shape, csr=(A.indptr, A.indices, A.data))
+    ksp = PETSc.KSP().create()
+    ksp.setOperators(A_petsc)
+    ksp.setType("gmres")
+    ksp.getPC().setType("hypre")
+    ksp.setTolerances(rtol=1e-12, atol=1e-14, max_it=500000)
+    ksp.setFromOptions()
+    ksp.solve(b_petsc, x_petsc)
+    phi_numeric = x_petsc.getArray()
+
+ 
+    Aphi_exact = A.dot(phi_exact)
+    residual = Aphi_exact - rhs_fn(mesh.cell_centers) * mesh.cell_volumes - b_correction
+    flux_imbalance = np.sum(residual)
+
+    err = np.abs(phi_numeric - phi_exact)
+    max_err, l2_err = np.max(err), np.sqrt(np.mean(err ** 2))
+
+    return l2_err
+
+
+# The following test follows the Method of Manufactured Solutions (MMS) approach
+# to verify spatial convergence of the numerical scheme by comparing numerical
+# and exact solutions on a sequence of refined meshes.
+def run_convergence_study(mesh_files, bc_file, u_exact_fn, rhs_fn, grad_fn, mu, rho, tag_prefix, component_idx=0, scheme="Upwind", limiter=None, ax=None, marker=None):
+    hs = []
+    errors = []
+
+    for mesh_file in mesh_files:
+        mesh = load_mesh(mesh_file, bc_file)
+        h = np.sqrt(np.mean(mesh.cell_volumes))
+        hs.append(h)
+
+        phi_exact = u_exact_fn[component_idx](mesh.cell_centers)
+        if np.isscalar(phi_exact) or phi_exact.size == 1:
+            # If it's a scalar value, broadcast to all cells
+            phi_exact = np.full(mesh.cell_centers.shape[0], float(phi_exact))
+        phi_exact = np.atleast_1d(np.asarray(phi_exact).ravel())
+        phi_exact = np.ascontiguousarray(phi_exact)
+        
+        u_field_x = u_exact_fn[0](mesh.cell_centers)
+        u_field_y = u_exact_fn[1](mesh.cell_centers)
+        u_field = np.column_stack([u_field_x, u_field_y])
+        u_field = np.ascontiguousarray(u_field)
+        #grad_phi_num = compute_cell_gradients(mesh, phi_exact)
+        grad_phi = np.ascontiguousarray(grad_fn(mesh.cell_centers), dtype=np.float64)
+        face_velocities = compute_face_velocities(mesh, u_field[:, 0], u_field[:, 1])
+        mdot = compute_face_fluxes(mesh, face_velocities, rho)
+        dummy_pressure = np.zeros(mesh.cell_centers.shape[0])
+        dummy_grad_p = compute_cell_gradients(mesh, dummy_pressure)
+
+        row, col, data, b_correction = assemble_diffusion_convection_matrix(
+            mesh, mdot, grad_phi, u_field,
+            rho, mu, component_idx, phi_exact, scheme, limiter,
+            dummy_pressure, dummy_grad_p
+        )
+
+
+        A = coo_matrix((data, (row, col)), shape=(mesh.cell_centers.shape[0],) * 2).tocsr()
+        diag = A.diagonal()
+        rhs = rhs_fn(mesh.cell_centers) * mesh.cell_volumes + b_correction
+
+        from petsc4py import PETSc
+        b_petsc = PETSc.Vec().createWithArray(rhs)
+        x_petsc = PETSc.Vec().createSeq(A.shape[0])
+        A_petsc = PETSc.Mat().createAIJ(size=A.shape, csr=(A.indptr, A.indices, A.data))
+        ksp = PETSc.KSP().create()
+        ksp.setOperators(A_petsc)
+        ksp.setType("bcgs")
+        ksp.getPC().setType("gamg")
+        ksp.setTolerances(rtol=1e-12, atol=1e-14, max_it=5000)
+        ksp.setFromOptions()
+        ksp.solve(b_petsc, x_petsc)
+        phi_numeric = x_petsc.getArray()
+        
+        # Make sure phi_exact matches the shape expected by A (same as the RHS)
+        if phi_exact.shape != rhs.shape:
+            phi_exact = phi_exact.reshape(rhs.shape)
+            
+        residual = A.dot(phi_exact) - rhs_fn(mesh.cell_centers) * mesh.cell_volumes - b_correction
+        flux_imbalance = np.sum(residual)
+
+        err = np.abs(phi_numeric - phi_exact)
+        l2_err = np.sqrt(np.mean(err**2))
+        errors.append(l2_err)
+
+    hs = np.array(hs)
+    errors = np.array(errors)
+    from numpy.linalg import lstsq
+    X = np.log(hs).reshape(-1, 1)
+    X = np.hstack([X, np.ones_like(X)])
+    y = np.log(errors)
+    (p, _), *_ = lstsq(X, y, rcond=None)
+
+    print(f"Momentum {scheme} ({tag_prefix}): observed order = {p:.2f}")
+
+    if ax is not None:
+        ax.loglog(hs, errors, label=f"{scheme} - observed order: {p:.2f}", marker=marker, linewidth=2.0, markersize=8)
+    return errors
+
+
+# === MMS Functions ===
+# The exact solution u_sin is chosen to be smooth and not exactly representable by the discrete scheme,
+# to validate the convergence behavior of the numerical method.
+def generate_mms_functions(expr_str, mu, rho):
+    x, y = sp.symbols("x y")
+    u_x_expr = sp.sympify(expr_str[0])
+    u_y_expr = sp.sympify(expr_str[1])
+    phi_expr = u_x_expr  # or u_y_expr depending on which component you're testing
+
+    grad_exprs = [sp.diff(phi_expr, var) for var in (x, y)]
+    laplacian_expr = sum(sp.diff(phi_expr, var, 2) for var in (x, y))
+    conv_term_expr = rho * (u_x_expr * grad_exprs[0] + u_y_expr * grad_exprs[1])
+    diff_term_expr = mu * laplacian_expr
+    rhs_expr = conv_term_expr - diff_term_expr
+
+    # Vectorized lambdify with explicit numpy module
+    u_x_func = lambdify((x, y), u_x_expr, modules="numpy")
+    u_y_func = lambdify((x, y), u_y_expr, modules="numpy")
+    grad_func = lambdify((x, y), grad_exprs, modules="numpy")
+    rhs_func = lambdify((x, y), rhs_expr, modules="numpy")
+
+    def eval_at(f):
+        return lambda xy: np.column_stack([
+            np.broadcast_to(g, (xy.shape[0],)) if np.isscalar(g) or np.ndim(g) == 0 else g
+            for g in f(xy[:, 0], xy[:, 1])
+        ])
+
+    def u_field(xy):
+        ux = u_x_func(xy[:, 0], xy[:, 1])
+        uy = u_y_func(xy[:, 0], xy[:, 1])
+        ux = np.broadcast_to(ux, (xy.shape[0],)) if np.isscalar(ux) or np.ndim(ux) == 0 else ux
+        uy = np.broadcast_to(uy, (xy.shape[0],)) if np.isscalar(uy) or np.ndim(uy) == 0 else uy
+        return np.column_stack([ux, uy])
+    u_x = lambda xy: u_x_func(xy[:, 0], xy[:, 1])
+    u_y = lambda xy: u_y_func(xy[:, 0], xy[:, 1])
+    def grad(xy):
+        vals = grad_func(xy[:, 0], xy[:, 1])
+        vals = [np.full((xy.shape[0],), v) if np.isscalar(v) or np.ndim(v) == 0 else np.asarray(v).ravel() for v in vals]
+        return np.column_stack(vals)
+    rhs = lambda xy: rhs_func(xy[:, 0], xy[:, 1])
+
+    return [u_x, u_y], u_field, grad, rhs
+
+
+
+
+# === Run Tests ===
+if __name__ == "__main__":
+    print("Running momentum assembly convergence study...")
+    
+    structured_uniform = {
+        "coarse": "meshing/experiments/lidDrivenCavity/structuredUniform/coarse/lidDrivenCavity_uniform_coarse.msh",
+        "medium": "meshing/experiments/lidDrivenCavity/structuredUniform/medium/lidDrivenCavity_uniform_medium.msh",
+        "fine": "meshing/experiments/lidDrivenCavity/structuredUniform/fine/lidDrivenCavity_uniform_fine.msh",
+    }
+    unstructured = {
+        "coarse": "meshing/experiments/lidDrivenCavity/unstructured/coarse/lidDrivenCavity_unstructured_coarse.msh",
+        "medium": "meshing/experiments/lidDrivenCavity/unstructured/medium/lidDrivenCavity_unstructured_medium.msh",
+        "fine": "meshing/experiments/lidDrivenCavity/unstructured/fine/lidDrivenCavity_unstructured_fine.msh",
+    }
+
+    # === Additional MMS Cases ===
+    mms_cases = {
+        "Sinusoidal": ("cos(pi*y)*sin(pi*x)", "-cos(pi*x)*sin(pi*y)"),
+    }
+    BC_files = {
+        "Sinusoidal": "shared_configs/domain/sanityChecks/sanityCheckSIN.yaml",
+    }
+
+    # Create separate figures for structured and unstructured meshes
+    fig_structured, ax_structured = plt.subplots(figsize=(10, 7))
+    fig_unstructured, ax_unstructured = plt.subplots(figsize=(10, 7))
+    marker_cycle = iter(['o', 's', '^', 'D', 'v', 'p', '*', 'x', 'P', 'H', 'X', 'D', 'p', 'P', 'H', 'X'])
+
+    time_start = time.time()
+
+    for tag, expr in mms_cases.items():
+        mu = 0.1
+        rho = 1.0
+        scheme4 = "SOU"
+        scheme1 = "QUICK"
+        scheme2 = "TVD"
+        scheme3 = "Upwind"
+        limiter = "MUSCL" # MUSCL, OSPRE, H_Cui
+        u_fn, u_field_fn, grad_fn, rhs_fn = generate_mms_functions(expr, mu=mu, rho=rho)
+        bc_file = BC_files[tag]
+
+        # Run convergence studies for structured mesh
+        errors_structured = run_convergence_study(
+            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_structured",
+            scheme=scheme1,
+            limiter=limiter,
+            ax=ax_structured,
+            marker=next(marker_cycle)
+        )
+
+        errors_structured = run_convergence_study(
+            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_structured",
+            scheme=scheme2,
+            limiter=limiter,
+            ax=ax_structured,
+            marker=next(marker_cycle)
+        )
+
+        errors_structured = run_convergence_study(
+            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_structured",
+            scheme=scheme3,
+            limiter=limiter,
+            ax=ax_structured,
+            marker=next(marker_cycle)
+        )
+
+        errors_structured = run_convergence_study(
+            [structured_uniform["coarse"], structured_uniform["medium"], structured_uniform["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_structured",
+            scheme=scheme4,
+            limiter=limiter,
+            ax=ax_structured,
+            marker=next(marker_cycle)
+        )
+
+        # Run convergence studies for unstructured mesh
+        errors_unstructured = run_convergence_study(
+            [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_unstructured",
+            scheme=scheme1,
+            limiter=limiter,
+            ax=ax_unstructured,
+            marker=next(marker_cycle)
+        )
+
+        errors_unstructured = run_convergence_study(
+            [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_unstructured",
+            scheme=scheme2,
+            limiter=limiter,
+            ax=ax_unstructured,
+            marker=next(marker_cycle)
+        )
+
+        errors_unstructured = run_convergence_study(
+            [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_unstructured",
+            scheme=scheme3,
+            limiter=limiter,
+            ax=ax_unstructured,
+            marker=next(marker_cycle)
+        )
+
+        errors_unstructured = run_convergence_study(
+            [unstructured["coarse"], unstructured["medium"], unstructured["fine"]],
+            bc_file,
+            u_fn, rhs_fn, grad_fn, mu, rho,
+            tag_prefix=f"{tag}_unstructured",
+            scheme=scheme4,
+            limiter=limiter,
+            ax=ax_unstructured,
+            marker=next(marker_cycle)
+        )
+
+    # Calculate grid sizes for both mesh types
+    hs_structured = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
+        structured_uniform["coarse"],
+        structured_uniform["medium"],
+        structured_uniform["fine"]
+    ]])
+    hs_unstructured = np.array([np.sqrt(np.mean(load_mesh(f, next(iter(BC_files.values()))).cell_volumes)) for f in [
+        unstructured["coarse"],
+        unstructured["medium"],
+        unstructured["fine"]
+    ]])
+
+    # Add reference slopes using the minimum error as reference (following postprocessing pattern)
+    error_ref_u = np.min(errors_structured) if len(errors_structured) > 0 else 1e-4
+    error_ref_unstruct = np.min(errors_unstructured) if len(errors_unstructured) > 0 else 1e-4
+    
+    # Create reference grid size range
+    h_ref_struct = np.array([hs_structured.min() * 0.8, hs_structured.max() * 1.2])
+    h_ref_unstruct = np.array([hs_unstructured.min() * 0.8, hs_unstructured.max() * 1.2])
+    
+    # First order reference (O(h^1)) - structured
+    ref_1st_struct = error_ref_u * 2 * (h_ref_struct / h_ref_struct[0])**1
+    # Second order reference (O(h^2)) - structured
+    ref_2nd_struct = error_ref_u * 2 * (h_ref_struct / h_ref_struct[0])**2
+    
+    # First order reference (O(h^1)) - unstructured
+    ref_1st_unstruct = error_ref_unstruct * 2 * (h_ref_unstruct / h_ref_unstruct[0])**1
+    # Second order reference (O(h^2)) - unstructured
+    ref_2nd_unstruct = error_ref_unstruct * 2 * (h_ref_unstruct / h_ref_unstruct[0])**2
+
+    # Configure structured mesh plot
+    ax_structured.loglog(h_ref_struct, ref_1st_struct, color='black', linestyle=':', alpha=0.6, linewidth=1.2, label=r'$\mathcal{O}(h^1)$')
+    ax_structured.loglog(h_ref_struct, ref_2nd_struct, color='black', linestyle='--', alpha=0.6, linewidth=1.2, label=r'$\mathcal{O}(h^2)$')
+    ax_structured.grid(True, which="both", alpha=0.3)
+    ax_structured.set_xlabel(r"Grid size $h$", fontsize=12)
+    ax_structured.set_ylabel(r"L2 Error", fontsize=12)
+    ax_structured.set_title("Order of Accuracy: Convection-Diffusion Equation\nStructured Mesh", fontsize=14, pad=20)
+    ax_structured.legend(loc="lower right", frameon=True, fancybox=True, shadow=True)
+
+    # Configure unstructured mesh plot
+    ax_unstructured.loglog(h_ref_unstruct, ref_1st_unstruct, color='black', linestyle=':', alpha=0.6, linewidth=1.2, label=r'$\mathcal{O}(h^1)$')
+    ax_unstructured.loglog(h_ref_unstruct, ref_2nd_unstruct, color='black', linestyle='--', alpha=0.6, linewidth=1.2, label=r'$\mathcal{O}(h^2)$')
+    ax_unstructured.grid(True, which="both", alpha=0.3)
+    ax_unstructured.set_xlabel(r"Grid size $h$", fontsize=12)
+    ax_unstructured.set_ylabel(r"L2 Error", fontsize=12)
+    ax_unstructured.set_title("Order of Accuracy: Convection-Diffusion Equation\nUnstructured Mesh", fontsize=14, pad=20)
+    ax_unstructured.legend(loc="lower right", frameon=True, fancybox=True, shadow=True)
+
+    # Save both plots
+    Path("tests/test_output/MMS_convergence").mkdir(parents=True, exist_ok=True)
+    plt.figure(fig_structured.number)
+    plt.savefig("tests/test_output/MMS_convergence/convergence_plot_structured.pdf", dpi=300)
+    plt.figure(fig_unstructured.number)
+    plt.savefig("tests/test_output/MMS_convergence/convergence_plot_unstructured.pdf", dpi=300)
+    plt.close('all')
+    
+    print(f"Momentum convergence study completed in {time.time() - time_start:.1f} seconds. Results saved to tests/test_output/MMS_convergence/")

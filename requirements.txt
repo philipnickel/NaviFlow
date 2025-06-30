@@ -1,0 +1,13 @@
+numpy
+pandas
+scipy
+matplotlib
+pyyaml
+numba
+meshio
+gmsh
+petsc4py
+pyamg
+scienceplots
+tqdm
+psutil 

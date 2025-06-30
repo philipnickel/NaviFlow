@@ -1,0 +1,30 @@
+boundaries:
+  top:
+    velocity:
+      bc: wall
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  bottom:
+    velocity:
+      bc: wall
+      value: [0.0, 0.0]
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  left:                      # inlet
+    velocity: {bc: inlet, value: ["4.0* 1.0 * x[1]*(1.00-x[1])/(1.00*1.00)", "0.0"]}
+    pressure:
+      bc: neumann
+      gradient: 0.0
+
+  right:                     # outlet
+    velocity:
+      bc: outlet
+      value: [0.0, 0.0]
+    pressure:
+      bc: dirichlet
+      value: 0.0  # Fixed pressure at outlet

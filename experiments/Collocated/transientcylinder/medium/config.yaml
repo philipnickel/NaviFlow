@@ -1,0 +1,50 @@
+name: transient_cylinderFlow_Re100
+description: Transient Upwind coarse mesh simulation for Cylinder Flow at Re=100
+tags:
+- transient
+- cylinderFlow
+- Upwind
+- coarse
+- Re100
+experiment: cylinderFlow
+domain:
+  mesh:
+  - unstructured
+  - medium
+  boundary_conditions: shared_configs/domain/boundaries_cylinderFlowtrans.yaml
+physical_properties:
+  rho: 1.0
+  reynolds_number: 100
+  characteristic_length: 0.1
+  characteristic_velocity: 1.0
+algorithm:
+  type: SIMPLE
+  relaxation_factors:
+    velocity: 0.7
+    pressure: 0.3
+  max_iterations: 10000
+  convergence_criteria:
+    residual: 1.0e-5
+  convection_discretization: TVD
+  limiter: MUSCL
+  non_orthogonal_corrections: 1
+  transient: true
+  dt: 0.0025
+  end_time: 100.0
+  save_interval: 100
+  time_scheme: "CrankNicolson"
+linear_solvers:
+  momentum:
+    type: bcgs
+    preconditioner: hypre
+    tolerance: 1.0e-10
+    max_iterations: 1000
+  pressure:
+    type: bcgs
+    preconditioner: hypre
+    tolerance: 1.0e-12
+    max_iterations: 1000
+numba_cores: 6
+output_settings:
+  save_interval: 5
+  format: "vtk"

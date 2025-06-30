@@ -1,0 +1,4 @@
+experiments/Collocated/lidDrivenCavity/QUICK/uniform/Re_100/medium/config.yaml
+experiments/Collocated/lidDrivenCavity/TVD/uniform/Re_100/medium/config.yaml
+experiments/Collocated/lidDrivenCavity/Upwind/uniform/Re_100/medium/config.yaml
+experiments/Staggered/02 GMG BiCGSTAB/Re100/medium/pseudo_config.yaml
